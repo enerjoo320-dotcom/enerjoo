@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+
+  --color-solar-blue: #0066FF;
+  --color-solar-text: #0F172A;
+  --color-solar-muted: #64748B;
+  --color-solar-bg: #F8FAFC;
+  --color-solar-card: #FFFFFF;
+  --color-solar-border: #E2E8F0;
+  --color-solar-light: #F1F5F9;
+  --color-solar-success: #10B981;
+  --color-solar-warning: #F59E0B;
+  --color-solar-danger: #EF4444;
+  --color-solar-accent: #8B5CF6;
+}
+
+@layer base {
+  body {
+    @apply bg-solar-bg text-solar-text font-sans antialiased;
+  }
+}
+
+.glass {
+  @apply bg-white/80 backdrop-blur-xl;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}

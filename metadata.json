@@ -1,0 +1,6 @@
+{
+  "name": "enerjoo",
+  "description": "Comprehensive solar energy platform in Egypt for comparing products, brands, and suppliers with AI-powered search and real-time data.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
