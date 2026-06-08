@@ -55,24 +55,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row gap-4">
+      <div className="flex gap-4">
         <div className="flex-1 relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-solar-muted" size={18} />
           <input 
             type="text" 
-            placeholder={useAiSearch ? t.aiSearchDesc : t.search} 
+            placeholder={t.search} 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className={`w-full bg-solar-card border rounded-2xl py-3 pl-12 pr-4 outline-none transition-all shadow-sm font-bold text-sm ${useAiSearch ? 'border-solar-blue ring-2 ring-solar-blue/10 bg-solar-blue/5' : 'border-solar-border focus:border-solar-blue'}`}
+            className="w-full bg-solar-card border border-solar-border rounded-2xl py-3 pl-[44px] pr-4 outline-none transition-all shadow-sm font-bold text-sm focus:border-solar-blue focus:ring-2/10"
           />
         </div>
-        <button
-          onClick={() => setUseAiSearch(!useAiSearch)}
-          className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-sm transition-all ${useAiSearch ? 'bg-solar-blue text-white shadow-lg shadow-solar-blue/20' : 'bg-solar-card border border-solar-border text-solar-muted hover:border-solar-blue hover:text-solar-blue'}`}
-        >
-          <Sparkles size={18} className={useAiSearch ? 'animate-pulse' : ''} />
-          <span>{t.aiSearch}</span>
-        </button>
       </div>
 
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">

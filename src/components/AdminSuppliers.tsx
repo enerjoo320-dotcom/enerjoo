@@ -61,9 +61,9 @@ export const AdminSuppliers: React.FC<AdminSuppliersProps> = ({ lang }) => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <AnimatePresence mode="popLayout">
-          {filteredSuppliers.map((supplier) => (
+          {filteredSuppliers.map((supplier, idx) => (
             <motion.div
-              key={supplier.id}
+              key={`${supplier.id || idx}-${idx}`}
               layout
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}

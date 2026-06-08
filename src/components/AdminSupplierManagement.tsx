@@ -66,9 +66,9 @@ export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = (
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredSuppliers.map((supplier) => (
+        {filteredSuppliers.map((supplier, idx) => (
           <motion.div 
-            key={supplier.id}
+            key={`${supplier.id || idx}-${idx}`}
             layout
             className="bg-solar-card rounded-3xl p-6 border border-solar-border shadow-sm relative overflow-hidden group hover:border-solar-blue/30 transition-all"
           >

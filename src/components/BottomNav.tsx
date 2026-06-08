@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, PlusCircle, ArrowLeftRight, User, LogIn, LayoutDashboard, Heart } from 'lucide-react';
+import { Home, PlusCircle, ArrowLeftRight, User, LogIn, LayoutDashboard, Heart, Calculator } from 'lucide-react';
 import { translations } from '../translations';
 import { User as UserType, ViewType } from '../types';
 import { motion } from 'motion/react';
@@ -16,18 +16,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang
   
   const navItems: { id: ViewType; icon: React.ReactNode; label: string; show: boolean }[] = [
     { id: 'home', icon: <Home size={20} strokeWidth={2.5} />, label: t.home, show: true },
-    { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: true },
-    { id: 'wishlist', icon: <Heart size={20} strokeWidth={2.5} />, label: t.wishlist, show: true },
+    { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: user?.type !== 'admin' },
+    { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: true },
+    { id: 'wishlist', icon: <Heart size={20} strokeWidth={2.5} />, label: t.wishlist, show: user?.type !== 'admin' },
     { 
       id: user?.type === 'admin' ? 'admin-suppliers' : 'add', 
-      icon: <PlusCircle size={20} strokeWidth={2.5} />, 
+      icon: user?.type === 'admin' ? <LayoutDashboard size={20} strokeWidth={2.5} /> : <PlusCircle size={20} strokeWidth={2.5} />, 
       label: user?.type === 'admin' ? t.manageSuppliers : t.addProduct, 
       show: user !== null && user.type !== 'customer'
     },
     { 
-      id: user ? (user.type === 'supplier' ? 'supplier-dashboard' : (user.type === 'admin' ? 'admin-suppliers' : 'profile')) : 'login', 
-      icon: user ? <User size={20} strokeWidth={2.5} /> : <LogIn size={20} strokeWidth={2.5} />, 
-      label: user ? (user.type === 'customer' ? t.profile || 'Profile' : t.dashboard) : t.login, 
+      id: 'profile', 
+      icon: <User size={20} strokeWidth={2.5} />, 
+      label: t.profile || 'Profile', 
       show: true 
     }
   ];

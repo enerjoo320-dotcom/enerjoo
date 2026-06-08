@@ -68,7 +68,8 @@ export type ViewType =
   | 'supplier-dashboard' 
   | 'profile'
   | 'wishlist'
-  | 'detail';
+  | 'detail'
+  | 'calculator';
 
 export interface Filters {
   category: Category;

@@ -144,21 +144,23 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         <div className="space-y-6">
           <div className="relative group">
             <img src={product.image} className="w-full aspect-[4/3] object-cover rounded-[40px] shadow-2xl shadow-solar-blue/10 border-4 border-white" alt={product.name} />
-            <div className="absolute top-4 right-4 flex gap-2">
-              <button 
-                onClick={() => onWishlist(product)} 
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition shadow-xl active:scale-90 ${isWishlisted ? 'bg-red-500 text-white' : 'bg-white text-solar-muted hover:text-red-500'}`}
-                title={isWishlisted ? t.removeFromWishlist : t.saveToWishlist}
-              >
-                <Heart size={22} fill={isWishlisted ? 'currentColor' : 'none'} />
-              </button>
-              <button 
-                onClick={() => onCompare(product)} 
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition shadow-xl active:scale-90 ${isCompared(product.id) ? 'bg-solar-accent text-white' : 'bg-white text-solar-muted hover:text-solar-blue'}`}
-              >
-                <ArrowLeftRight size={22} />
-              </button>
-            </div>
+            {user?.type !== 'admin' && (
+              <div className="absolute top-4 right-4 flex gap-2">
+                <button 
+                  onClick={() => onWishlist(product)} 
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center transition shadow-xl active:scale-90 ${isWishlisted ? 'bg-red-500 text-white' : 'bg-white text-solar-muted hover:text-red-500'}`}
+                  title={isWishlisted ? t.removeFromWishlist : t.saveToWishlist}
+                >
+                  <Heart size={22} fill={isWishlisted ? 'currentColor' : 'none'} />
+                </button>
+                <button 
+                  onClick={() => onCompare(product)} 
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center transition shadow-xl active:scale-90 ${isCompared(product.id) ? 'bg-solar-accent text-white' : 'bg-white text-solar-muted hover:text-solar-blue'}`}
+                >
+                  <ArrowLeftRight size={22} />
+                </button>
+              </div>
+            )}
           </div>
           
           <div className="bg-solar-card rounded-[32px] p-8 border border-solar-border shadow-sm">

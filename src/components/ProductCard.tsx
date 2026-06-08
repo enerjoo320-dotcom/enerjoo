@@ -110,22 +110,24 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </span>
             )}
           </div>
-          <div className="flex gap-2 items-center pointer-events-auto">
-            {onWishlist && (
+          {user?.type !== 'admin' && (
+            <div className="flex gap-2 items-center pointer-events-auto">
+              {onWishlist && (
+                <button 
+                  onClick={onWishlist} 
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-lg ${isWishlisted ? 'bg-red-500 text-white' : 'bg-white/90 backdrop-blur-md text-solar-muted hover:text-red-500'}`}
+                >
+                  <Heart size={18} fill={isWishlisted ? 'currentColor' : 'none'} />
+                </button>
+              )}
               <button 
-                onClick={onWishlist} 
-                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-lg ${isWishlisted ? 'bg-red-500 text-white' : 'bg-white/90 backdrop-blur-md text-solar-muted hover:text-red-500'}`}
+                onClick={onCompare} 
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-lg ${isCompared ? 'bg-solar-accent text-white' : 'bg-white/90 backdrop-blur-md text-solar-muted hover:text-solar-blue'}`}
               >
-                <Heart size={18} fill={isWishlisted ? 'currentColor' : 'none'} />
+                <ArrowLeftRight size={18} />
               </button>
-            )}
-            <button 
-              onClick={onCompare} 
-              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-lg ${isCompared ? 'bg-solar-accent text-white' : 'bg-white/90 backdrop-blur-md text-solar-muted hover:text-solar-blue'}`}
-            >
-              <ArrowLeftRight size={18} />
-            </button>
-          </div>
+            </div>
+          )}
         </div>
         {product.efficiency >= 22 && (
           <div className="absolute bottom-2 right-2 bg-solar-success/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-1 rounded-lg shadow-sm">

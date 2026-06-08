@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo } from 'react';
-import { Sparkles, ShieldCheck, LogIn } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Sparkles, ShieldCheck, LogIn, ChevronLeft, ChevronRight, Sun, Zap, Battery, Wrench, Calculator } from 'lucide-react';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { ProductCard } from './components/ProductCard';
@@ -17,6 +17,8 @@ import { RegisterView } from './components/RegisterView';
 import { SupplierDashboard } from './components/SupplierDashboard';
 import { AdminSupplierManagement } from './components/AdminSupplierManagement';
 import { AdvancedSearchPanel } from './components/AdvancedSearchPanel';
+import { SolarCalculator } from './components/SolarCalculator';
+import { ProfileView } from './components/ProfileView';
 import { useAuth } from './context/AuthContext';
 import { 
   subscribeToProducts, 
@@ -35,7 +37,16 @@ import { translations } from './translations';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
-  const [lang, setLang] = useState<'ar' | 'en'>('ar');
+  
+  // Initialize from persistent localStorage or browser default
+  const [lang, setLang] = useState<'ar' | 'en'>(() => {
+    const saved = localStorage.getItem('enerjoo_lang');
+    if (saved === 'ar' || saved === 'en') return saved;
+    const browserLang = navigator.language || (navigator as any).userLanguage || '';
+    if (browserLang.toLowerCase().startsWith('en')) return 'en';
+    return 'ar';
+  });
+
   const [view, setView] = useState<ViewType>('home');
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -63,6 +74,13 @@ export default function App() {
 
   const isAr = lang === 'ar';
   const t = translations[lang];
+
+  // Persist language selections in localStorage & configure document layout dynamically
+  useEffect(() => {
+    localStorage.setItem('enerjoo_lang', lang);
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+  }, [lang]);
 
   useEffect(() => {
     // Attempt seeding and setup real-time listeners
@@ -236,6 +254,41 @@ export default function App() {
         }
         return (
           <div className="space-y-6 pb-20">
+            {/* AI Engineering Solar Sizing Promo Banner */}
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-r from-solar-blue via-indigo-600 to-indigo-700 text-white rounded-[32px] p-6 md:p-8 shadow-xl shadow-indigo-600/10 flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative"
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-solar-blue/10 rounded-full blur-2xl -ml-16 -mb-16"></div>
+              
+              <div className="space-y-2 relative z-10 text-right md:text-right w-full md:w-3/4">
+                <div className="inline-flex items-center gap-1.5 bg-white/10 text-amber-300 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
+                  <Sparkles size={12} className="animate-pulse" />
+                  <span>{isAr ? 'ميزة حصرية هندسية' : 'EXCLUSIVE AI ENGINEERING'}</span>
+                </div>
+                <h2 className="text-xl md:text-2xl font-display font-black tracking-tight leading-snug">
+                  {isAr 
+                    ? 'صمم محطتك الشمسية المتكاملة واحسب تكاليفها بالذكاء الاصطناعي ⚡' 
+                    : 'Design Your Full Solar Station & Estimate Costs Instantly ⚡'}
+                </h2>
+                <p className="text-xs md:text-sm text-white/85 font-medium leading-relaxed max-w-2xl">
+                  {isAr 
+                    ? 'حدد نوع نظامك (متصل بالشبكة، نظام هجين، أو منفصل) واحسب استهلاكك أو حدد قائمة أجهزتك الخاصة، وسيقوم مهندسنا الذكي بمطابقة أفضل القطع والماركات المتاحة من الموردين وتوليد دراسة جدوى استرشادية مخصصة وعروض أسعار في ثوانٍ معدودة!' 
+                    : 'Select your target system architecture, calculate load or select appliances, and we will automatically engineer the design, match best brands, and output real-time Egyptian pricing estimates!'}
+                </p>
+              </div>
+
+              <button 
+                onClick={() => setView('calculator')}
+                className="w-full md:w-auto shrink-0 bg-white hover:bg-amber-100 text-indigo-700 hover:text-indigo-800 font-black text-xs md:text-sm px-7 py-4 rounded-xl transition duration-300 transform hover:scale-105 active:scale-95 shadow-md shadow-black/10 cursor-pointer relative z-10 flex items-center justify-center gap-2"
+              >
+                <Calculator size={18} />
+                <span>{isAr ? 'ابدأ التصميم والاحتساب الذكي' : 'Start Sizing & Design'}</span>
+              </button>
+            </motion.div>
+
             <FilterBar 
               lang={lang} 
               activeFilter={activeFilters} 
@@ -261,39 +314,133 @@ export default function App() {
             />
             
             {filteredProducts.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {filteredProducts.map(p => {
-                  const aiResult = semanticResults.find(r => r.productId === p.id?.toString());
+              supplierFilterId ? (
+                // Supplier Profile view grouped by sections
+                (() => {
+                  const activeSup = suppliers.find(s => s.id?.toString() === supplierFilterId.toString());
+                  const supPanels = filteredProducts.filter(p => p.category === 'panels');
+                  const supInverters = filteredProducts.filter(p => p.category === 'inverters');
+                  const supBatteries = filteredProducts.filter(p => p.category === 'batteries');
+                  const supOthers = filteredProducts.filter(p => p.category !== 'panels' && p.category !== 'inverters' && p.category !== 'batteries');
+
+                  const supGroups = [
+                    { title: isAr ? 'قسم ألواح الطاقة الشمسية' : 'Solar Panels Section', items: supPanels, icon: '☀️' },
+                    { title: isAr ? 'قسم محولات التيار والعواكس' : 'Inverters Section', items: supInverters, icon: '⚡' },
+                    { title: isAr ? 'قسم البطاريات ووحدات التخزين' : 'Batteries Section', items: supBatteries, icon: '🔋' },
+                    { title: isAr ? 'قسم الملحقات والمكونات الأخرى' : 'System Components & Accessories', items: supOthers, icon: '⚙️' },
+                  ].filter(g => g.items.length > 0);
+
                   return (
-                    <div key={p.id} className="relative group">
-                      <ProductCard 
-                        product={p} 
-                        lang={lang} 
-                        onClick={() => setSelectedProduct(p)} 
-                        onCompare={(e) => { e.stopPropagation(); toggleCompare(p); }}
-                        onWishlist={(e) => { e.stopPropagation(); toggleWishlist(p); }}
-                        onEdit={(e, product) => {
-                          e.stopPropagation();
-                          setEditingProduct(product);
-                          setView('add');
-                        }}
-                        isCompared={!!compareList.find(cp => cp.id === p.id)}
-                        isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
-                      />
-                      {useAiSearch && aiResult && (
-                        <div className="absolute top-2 right-2 bg-solar-blue text-white p-2 rounded-xl shadow-xl z-20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none max-w-[200px]">
-                          <div className="flex items-center gap-1 mb-1">
-                            <Sparkles size={10} />
-                            <span className="text-[10px] font-black uppercase">{t.aiMatching}</span>
-                            <span className="ml-auto text-[10px] font-black">{Math.round(aiResult.relevanceScore * 100)}%</span>
+                    <div className="space-y-12">
+                      {/* Supplier Profile Badge Card */}
+                      {activeSup && (
+                        <div className="bg-white rounded-[40px] p-6 md:p-8 border border-solar-border shadow-md flex flex-col md:flex-row items-center justify-between gap-6">
+                          <div className="flex items-center gap-4">
+                            <div className="w-16 h-16 bg-solar-blue text-white rounded-3xl flex items-center justify-center text-2xl font-black shadow-md shadow-solar-blue/20">
+                              {isAr ? (activeSup.nameAr || activeSup.name)?.[0] : activeSup.name?.[0]}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h2 className="text-2xl font-black text-solar-text">{isAr ? activeSup.nameAr || activeSup.name : activeSup.name}</h2>
+                                {activeSup.verified && (
+                                  <span className="bg-solar-success/15 text-solar-success text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
+                                    <ShieldCheck size={12} />
+                                    {isAr ? 'مورد معتمد' : 'VERIFIED'}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-solar-muted font-bold mt-1.5 flex flex-wrap items-center gap-1.5">
+                                <span>📍 {activeSup.location}</span>
+                                <span className="text-solar-border/70">|</span>
+                                <span className="cursor-pointer text-solar-blue hover:underline" onClick={() => {
+                                  if (activeSup.phone) {
+                                    const phone = activeSup.phone.replace(/\+/g, '').replace(/\s+/g, '');
+                                    window.open(`https://wa.me/${phone}`, '_blank');
+                                  }
+                                }}>📞 {activeSup.phone}</span>
+                              </p>
+                            </div>
                           </div>
-                          <p className="text-[9px] leading-tight font-medium">{aiResult.matchReason}</p>
+
+                          <button 
+                            onClick={() => setSupplierFilterId(null)}
+                            className="w-full md:w-auto bg-solar-light text-solar-muted hover:text-solar-blue border border-solar-border/40 px-6 py-3 rounded-2xl font-black text-sm transition"
+                          >
+                            {isAr ? 'عرض كل الموردين' : 'View All Suppliers'}
+                          </button>
                         </div>
                       )}
+
+                      {/* Group sections */}
+                      <div className="space-y-12">
+                        {supGroups.map((group, index) => (
+                          <div key={index} className="space-y-6">
+                            <div className="flex items-center gap-2 border-b border-solar-border/60 pb-3">
+                              <span className="text-2xl">{group.icon}</span>
+                              <h3 className="text-xl font-black text-solar-text">{group.title}</h3>
+                              <span className="bg-solar-light text-solar-muted text-xs font-black px-2.5 py-1 rounded-full">{group.items.length} {t.products}</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                              {group.items.map(p => (
+                                <ProductCard 
+                                  key={p.id}
+                                  product={p} 
+                                  lang={lang} 
+                                  onClick={() => setSelectedProduct(p)} 
+                                  onCompare={(e) => { e.stopPropagation(); toggleCompare(p); }}
+                                  onWishlist={(e) => { e.stopPropagation(); toggleWishlist(p); }}
+                                  onEdit={(e, product) => {
+                                    e.stopPropagation();
+                                    setEditingProduct(product);
+                                    setView('add');
+                                  }}
+                                  isCompared={!!compareList.find(cp => cp.id === p.id)}
+                                  isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   );
-                })}
-              </div>
+                })()
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {filteredProducts.map(p => {
+                    const aiResult = semanticResults.find(r => r.productId === p.id?.toString());
+                    return (
+                      <div key={p.id} className="relative group">
+                        <ProductCard 
+                          product={p} 
+                          lang={lang} 
+                          onClick={() => setSelectedProduct(p)} 
+                          onCompare={(e) => { e.stopPropagation(); toggleCompare(p); }}
+                          onWishlist={(e) => { e.stopPropagation(); toggleWishlist(p); }}
+                          onEdit={(e, product) => {
+                            e.stopPropagation();
+                            setEditingProduct(product);
+                            setView('add');
+                          }}
+                          isCompared={!!compareList.find(cp => cp.id === p.id)}
+                          isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
+                        />
+                        {useAiSearch && aiResult && (
+                          <div className="absolute top-2 right-2 bg-solar-blue text-white p-2 rounded-xl shadow-xl z-20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none max-w-[200px]">
+                            <div className="flex items-center gap-1 mb-1">
+                              <Sparkles size={10} />
+                              <span className="text-[10px] font-black uppercase">{t.aiMatching}</span>
+                              <span className="ml-auto text-[10px] font-black">{Math.round(aiResult.relevanceScore * 100)}%</span>
+                            </div>
+                            <p className="text-[9px] leading-tight font-medium">{aiResult.matchReason}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )
             ) : (
               <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm">
                 <div className="text-6xl mb-6 grayscale opacity-20">🔎</div>
@@ -403,46 +550,35 @@ export default function App() {
               const s = suppliers.find(sup => sup.id === id);
               if (s) toggleSupplierVerification(id.toString(), !s.verified);
             }}
-            onBack={() => setView('supplier-dashboard')}
+            onBack={() => setView('home')}
             initialSearch={adminSearch}
-            onViewSupplier={(id) => { setAdminFilterId(id); setView('supplier-dashboard'); }}
+            onViewSupplier={(id) => { setSupplierFilterId(id); setView('home'); }}
           />
         );
       case 'profile':
         return (
-          <div className="max-w-md mx-auto py-10">
-            <div className="bg-white rounded-[40px] p-8 border border-solar-border shadow-xl text-center">
-              <div className="relative inline-block mb-6">
-                <img src={user?.avatar} className="w-24 h-24 rounded-full border-4 border-solar-blue object-cover shadow-lg" alt="" />
-                {user?.verified && (
-                  <div className="absolute -bottom-1 -right-1 bg-solar-blue text-white p-1.5 rounded-full shadow-lg">
-                    <ShieldCheck size={16} />
-                  </div>
-                )}
-              </div>
-              <h2 className="text-2xl font-black text-solar-text">{isAr ? user?.nameAr || user?.name : user?.name}</h2>
-              <p className="text-solar-muted font-bold mt-1">{user?.email}</p>
-              <div className="mt-4 inline-flex items-center gap-2 bg-solar-light text-solar-blue px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-tighter">
-                {isAr ? 'حساب شخصي' : 'Personal Account'}
-              </div>
-              
-              <div className="mt-10 pt-10 border-t border-solar-border space-y-3">
-                <button 
-                  onClick={() => logout()}
-                  className="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 p-4 rounded-2xl font-black transition-all hover:bg-red-100"
-                >
-                  <LogIn className="rotate-180" size={20} />
-                  {t.logout}
-                </button>
-                <button 
-                  onClick={() => setView('home')}
-                  className="w-full text-solar-muted font-bold p-2 hover:text-solar-blue transition-colors"
-                >
-                  {t.back}
-                </button>
-              </div>
-            </div>
-          </div>
+          <ProfileView 
+            lang={lang}
+            setLang={setLang}
+            user={user}
+            logout={logout}
+            setView={setView}
+            wishlistCount={wishlist.length}
+            compareCount={compareList.length}
+            productsCount={user ? products.filter(p => p.supplierId === user.uid).length : 0}
+          />
+        );
+      case 'calculator':
+        return (
+          <SolarCalculator 
+            lang={lang}
+            products={products}
+            onBack={() => setView('home')}
+            onProductClick={(p) => {
+              setSelectedProduct(p);
+              setView('home');
+            }}
+          />
         );
       default:
         return null;

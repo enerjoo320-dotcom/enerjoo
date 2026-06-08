@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Globe, Heart, LogIn, LogOut, PlusCircle, Users } from 'lucide-react';
 import { translations } from '../translations';
 import { User, ViewType } from '../types';
@@ -29,14 +29,16 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
         </div>
 
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setView('wishlist')}
-            className="hidden md:flex items-center gap-2 text-solar-muted hover:text-red-500 transition font-bold text-sm bg-solar-light px-3 py-1.5 rounded-full"
-            title={t.wishlist}
-          >
-            <Heart size={18} className="text-red-500" />
-            <span>{t.wishlist}</span>
-          </button>
+          {user?.type !== 'admin' && (
+            <button 
+              onClick={() => setView('wishlist')}
+              className="hidden md:flex items-center gap-2 text-solar-muted hover:text-red-500 transition font-bold text-sm bg-solar-light px-3 py-1.5 rounded-full"
+              title={t.wishlist}
+            >
+              <Heart size={18} className="text-red-500" />
+              <span>{t.wishlist}</span>
+            </button>
+          )}
 
           {user?.type === 'admin' && (
             <button 
@@ -59,18 +61,19 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
           )}
 
           <button 
-            onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-solar-light transition text-solar-text font-bold text-sm"
+            onClick={() => setLang(isAr ? 'en' : 'ar')}
+            className="flex items-center gap-2 bg-solar-light hover:bg-solar-border border border-solar-border/40 px-3.5 py-1.5 rounded-full text-solar-text transition font-black text-xs cursor-pointer select-none"
+            title={isAr ? "Switch to English" : "تغيير إلى العربية"}
           >
-            <Globe size={18} className="text-solar-blue" />
-            <span>{isAr ? 'English' : 'العربية'}</span>
+            <Globe size={15} className="text-solar-blue" />
+            <span>{isAr ? "English" : "العربية"}</span>
           </button>
 
           {user ? (
             <div className="flex items-center gap-4">
               <div 
                 className="flex items-center gap-2 bg-solar-light px-3 py-1.5 rounded-full cursor-pointer hover:bg-solar-border transition"
-                onClick={() => setView(user.type === 'admin' ? 'admin-suppliers' : 'supplier-dashboard')}
+                onClick={() => setView('profile')}
               >
                 <img src={user.avatar} className="w-7 h-7 rounded-full border border-solar-border" alt={user.name} />
                 <span className="text-xs font-bold text-solar-text hidden md:block">{isAr ? user.nameAr : user.name}</span>
