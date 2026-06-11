@@ -44,6 +44,15 @@ export interface Product {
   suppliers: Supplier[];
 }
 
+export interface ProductReview {
+  id: string;
+  userId: string;
+  userName: string;
+  rating: number;
+  comment: string;
+  createdAt: any;
+}
+
 export interface User {
   uid: string;
   email: string | null;

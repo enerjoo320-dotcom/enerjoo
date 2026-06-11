@@ -786,6 +786,22 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       setLeadForm(prev => ({ ...prev, submitted: true, loading: false }));
     } catch (err: any) {
       console.error(err);
+      
+      // Maintain complaint structured error reporting as per Firestore Guidelines
+      try {
+        const errInfo = {
+          error: err instanceof Error ? err.message : String(err),
+          operationType: 'create',
+          path: 'quotations',
+          authInfo: {
+            userId: null,
+            email: null,
+            emailVerified: null,
+          }
+        };
+        console.error('Firestore Error:', JSON.stringify(errInfo));
+      } catch (logErr) {}
+
       setLeadForm(prev => ({ 
         ...prev, 
         loading: false, 
@@ -1881,8 +1897,32 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                         </div>
 
                         {leadForm.error && (
-                          <div className="p-3 bg-red-50 text-red-700 text-[11px] font-bold rounded-lg border border-red-100">
-                            ⚠️ {leadForm.error}
+                          <div className="space-y-2">
+                            <div className="p-3 bg-red-50 text-red-700 text-[11px] font-bold rounded-lg border border-red-100">
+                              ⚠️ {leadForm.error}
+                            </div>
+                            
+                            <a
+                              href={`https://wa.me/${currentTierData?.panel?.suppliers?.[0]?.phone || '201033253870'}?text=${(() => {
+                                const sysLabel = isAr
+                                  ? (systemType === 'on-grid' ? 'متصل بالشبكة (On-Grid)' : systemType === 'off-grid' ? 'منفصل بالشبكة (Off-Grid)' : systemType === 'hybrid' ? 'هجين (Hybrid)' : 'طلمبة ري (Solar Pump)')
+                                  : systemType;
+                                const tierName = isAr
+                                  ? (currentTier === 'budget' ? 'الباقة الاقتصادية' : currentTier === 'premium' ? 'الباقة الفاخرة' : 'الباقة الموصى بها')
+                                  : (currentTier === 'budget' ? 'Budget' : currentTier === 'premium' ? 'Premium' : 'Recommended');
+                                const specsText = currentSelection ? `${currentTier.toUpperCase()}: الألواح=${currentTierData?.panelQty}، الإنفرتر=${currentTierData?.inverterQty}، البطاريات=${currentTierData?.batteryQty || 0}` : '';
+                                
+                                return encodeURIComponent(isAr 
+                                  ? `مرحباً، أود الحصول على عرض سعر عبر Enerjoo:\nالاسم: ${leadForm.name}\nالهاتف: ${leadForm.phone}\nنوع النظام: ${sysLabel}\nالباقة المختارة: ${tierName}\nالتكلفة الاسترشادية: ${(currentSelection?.tiers[currentTier]?.cost || 0).toLocaleString()} ج.م\nالتفاصيل الفنية: ${specsText}\nالموقع: ${locationStr || cityChoice}\nملاحظات: ${leadForm.notes || 'لا يوجد'}`
+                                  : `Hello, I'd like to get a solar quote via Enerjoo:\nName: ${leadForm.name}\nPhone: ${leadForm.phone}\nSystem Type: ${sysLabel}\nChosen Tier: ${tierName}\nCost Estimate: ${(currentSelection?.tiers[currentTier]?.cost || 0).toLocaleString()} EGP\nSpecs: ${specsText}\nLocation: ${locationStr || cityChoice}\nNotes: ${leadForm.notes || 'None'}`
+                                );
+                              })()}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-xl cursor-pointer flex items-center justify-center gap-2 transition text-center shadow-sm"
+                            >
+                              <span>{isAr ? 'إرسال طلب عروض الأسعار مباشرة للمورد عبر WhatsApp 💬' : 'Send Sizing Inquiry directly via WhatsApp 💬'}</span>
+                            </a>
                           </div>
                         )}
 

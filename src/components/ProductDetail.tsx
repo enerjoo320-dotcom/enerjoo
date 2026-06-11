@@ -1,10 +1,11 @@
-import React from 'react';
-import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart } from 'lucide-react';
-import { Product } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare } from 'lucide-react';
+import { Product, ProductReview } from '../types';
 import { translations } from '../translations';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ProductCard } from './ProductCard';
 import { useAuth } from '../context/AuthContext';
+import { subscribeToProductReviews, addProductReview, deleteProductReview } from '../services/firestoreService';
 
 interface ProductDetailProps {
   product: Product;
@@ -38,6 +39,63 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const isAr = lang === 'ar';
   const isWishlisted = isInWishlist(product.id);
   const isOwner = user?.uid === product.supplierId;
+
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [newRating, setNewRating] = useState(5);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToProductReviews(product.id.toString(), setReviews);
+    return () => unsub();
+  }, [product.id]);
+
+  const averageRating = useMemo(() => {
+    if (reviews.length === 0) return 0;
+    const total = reviews.reduce((sum, r) => sum + r.rating, 0);
+    return Math.round((total / reviews.length) * 10) / 10;
+  }, [reviews]);
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      setReviewError(isAr ? 'يرجى تسجيل الدخول أولاً' : 'Please sign in first');
+      return;
+    }
+    if (!newComment.trim()) {
+      setReviewError(isAr ? 'يرجى كتابة تعليق' : 'Please write a comment');
+      return;
+    }
+    setIsSubmitting(true);
+    setReviewError(null);
+    try {
+      await addProductReview(product.id.toString(), {
+        userId: user.uid,
+        userName: user.name || user.email || 'Anonymous User',
+        rating: newRating,
+        comment: newComment,
+      });
+      setNewComment('');
+      setNewRating(5);
+    } catch (err: any) {
+      setReviewError(isAr ? 'فشل إضافة التقييم. حاول مرة أخرى.' : 'Failed to submit review. Try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReviewDelete = async (reviewId: string) => {
+    if (!window.confirm(isAr ? 'هل أنت متأكد من حذف هذا التقييم؟' : 'Are you sure you want to delete this review?')) {
+      return;
+    }
+    try {
+      await deleteProductReview(product.id.toString(), reviewId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const getMainSpecs = () => {
     const common = [
@@ -211,6 +269,22 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 {t[product.status] || t.available}
               </span>
             </div>
+            {reviews.length > 0 && (
+              <div className="flex items-center gap-1.5 mt-3 text-solar-muted text-xs font-bold leading-none">
+                <div className="flex items-center text-amber-500">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star
+                      key={i}
+                      size={14}
+                      className={i < Math.round(averageRating) ? "fill-amber-500 text-amber-500" : "text-gray-300"}
+                    />
+                  ))}
+                </div>
+                <span className="text-solar-text font-black text-sm">{averageRating}</span>
+                <span>•</span>
+                <span>{reviews.length} {isAr ? 'تقييم' : 'reviews'}</span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -288,6 +362,213 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               >
                 <ArrowLeftRight size={24} />
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Dynamic Reviews and Rating Section */}
+      <div className="mt-16 bg-solar-card rounded-[40px] p-8 md:p-12 border border-solar-border shadow-sm">
+        <div className="flex flex-col lg:flex-row gap-12">
+          {/* Column 1: Rating Summary Stats */}
+          <div className="lg:w-1/3 flex flex-col justify-center items-center lg:items-start text-center lg:text-left lg:border-r lg:border-solar-border/50 pb-8 lg:pb-0 lg:pe-8 dir-neutral">
+            <h3 className="text-xl font-black text-solar-text mb-4 uppercase tracking-wider flex items-center gap-2 justify-center lg:justify-start">
+              <Star className="text-amber-500 fill-amber-500" />
+              {isAr ? 'التقييمات والآراء' : 'Reviews & Ratings'}
+            </h3>
+            
+            <div className="flex items-baseline gap-2 mt-2 justify-center lg:justify-start">
+              <span className="text-6xl font-black text-solar-text">{averageRating > 0 ? averageRating : '0.0'}</span>
+              <span className="text-solar-muted font-bold">/ 5.0</span>
+            </div>
+
+            <div className="flex items-center text-amber-500 mt-3 mb-2 justify-center lg:justify-start gap-1">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star
+                  key={i}
+                  size={24}
+                  className={(averageRating > 0 && i < Math.round(averageRating)) ? "fill-amber-500 text-amber-500" : "text-gray-200"}
+                />
+              ))}
+            </div>
+
+            <p className="text-xs font-bold text-solar-muted uppercase mt-2">
+              {reviews.length} {isAr ? 'تقييمات موثقة من العملاء' : 'verified customer reviews'}
+            </p>
+
+            {/* Rating distribution breakdown */}
+            <div className="w-full mt-6 space-y-2 max-w-xs">
+              {[5, 4, 3, 2, 1].map((stars) => {
+                const count = reviews.filter((r) => r.rating === stars).length;
+                const percentage = reviews.length > 0 ? (count / reviews.length) * 100 : 0;
+                return (
+                  <div key={stars} className="flex items-center gap-3 text-xs font-bold text-solar-muted">
+                    <span className="w-3 text-right">{stars}</span>
+                    <Star size={12} className="fill-amber-500 text-amber-500 inline shrink-0" />
+                    <div className="flex-1 h-2 bg-solar-bg rounded-full overflow-hidden border border-solar-border/30">
+                      <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${percentage}%` }}></div>
+                    </div>
+                    <span className="w-8 text-right font-black">{percentage.toFixed(0)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Column 2: Leaving feedback and reviews showcase */}
+          <div className="flex-1 space-y-10">
+            {/* Feedback Form: Only shown for authenticated users */}
+            <div>
+              {user ? (
+                <form onSubmit={handleReviewSubmit} className="bg-solar-bg p-6 md:p-8 rounded-[32px] border border-solar-border/60">
+                  <h4 className="text-md font-black text-solar-text mb-4 flex items-center gap-2">
+                    <MessageSquare size={18} className="text-solar-blue" />
+                    {isAr ? 'شاركنا بتجربتك ورأيك' : 'Share your feedback'}
+                  </h4>
+
+                  {/* Dynamic interactive star selector */}
+                  <div className="flex items-center gap-2 mb-6 flex-wrap">
+                    <span className="text-xs font-black text-solar-muted uppercase tracking-wider">
+                      {isAr ? 'تقييمك للمنتج:' : 'Your Rating:'}
+                    </span>
+                    <div className="flex gap-1" dir="ltr">
+                      {[1, 2, 3, 4, 5].map((starVal) => {
+                        const isHighlighted = hoverRating !== null ? starVal <= hoverRating : starVal <= newRating;
+                        return (
+                          <button
+                            type="button"
+                            key={starVal}
+                            onClick={() => setNewRating(starVal)}
+                            onMouseEnter={() => setHoverRating(starVal)}
+                            onMouseLeave={() => setHoverRating(null)}
+                            className="text-amber-500 transition duration-150 transform hover:scale-125 focus:outline-none"
+                          >
+                            <Star
+                              size={28}
+                              className={isHighlighted ? "fill-amber-500 text-amber-500" : "text-gray-300"}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Text area inside a sleek layout */}
+                  <div className="relative">
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder={isAr ? 'اكتب مراجعتك هنا بالتفصيل (كفاءة الأداء، عيوب المنتج، الضمان المالي...)' : 'Write your comprehensive feedback here (efficiency, material quality, delivery time...)'}
+                      className="w-full h-32 px-5 py-4 rounded-2xl bg-white border border-solar-border focus:border-solar-blue focus:ring-1 focus:ring-solar-blue focus:outline-none text-sm transition-all shadow-inner placeholder-solar-muted/70"
+                      maxLength={1000}
+                    />
+                    <div className="absolute bottom-3 right-4 text-[10px] font-mono text-solar-muted">
+                      {newComment.length} / 1000
+                    </div>
+                  </div>
+
+                  {reviewError && (
+                    <p className="text-red-500 text-xs font-black mt-2 flex items-center gap-1">
+                      ⚠️ {reviewError}
+                    </p>
+                  )}
+
+                  <div className="flex justify-end mt-4">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="bg-solar-blue text-white px-8 py-3.5 rounded-2xl font-black shadow-lg shadow-solar-blue/20 transition active:scale-95 disabled:opacity-50 hover:bg-opacity-90 flex items-center gap-2 text-sm"
+                    >
+                      {isSubmitting ? (isAr ? 'جاري الإرسال...' : 'Submitting...') : (isAr ? 'إرسال التقييم' : 'Submit Review')}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="bg-solar-bg p-6 md:p-8 rounded-[32px] border-2 border-dashed border-solar-border text-center">
+                  <h4 className="text-sm font-black text-solar-muted uppercase tracking-widest mb-2">
+                    {isAr ? 'هل قمت بشراء هذا المنتج أو تجربته؟' : 'Have you tried or purchased this product?'}
+                  </h4>
+                  <p className="text-xs font-bold text-solar-muted mb-4 max-w-sm mx-auto">
+                    {isAr ? 'يرجى تسجيل الدخول أو إعداد حساب لتتمكن من إضافة تقييمك ومساعدة الآخرين.' : 'Please register or sign in to your account with Google or Email to leave feedback.'}
+                  </p>
+                  <div className="inline-block bg-solar-blue-light border border-solar-blue/20 text-solar-blue font-black px-6 py-2.5 rounded-xl text-xs uppercase cursor-default">
+                    {isAr ? 'يرجى تسجيل الدخول من أعلى الصفحة لكتابة تقييم' : 'Please Sign In From Top Bar To Write Review'}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* List of Reviews Panel */}
+            <div className="space-y-6">
+              <h4 className="text-sm font-black text-solar-muted uppercase tracking-widest flex items-center gap-2">
+                <MessageSquare size={14} className="text-solar-blue" />
+                {isAr ? 'آراء وتوصيات مجتمع الطاقة' : 'Community Feedbacks'} ({reviews.length})
+              </h4>
+
+              {reviews.length === 0 ? (
+                <div className="text-center py-10 bg-solar-bg/50 rounded-3xl border border-solar-border/30">
+                  <p className="text-xs font-bold text-solar-muted">
+                    {isAr ? 'لا توجد تقييمات لهذا المنتج بعد. كن أول من يبدي رأيه!' : 'No reviews left for this product yet. Be the first to share your thoughts!'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <AnimatePresence>
+                    {reviews.map((r, index) => {
+                      const isMyReview = user && user.uid === r.userId;
+                      const initials = r.userName ? r.userName.charAt(0).toUpperCase() : '?';
+                      return (
+                        <motion.div
+                          key={r.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="bg-white p-6 rounded-[28px] border border-solar-border shadow-sm flex gap-4 hover:shadow-md transition"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-solar-blue/10 text-solar-blue border border-solar-blue/25 flex items-center justify-center font-black shrink-0">
+                            {initials}
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <h5 className="font-black text-solar-text text-sm truncate">{r.userName}</h5>
+                              <span className="text-[10px] font-bold text-solar-muted shrink-0">
+                                {r.createdAt ? new Date(r.createdAt).toLocaleDateString(isAr ? 'ar-EG' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : ''}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center text-amber-500 mb-2 gap-0.5" dir="ltr">
+                              {Array.from({ length: 5 }).map((_, i) => (
+                                <Star
+                                  key={i}
+                                  size={12}
+                                  className={i < r.rating ? "fill-amber-500 text-amber-500" : "text-gray-200"}
+                                />
+                              ))}
+                            </div>
+
+                            <p className="text-xs font-bold text-solar-text leading-relaxed whitespace-pre-wrap">
+                              {r.comment}
+                            </p>
+
+                            {isMyReview && (
+                              <div className="flex justify-end mt-2">
+                                <button
+                                  onClick={() => handleReviewDelete(r.id)}
+                                  className="text-[10px] font-black text-red-500 hover:underline hover:text-red-600 transition"
+                                >
+                                  {isAr ? 'حذف التقييم' : 'Delete Review'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
           </div>
         </div>

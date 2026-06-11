@@ -1,0 +1,111 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reuseable safe helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // 1. PRODUCTS COLLECTION SECURITY
+    match /products/{productId} {
+      // Anyone can read products in the public catalog
+      allow read, list: if true;
+
+      // Only registered, authenticated users (suppliers, admins) can create, update, or delete products
+      allow create: if isSignedIn() 
+        && incoming().name is string 
+        && incoming().name.size() > 0 
+        && incoming().name.size() <= 200;
+        
+      allow update, delete: if isSignedIn();
+
+      // 4. REVIEWS SUBCOLLECTION SECURITY
+      match /reviews/{reviewId} {
+        // Anyone can read product reviews
+        allow read, list: if true;
+
+        // Only authenticated users can manage reviews under their owner ID
+        allow create: if isSignedIn()
+          && isValidId(productId)
+          && isValidId(reviewId)
+          && incoming().userId == request.auth.uid
+          && incoming().userName is string
+          && incoming().userName.size() > 0
+          && incoming().userName.size() <= 100
+          && incoming().rating is number
+          && incoming().rating >= 1
+          && incoming().rating <= 5
+          && incoming().comment is string
+          && incoming().comment.size() <= 1000
+          && incoming().createdAt == request.time;
+
+        allow update: if isSignedIn()
+          && isValidId(productId)
+          && isValidId(reviewId)
+          && existing().userId == request.auth.uid
+          && incoming().userId == request.auth.uid
+          && incoming().userName is string
+          && incoming().userName.size() > 0
+          && incoming().userName.size() <= 100
+          && incoming().rating is number
+          && incoming().rating >= 1
+          && incoming().rating <= 5
+          && incoming().comment is string
+          && incoming().comment.size() <= 1000
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment', 'updatedAt']);
+
+        allow delete: if isSignedIn()
+          && isValidId(productId)
+          && isValidId(reviewId)
+          && existing().userId == request.auth.uid;
+      }
+    }
+
+    // 2. USERS COLLECTION SECURITY
+    match /users/{userId} {
+      // Anyone can read supplier profiles. Other profiles should restrict to owner.
+      allow read: if true;
+      allow list: if true; // to support public supplier directory listings
+
+      // Users can create/update their own profile
+      allow create, update: if isSignedIn() && (request.auth.uid == userId);
+      
+      // Admins/Super-users (or standard authenticated user deleting their own profile)
+      allow delete: if isSignedIn() && (request.auth.uid == userId);
+    }
+
+    // 3. QUOTATIONS COLLECTION SECURITY (AI Sizing Leads)
+    match /quotations/{quotationId} {
+      // Lead forms must be submittable by anyone, including unauthenticated guest visitors
+      allow create: if incoming().name is string 
+        && incoming().name.size() >= 2 
+        && incoming().name.size() <= 150
+        && incoming().phone is string
+        && incoming().phone.size() >= 7
+        && incoming().phone.size() <= 30;
+
+      // Only authenticated users (suppliers, administrators) can list or read leads
+      allow read, list, update, delete: if isSignedIn();
+    }
+  }
+}

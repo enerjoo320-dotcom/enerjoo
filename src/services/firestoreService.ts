@@ -8,10 +8,11 @@ import {
   query, 
   onSnapshot,
   serverTimestamp,
-  where
+  where,
+  orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { Product, Supplier } from '../types';
+import { Product, Supplier, ProductReview } from '../types';
 import { productsData } from '../data/mockData';
 
 const PRODUCTS_COLLECTION = 'products';
@@ -58,7 +59,19 @@ export const subscribeToProducts = (callback: (products: Product[]) => void) => 
     const products = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
     callback(products);
   }, (error) => {
-    handleFirestoreError(error, OperationType.LIST, PRODUCTS_COLLECTION);
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+      },
+      operationType: OperationType.LIST,
+      path: PRODUCTS_COLLECTION
+    };
+    console.error('Firestore Error:', JSON.stringify(errInfo));
+    console.warn("Falling back to local static solar products catalog.");
+    callback(productsData);
   });
 };
 
@@ -88,7 +101,29 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
       });
     callback(suppliers);
   }, (error) => {
-    handleFirestoreError(error, OperationType.LIST, USERS_COLLECTION);
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+      },
+      operationType: OperationType.LIST,
+      path: USERS_COLLECTION
+    };
+    console.error('Firestore Error:', JSON.stringify(errInfo));
+    console.warn("Falling back to local static suppliers database.");
+    
+    // Dynamically build supplier list from productsData
+    const fallbackSuppliers: Supplier[] = [];
+    productsData.forEach(p => {
+      p.suppliers.forEach(s => {
+        if (!fallbackSuppliers.some(existing => existing.id === s.id)) {
+          fallbackSuppliers.push(s);
+        }
+      });
+    });
+    callback(fallbackSuppliers);
   });
 };
 
@@ -165,5 +200,79 @@ export const toggleSupplierVerification = async (uid: string, verified: boolean)
     await updateDoc(docRef, { verified });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);
+  }
+};
+
+export const subscribeToProductReviews = (productId: string, callback: (reviews: ProductReview[]) => void) => {
+  const reviewsRef = collection(db, PRODUCTS_COLLECTION, productId.toString(), 'reviews');
+  const q = query(reviewsRef, orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const reviews = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        userId: data.userId || '',
+        userName: data.userName || '',
+        rating: data.rating || 0,
+        comment: data.comment || '',
+        createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : data.createdAt) : null,
+      } as ProductReview;
+    });
+    callback(reviews);
+  }, (error) => {
+    console.warn(`Falling back query for reviews on product ${productId} without ordering:`, error.message);
+    return onSnapshot(reviewsRef, (snapshot) => {
+      const reviews = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          userId: data.userId || '',
+          userName: data.userName || '',
+          rating: data.rating || 0,
+          comment: data.comment || '',
+          createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate() : data.createdAt) : null,
+        } as ProductReview;
+      });
+      reviews.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+      callback(reviews);
+    }, (err) => {
+      const errInfo = {
+        error: err instanceof Error ? err.message : String(err),
+        authInfo: {
+          userId: auth.currentUser?.uid,
+          email: auth.currentUser?.email,
+          emailVerified: auth.currentUser?.emailVerified,
+        },
+        operationType: OperationType.LIST,
+        path: `${PRODUCTS_COLLECTION}/${productId}/reviews`
+      };
+      console.error('Firestore Error:', JSON.stringify(errInfo));
+      callback([]);
+    });
+  });
+};
+
+export const addProductReview = async (productId: string, review: Omit<ProductReview, 'id' | 'createdAt'>) => {
+  try {
+    const reviewsRef = collection(db, PRODUCTS_COLLECTION, productId.toString(), 'reviews');
+    await addDoc(reviewsRef, {
+      ...review,
+      createdAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${PRODUCTS_COLLECTION}/${productId}/reviews`);
+  }
+};
+
+export const deleteProductReview = async (productId: string, reviewId: string) => {
+  try {
+    const docRef = doc(db, PRODUCTS_COLLECTION, productId.toString(), 'reviews', reviewId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${PRODUCTS_COLLECTION}/${productId}/reviews/${reviewId}`);
   }
 };
