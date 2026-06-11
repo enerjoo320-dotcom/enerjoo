@@ -38,14 +38,8 @@ import { translations } from './translations';
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
   
-  // Initialize from persistent localStorage or browser default
-  const [lang, setLang] = useState<'ar' | 'en'>(() => {
-    const saved = localStorage.getItem('enerjoo_lang');
-    if (saved === 'ar' || saved === 'en') return saved;
-    const browserLang = navigator.language || (navigator as any).userLanguage || '';
-    if (browserLang.toLowerCase().startsWith('en')) return 'en';
-    return 'ar';
-  });
+  // Default consistently to Arabic
+  const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
   const [view, setView] = useState<ViewType>('home');
   const [products, setProducts] = useState<Product[]>([]);

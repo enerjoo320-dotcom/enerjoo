@@ -60,15 +60,6 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
             </button>
           )}
 
-          <button 
-            onClick={() => setLang(isAr ? 'en' : 'ar')}
-            className="flex items-center gap-2 bg-solar-light hover:bg-solar-border border border-solar-border/40 px-3.5 py-1.5 rounded-full text-solar-text transition font-black text-xs cursor-pointer select-none"
-            title={isAr ? "Switch to English" : "تغيير إلى العربية"}
-          >
-            <Globe size={15} className="text-solar-blue" />
-            <span>{isAr ? "English" : "العربية"}</span>
-          </button>
-
           {user ? (
             <div className="flex items-center gap-4">
               <div 

@@ -77,35 +77,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </p>
         </div>
 
-        {/* Section: Language switcher */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-black text-solar-text px-2 text-right">
-            {isAr ? 'اللغة' : 'Language'}
-          </h3>
-          <div className="grid grid-cols-2 gap-3 bg-white p-2 rounded-[24px] border border-solar-border/50 shadow-sm">
-            <button
-              onClick={() => setLang('ar')}
-              className={`py-3.5 px-4 rounded-[18px] font-black text-sm transition-all duration-300 cursor-pointer ${
-                isAr 
-                  ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25' 
-                  : 'bg-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              العربية
-            </button>
-            <button
-              onClick={() => setLang('en')}
-              className={`py-3.5 px-4 rounded-[18px] font-black text-sm transition-all duration-300 cursor-pointer ${
-                !isAr 
-                  ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25' 
-                  : 'bg-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              English
-            </button>
-          </div>
-        </div>
-
         {/* Section: Account block */}
         <div className="space-y-2">
           <h3 className="text-sm font-black text-solar-text px-2 text-right">

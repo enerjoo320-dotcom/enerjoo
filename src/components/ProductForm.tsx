@@ -18,7 +18,6 @@ export const ProductForm: React.FC<{
   
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
-    nameAr: initialData?.nameAr || '',
     brand: initialData?.brand || '',
     category: (initialData?.category as string) || 'panels',
     price: initialData?.price?.toString() || '',
@@ -116,7 +115,7 @@ export const ProductForm: React.FC<{
 
       const newProduct: any = {
         name: formData.name,
-        nameAr: formData.nameAr || formData.name,
+        nameAr: formData.name,
         brand: formData.brand,
         category: formData.category as any,
         price: parseInt(formData.price) || 0,
@@ -171,21 +170,13 @@ export const ProductForm: React.FC<{
   return (
     <form className="space-y-6 text-right" onSubmit={handleSubmit}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
-        <div className="space-y-2">
-          <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{lang === 'ar' ? 'اسم المنتج (إنجليزي)' : 'Product Name (EN)'}</label>
+        <div className="space-y-2 md:col-span-2 text-left">
+          <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.productName}</label>
           <input 
             value={formData.name}
             onChange={e => setFormData(p => ({...p, name: e.target.value}))}
             className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-            required
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{lang === 'ar' ? 'اسم المنتج (عربي)' : 'Product Name (AR)'}</label>
-          <input 
-            value={formData.nameAr}
-            onChange={e => setFormData(p => ({...p, nameAr: e.target.value}))}
-            className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+            placeholder={lang === 'ar' ? 'مثال: لوح شمسي جينكو 580 واط' : 'e.g., Jinko Solar 580W'}
             required
           />
         </div>
