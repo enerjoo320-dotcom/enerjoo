@@ -35,6 +35,7 @@ import { translations } from '../translations';
 import { Product } from '../types';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { productsData } from '../data/mockData';
 
 interface SolarCalculatorProps {
   lang: 'ar' | 'en';
@@ -572,35 +573,37 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
     const solarCapacityKw = dailyKwh / (psh * systemLosses);
 
     // Dynamic Sizing of 3 specific options with realistic products matched from database:
+    const availableProducts = products && products.length > 0 ? products : productsData;
+
     // Option A: Budget Sizing
     // - Panels: Trina Solar 410W or JA Solar 395W
     // - Inverter: growatt 5000TL equivalent
-    const budgetPanel = products.find(p => p.category === 'panels' && p.power <= 410) || products[1] || products[0];
-    const budgetInverter = products.find(p => p.category === 'inverters') || products[3];
-    const budgetQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / budgetPanel.power));
-    const budgetRealKw = (budgetQtyPanels * budgetPanel.power) / 1000;
+    const budgetPanel = availableProducts.find(p => p.category === 'panels' && p.power <= 410) || availableProducts.find(p => p.category === 'panels') || productsData[1];
+    const budgetInverter = availableProducts.find(p => p.category === 'inverters') || productsData[3];
+    const budgetQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / (budgetPanel?.power || 410)));
+    const budgetRealKw = (budgetQtyPanels * (budgetPanel?.power || 410)) / 1000;
     const budgetInverterQty = Math.ceil(budgetRealKw / 5); // 5kW increments
     
     // Option B: Recommended Option Sizing
     // - Panels: LONGi Hi-MO 5 540W
     // - Inverter: Growatt SPF 5000TL
-    const recPanel = products.find(p => p.category === 'panels' && p.brand.toLowerCase() === 'longi') || products[2] || products[0];
-    const recInverter = products.find(p => p.category === 'inverters' && p.brand.toLowerCase() === 'growatt') || products[3];
-    const recQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / recPanel.power));
-    const recRealKw = (recQtyPanels * recPanel.power) / 1000;
+    const recPanel = availableProducts.find(p => p.category === 'panels' && p.brand.toLowerCase() === 'longi') || availableProducts.find(p => p.category === 'panels') || productsData[2];
+    const recInverter = availableProducts.find(p => p.category === 'inverters' && p.brand.toLowerCase() === 'growatt') || availableProducts.find(p => p.category === 'inverters') || productsData[3];
+    const recQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / (recPanel?.power || 540)));
+    const recRealKw = (recQtyPanels * (recPanel?.power || 540)) / 1000;
     const recInverterQty = Math.ceil(recRealKw / 5);
 
     // Option C: Premium Option Sizing
     // - Panels: Jinko Solar 450W
     // - Inverter: Growatt high standard configured
-    const premiumPanel = products.find(p => p.category === 'panels' && p.brand.toLowerCase() === 'jinko') || products[0] || products[2];
-    const premiumInverter = products.find(p => p.category === 'inverters') || products[3];
-    const premiumQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1150) / premiumPanel.power)); // highly engineered safety markup
-    const premiumRealKw = (premiumQtyPanels * premiumPanel.power) / 1000;
+    const premiumPanel = availableProducts.find(p => p.category === 'panels' && p.brand.toLowerCase() === 'jinko') || availableProducts.find(p => p.category === 'panels') || productsData[0];
+    const premiumInverter = availableProducts.find(p => p.category === 'inverters') || productsData[3];
+    const premiumQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1150) / (premiumPanel?.power || 450))); // highly engineered safety markup
+    const premiumRealKw = (premiumQtyPanels * (premiumPanel?.power || 450)) / 1000;
     const premiumInverterQty = Math.ceil(premiumRealKw / 5);
 
     // 5. Battery sizing (None for On-Grid, off-grid consumes full nightly storage, hybrid consumes ~40% backup storage)
-    const activeBattery = products.find(p => p.category === 'batteries') || products[4];
+    const activeBattery = availableProducts.find(p => p.category === 'batteries') || productsData[4];
     const batteryUnitKwh = 2.4; // Pylontech US2000C is 2.4kWh (48V 50Ah)
     const batteryCapacityPrice = activeBattery ? activeBattery.price : 22000;
 
