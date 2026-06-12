@@ -27,6 +27,8 @@ export const RegisterView: React.FC<{
   const [error, setError] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
   const [captchaVerified, setCaptchaVerified] = useState(false);
+  const [isNotAllowedError, setIsNotAllowedError] = useState(false);
+  const [isPopupBlockedError, setIsPopupBlockedError] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +49,8 @@ export const RegisterView: React.FC<{
 
     setIsLoading(true);
     setError('');
+    setIsNotAllowedError(false);
+    setIsPopupBlockedError(false);
 
     try {
       await register(formData.email, formData.password, {
@@ -66,6 +70,7 @@ export const RegisterView: React.FC<{
       let message = isAr ? 'فشل التسجيل' : 'Registration failed';
       
       const errorCode = err.code || (err.message && err.message.includes('auth/email-already-in-use') ? 'auth/email-already-in-use' : '');
+      const isNotAllowed = err.code === 'auth/operation-not-allowed' || err.message?.includes('auth/operation-not-allowed');
       
       if (errorCode === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use')) {
         message = isAr ? 'هذا البريد الإلكتروني مستخدم بالفعل' : 'This email is already in use';
@@ -73,8 +78,11 @@ export const RegisterView: React.FC<{
         message = isAr ? 'كلمة المرور ضعيفة جداً' : 'The password is too weak';
       } else if (err.code === 'auth/invalid-email') {
         message = isAr ? 'البريد الإلكتروني غير صالح' : 'Invalid email address';
-      } else if (err.code === 'auth/operation-not-allowed') {
-        message = isAr ? 'تسجيل الموردين بالبريد غير مفعّل في لوحة Firebase الخاصة بك حالياً' : 'Email authentication is not enabled in your Firebase console';
+      } else if (isNotAllowed) {
+        setIsNotAllowedError(true);
+        message = isAr 
+          ? 'طريقة التسجيل بالبريد وكلمة المرور غير مفعّلة في لوحة تحكم Firebase حالياً.' 
+          : 'Email & Password sign-in method is not enabled in your Firebase console.';
       }
       
       setError(message);
@@ -86,6 +94,8 @@ export const RegisterView: React.FC<{
   const handleGoogleSignUp = async () => {
     setIsLoading(true);
     setError('');
+    setIsPopupBlockedError(false);
+    setIsNotAllowedError(false);
     try {
       await signInWithGoogle(role);
       setIsSuccess(true);
@@ -95,6 +105,13 @@ export const RegisterView: React.FC<{
     } catch (err: any) {
       console.error("Google Registration Error:", err);
       let message = isAr ? 'فشل التسجيل باستخدام Google' : 'Google registration failed';
+      const isPopupBlocked = err.code === 'auth/popup-blocked' || err.message?.includes('auth/popup-blocked');
+      if (isPopupBlocked) {
+        setIsPopupBlockedError(true);
+        message = isAr 
+          ? 'تم حظر نافذة التسجيل المنبثقة من قبل متصفحك.' 
+          : 'Google sign-up popup was blocked by your browser.';
+      }
       setError(message);
     } finally {
       setIsLoading(false);
@@ -186,8 +203,67 @@ export const RegisterView: React.FC<{
         </div>
 
         {error && (
-          <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-xl text-sm font-bold border border-solar-danger/20">
-            {error}
+          <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-xl text-sm font-bold border border-solar-danger/20 space-y-3">
+            <div>{error}</div>
+            
+            {isNotAllowedError && (
+              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-left leading-relaxed space-y-2">
+                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
+                  {isAr ? '🛠️ خطوات تفعيل خيار البريد الإلكتروني في Firebase:' : '🛠️ How to enable Email/Password in Firebase Console:'}
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-solar-muted">
+                  <li>
+                    {isAr 
+                      ? 'افتح لوحة تحكم Firebase: ' 
+                      : 'Open Firebase Console: '}
+                    <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-solar-blue underline font-bold">console.firebase.google.com</a>
+                  </li>
+                  <li>
+                    {isAr 
+                      ? 'اختر مشروعك الحالي.' 
+                      : 'Select your active project.'}
+                  </li>
+                  <li>
+                    {isAr 
+                      ? 'من القائمة الجانبية Build، اختر Authentication.' 
+                      : 'From the Build side-menu, select Authentication.'}
+                  </li>
+                  <li>
+                    {isAr 
+                      ? 'اذهب لتبويب Sign-in method واضغط على Add new provider.' 
+                      : 'Go to Sign-in method and click Add new provider.'}
+                  </li>
+                  <li>
+                    {isAr 
+                      ? 'اختر Email/Password وعيّنه كـ Enabled ثم احفظ الخيارات.' 
+                      : 'Select Email/Password, turn the switch to Enabled, and Save.'}
+                  </li>
+                </ol>
+                <div className="mt-2.5 p-2 bg-solar-blue/5 text-solar-blue rounded-lg border border-solar-blue/10 text-[10px] font-black text-center">
+                  {isAr 
+                    ? '💡 بديل سريع: يمكنك تسجيل الدخول فوراً باستخدام حساب Google بالأسفل دون الحاجة لتغيير أي إعدادات!' 
+                    : '💡 Fast Alternative: You can sign up instantly using Google Sign-In below without any console setup!'}
+                </div>
+              </div>
+            )}
+
+            {isPopupBlockedError && (
+              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-left leading-relaxed space-y-2">
+                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
+                  {isAr ? '🌐 حل مشكلة حظر النافذة المنبثقة للـ iframe:' : '🌐 How to fix iframe popup blocking:'}
+                </p>
+                <p className="text-[11px] text-solar-muted">
+                  {isAr 
+                    ? 'لأن هذا التطبيق يعمل كمعاينة داخل إطار (iframe)، فإن المتصفحات تحظر أزرار النوافذ المنبثقة من Google لغايات أمنية.' 
+                    : 'Because this app runs inside a preview iframe, modern browsers automatically block secondary Google sign-in popups.'}
+                </p>
+                <div className="mt-3 p-2 bg-solar-blue/10 text-solar-blue rounded-lg border border-solar-blue/20 text-center font-bold text-[11px]">
+                  {isAr 
+                    ? '👉 يرجى فتح التطبيق في نافذة مستقلة جديدة عبر النقر على زر السهم أعلى الزاوية اليمنى من شاشتك ثم إعادة التجربة!' 
+                    : '👉 Please open this application in a new tab by clicking the "Open in new tab" arrow icon at the top-right of your screen and try again!'}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

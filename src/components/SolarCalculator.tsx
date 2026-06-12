@@ -101,14 +101,26 @@ export const SolarCalculator: React.FC<SolarCalculatorProps> = ({
 
   // Appliances standard listing
   const [appliancesList, setAppliancesList] = useState<ApplianceInput[]>([
-    { id: '1', nameAr: 'إضاءة وليد (LED)', nameEn: 'LED Lights', watts: 15, qty: 8, hours: 6, category: 'lights' },
+    { id: '1', nameAr: 'إضاءة ليد (LED)', nameEn: 'LED Lights', watts: 15, qty: 8, hours: 6, category: 'lights' },
     { id: '2', nameAr: 'شاشة تلفزيون (TV)', nameEn: 'TV screen', watts: 100, qty: 1, hours: 5, category: 'screens' },
     { id: '3', nameAr: 'ثلاجة كهربائية', nameEn: 'Refrigerator', watts: 200, qty: 1, hours: 24, category: 'general' },
-    { id: '4', nameAr: 'تكييف هوائي (1.5 حصان)', nameEn: 'Air Conditioner 1.5 HP', watts: 1400, qty: 1, hours: 6, category: 'cooling' },
-    { id: '5', nameAr: 'مروحة سقف/مكتب', nameEn: 'Ceiling/Desk Fan', watts: 75, qty: 3, hours: 10, category: 'cooling' },
-    { id: '6', nameAr: 'مضخة مياه (1 حصان)', nameEn: 'Water Pump 1 HP', watts: 750, qty: 0, hours: 2, category: 'power' },
-    { id: '7', nameAr: 'كمبيوتر / لابتوب', nameEn: 'Computer/Laptop', watts: 150, qty: 1, hours: 4, category: 'general' },
-    { id: '8', nameAr: 'غسالة ملابس', nameEn: 'Washing Machine', watts: 500, qty: 1, hours: 1.5, category: 'general' }
+    { id: '4', nameAr: 'ديب فريزر (Deep Freezer)', nameEn: 'Deep Freezer', watts: 250, qty: 0, hours: 24, category: 'general' },
+    { id: '5', nameAr: 'تكييف هوائي (1.5 حصان)', nameEn: 'Air Conditioner 1.5 HP', watts: 1400, qty: 1, hours: 6, category: 'cooling' },
+    { id: '6', nameAr: 'تكييف هوائي (2.25 حصان)', nameEn: 'Air Conditioner 2.25 HP', watts: 2100, qty: 0, hours: 6, category: 'cooling' },
+    { id: '7', nameAr: 'تكييف هوائي (3 حصان)', nameEn: 'Air Conditioner 3 HP', watts: 2800, qty: 0, hours: 6, category: 'cooling' },
+    { id: '8', nameAr: 'مروحة سقف/مكتب', nameEn: 'Ceiling/Desk Fan', watts: 75, qty: 3, hours: 10, category: 'cooling' },
+    { id: '9', nameAr: 'مضخة مياه (1 حصان)', nameEn: 'Water Pump 1 HP', watts: 750, qty: 0, hours: 2, category: 'power' },
+    { id: '10', nameAr: 'غلاية مياه كهربائية (Kettle)', nameEn: 'Electric Kettle', watts: 1800, qty: 0, hours: 0.5, category: 'general' },
+    { id: '11', nameAr: 'مايكروويف (Microwave)', nameEn: 'Microwave Oven', watts: 1200, qty: 0, hours: 0.5, category: 'general' },
+    { id: '12', nameAr: 'كمبيوتر / لابتوب', nameEn: 'Computer/Laptop', watts: 150, qty: 1, hours: 4, category: 'general' },
+    { id: '13', nameAr: 'غسالة ملابس', nameEn: 'Washing Machine', watts: 500, qty: 1, hours: 1.5, category: 'general' },
+    { id: '14', nameAr: 'غسالة أطباق (Dishwasher)', nameEn: 'Dishwasher', watts: 1200, qty: 0, hours: 1.5, category: 'general' },
+    { id: '15', nameAr: 'فرن كهربائي', nameEn: 'Electric Oven', watts: 2000, qty: 0, hours: 1, category: 'general' },
+    { id: '16', nameAr: 'سخان مياه كهربائي', nameEn: 'Electric Water Heater', watts: 2000, qty: 0, hours: 2, category: 'general' },
+    { id: '17', nameAr: 'مكواة ملابس', nameEn: 'Electric Iron', watts: 1000, qty: 0, hours: 1, category: 'general' },
+    { id: '18', nameAr: 'خلاط ومحضر طعام', nameEn: 'Kitchen Blender/Mixer', watts: 400, qty: 0, hours: 0.5, category: 'general' },
+    { id: '19', nameAr: 'مكنسة كهربائية', nameEn: 'Vacuum Cleaner', watts: 1400, qty: 0, hours: 0.5, category: 'general' },
+    { id: '20', nameAr: 'راوتر وكاميرات مراقبة (CCTV)', nameEn: 'Router & Security Cameras', watts: 40, qty: 0, hours: 24, category: 'general' }
   ]);
 
   // Handle auto scroll
@@ -322,6 +334,16 @@ Step 3: To figure out your local solar irradiance rates and effective Peak Sun H
       if (item.id === id) {
         const validatedHours = Math.min(24, Math.max(0.5, hours));
         return { ...item, hours: validatedHours };
+      }
+      return item;
+    }));
+  };
+
+  const adjustApplianceWatts = (id: string, watts: number) => {
+    setAppliancesList(prev => prev.map(item => {
+      if (item.id === id) {
+        const validatedWatts = Math.max(1, watts);
+        return { ...item, watts: validatedWatts };
       }
       return item;
     }));
@@ -1375,11 +1397,24 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                       key={item.id}
                       className="border border-solar-border/60 hover:border-solar-border p-3.5 rounded-2xl flex items-center justify-between gap-5 transition"
                     >
-                      <div className="w-1/2">
+                      <div className="w-1/2 flex flex-col gap-1.5">
                         <h4 className="text-xs font-black text-solar-text leading-tight">{isAr ? item.nameAr : item.nameEn}</h4>
-                        <span className="text-[10px] text-solar-muted font-bold mt-0.5 block">
-                          {isAr ? `الاستهلاك التقريبي: ${item.watts} وات` : `Loads: ${item.watts}W`}
-                        </span>
+                        <div className="flex items-center gap-1.5 focus-within:text-solar-blue transition-colors">
+                          <span className="text-[10px] text-solar-muted font-bold whitespace-nowrap">
+                            {isAr ? 'القدرة (وات):' : 'Power (W):'}
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="15000"
+                            value={item.watts || ''}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              adjustApplianceWatts(item.id, val);
+                            }}
+                            className="w-16 px-1.5 py-0.5 text-[10px] font-black text-solar-text text-center border border-solar-border/75 rounded-lg focus:border-solar-blue focus:ring-1 focus:ring-solar-blue/20 bg-solar-light/35 focus:bg-white outline-none transition"
+                          />
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-6">
