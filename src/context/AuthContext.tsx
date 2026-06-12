@@ -4,11 +4,10 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  sendEmailVerification,
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, query, where, getDocs, onSnapshot } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { User } from "../types";
 
@@ -28,59 +27,75 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubUserDoc: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubUserDoc) {
+        unsubUserDoc();
+        unsubUserDoc = null;
+      }
+
       if (firebaseUser) {
         // Clear mock local auth
         localStorage.removeItem("enerjoo_mock_auth_uid");
         
         const userDocRef = doc(db, "users", firebaseUser.uid);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          let isVerified = data.verified || firebaseUser.emailVerified;
-          
-          // Sync if changed
-          if (firebaseUser.emailVerified && !data.verified) {
-            await setDoc(userDocRef, { verified: true }, { merge: true });
-            isVerified = true;
-          }
+        unsubUserDoc = onSnapshot(userDocRef, async (userDoc) => {
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            let isVerified = data.type === 'customer' || data.type === 'admin' || data.verified || firebaseUser.emailVerified;
+            
+            // Sync if changed
+            if ((data.type === 'customer' || data.type === 'admin') && !data.verified) {
+              await setDoc(userDocRef, { verified: true }, { merge: true });
+              isVerified = true;
+            }
 
-          setUser({ uid: firebaseUser.uid, ...data, verified: isVerified } as User);
-        } else {
-          setUser({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || "",
-            name: "User",
-            nameAr: "مستخدم",
-            type: "customer"
-          } as User);
-        }
-        setLoading(false);
+            setUser({ uid: firebaseUser.uid, ...data, verified: isVerified } as User);
+          } else {
+            setUser({
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || "",
+              name: "User",
+              nameAr: "مستخدم",
+              type: "customer",
+              verified: true
+            } as User);
+          }
+          setLoading(false);
+        }, (err) => {
+          console.error("User snapshot listening error:", err);
+          setLoading(false);
+        });
       } else {
         // Check for local mock auth session
         const mockUid = localStorage.getItem("enerjoo_mock_auth_uid");
         if (mockUid) {
-          try {
-            const userDocRef = doc(db, "users", mockUid);
-            const userDoc = await getDoc(userDocRef);
+          const userDocRef = doc(db, "users", mockUid);
+          unsubUserDoc = onSnapshot(userDocRef, (userDoc) => {
             if (userDoc.exists()) {
               setUser({ uid: mockUid, ...userDoc.data() } as User);
             } else {
               setUser(null);
               localStorage.removeItem("enerjoo_mock_auth_uid");
             }
-          } catch (e) {
-            console.error("Local mock auth error:", e);
+            setLoading(false);
+          }, (err) => {
+            console.error("Mock user snapshot error:", err);
             setUser(null);
-          }
+            setLoading(false);
+          });
         } else {
           setUser(null);
+          setLoading(false);
         }
-        setLoading(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubUserDoc) unsubUserDoc();
+    };
   }, []);
 
   const register = async (email: string, password: string, additionalData: any = {}) => {
@@ -90,12 +105,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const res = await createUserWithEmailAndPassword(auth, email, password);
       
-      try {
-        await sendEmailVerification(res.user);
-      } catch (err) {
-        console.error("Error sending verification email:", err);
-      }
-
       const userData: User = {
         uid: res.user.uid,
         email: email,
@@ -106,7 +115,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         location: additionalData.location || "Cairo, Egypt",
         phone: additionalData.phone || "",
         avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${res.user.uid}`,
-        verified: userRole === 'admin' ? true : false,
+        verified: userRole === 'admin' || userRole === 'customer',
         createdAt: new Date().toISOString()
       };
       await setDoc(doc(db, "users", res.user.uid), userData);

@@ -65,12 +65,6 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       setReviewError(isAr ? 'يرجى تسجيل الدخول أولاً' : 'Please sign in first');
       return;
     }
-    
-    // Check if user is email-verified (admin is implicitly bypass verified)
-    if (user.type !== 'admin' && !auth.currentUser?.emailVerified) {
-      setReviewError(isAr ? 'عذراً، يرجى تفعيل حسابك عن طريق بريدك الإلكتروني أولاً لتتمكن من كتابة تقييم.' : 'Sorry, you must verify your email address before you can submit a review.');
-      return;
-    }
 
     if (!newComment.trim()) {
       setReviewError(isAr ? 'يرجى كتابة تعليق' : 'Please write a comment');

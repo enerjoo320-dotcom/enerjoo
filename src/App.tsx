@@ -34,14 +34,10 @@ import { calculateRelevanceScore, hybridSort } from './utils/searchUtils';
 import { Product, Supplier, ViewType, Filters, AdvancedFilters } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations } from './translations';
-import { sendEmailVerification } from 'firebase/auth';
 import { auth } from './lib/firebase';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
-  
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
   
   // Default consistently to Arabic
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
@@ -73,22 +69,6 @@ export default function App() {
 
   const isAr = lang === 'ar';
   const t = translations[lang];
-
-  const handleResendVerification = async () => {
-    if (auth.currentUser) {
-      setResendLoading(true);
-      try {
-        await sendEmailVerification(auth.currentUser);
-        setResendSuccess(true);
-        setTimeout(() => setResendSuccess(false), 5000);
-      } catch (err) {
-        console.error("Resend verification failed:", err);
-        alert(lang === 'ar' ? 'فشل إرسال رابط التحقق. يرجى الانتظار دقيقة والمحاولة مجدداً.' : 'Failed to send verification link. Please wait a minute and try again.');
-      } finally {
-        setResendLoading(false);
-      }
-    }
-  };
 
   // Persist language selections in localStorage & configure document layout dynamically
   useEffect(() => {
@@ -205,10 +185,6 @@ export default function App() {
   const toggleWishlist = (product: Product) => {
     if (!user) {
       setView('login');
-      return;
-    }
-    if (user.type !== 'admin' && !auth.currentUser?.emailVerified) {
-      alert(isAr ? 'عذراً، يرجى تفعيل حسابك عن طريق بريدك الإلكتروني أولاً لتتمكن من إضافة المكونات للمفضلة.' : 'Sorry, you must verify your email address before you can save products to your wishlist.');
       return;
     }
     setWishlist(prev => {
@@ -610,33 +586,8 @@ export default function App() {
       
       {user && (
         <div className="max-w-7xl mx-auto px-4 mt-2">
-          {/* Case 1: Email not verified */}
-          {!auth.currentUser?.emailVerified && user.type !== 'admin' && (
-            <div className="bg-amber-500 text-white text-xs py-3.5 px-4 font-bold flex flex-col sm:flex-row items-center justify-between gap-3 rounded-2xl border border-amber-600/30 shadow-md">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">⚠️</span>
-                <span>
-                  {isAr
-                    ? 'تنبيه: بريدك الإلكتروني غير مفعّل بعد. يرجى تفعيل حسابك من خلال رابط التفعيل المرسل لبريدك الإلكتروني لتتمكن من كتابة مراجعات أو حفظ منتجات بالمفضلة.'
-                    : 'Notice: Your email is not verified yet. Please check your inbox and click the link to verify your account to unlock reviews and wishlist keys.'}
-                </span>
-              </div>
-              <button
-                onClick={handleResendVerification}
-                disabled={resendLoading || resendSuccess}
-                className="bg-white text-amber-600 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-slate-50 transition shrink-0 shadow-sm"
-              >
-                {resendLoading 
-                  ? (isAr ? 'جاري الإرسال...' : 'Sending...') 
-                  : resendSuccess 
-                    ? (isAr ? 'تم الإرسال بنجاح!' : 'Sent successfully!') 
-                    : (isAr ? 'إعادة إرسال رابط التفعيل' : 'Resend verification email')}
-              </button>
-            </div>
-          )}
-
-          {/* Case 2: Supplier, email is verified, but admin has not approved them yet */}
-          {user.type === 'supplier' && !user.verified && auth.currentUser?.emailVerified && (
+          {/* Case 2: Supplier, but admin has not approved them yet */}
+          {user.type === 'supplier' && !user.verified && (
             <div className="bg-blue-600 text-white text-xs py-3.5 px-4 font-bold flex items-center justify-center gap-2 rounded-2xl border border-blue-700/30 shadow-md">
               <span className="text-sm">🕒</span>
               <span>
