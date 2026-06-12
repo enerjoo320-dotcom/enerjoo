@@ -3,7 +3,10 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendEmailVerification,
+  GoogleAuthProvider,
+  signInWithPopup
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
@@ -14,6 +17,7 @@ type AuthContextType = {
   loading: boolean;
   register: (email: string, password: string, additionalData?: any) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (role?: 'customer' | 'supplier') => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -60,6 +64,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const register = async (email: string, password: string, additionalData: any = {}) => {
     const res = await createUserWithEmailAndPassword(auth, email, password);
+    
+    try {
+      await sendEmailVerification(res.user);
+    } catch (err) {
+      console.error("Error sending verification email:", err);
+    }
+
     const adminEmails = ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com'];
     const userRole = adminEmails.includes(email.toLowerCase()) ? 'admin' : (additionalData.type || "customer");
     
@@ -84,12 +95,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await signInWithEmailAndPassword(auth, email, password);
   };
 
+  const signInWithGoogle = async (role: 'customer' | 'supplier' = 'customer') => {
+    const provider = new GoogleAuthProvider();
+    const res = await signInWithPopup(auth, provider);
+    const userDocRef = doc(db, "users", res.user.uid);
+    const userDoc = await getDoc(userDocRef);
+
+    if (!userDoc.exists()) {
+      const adminEmails = ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com'];
+      const userRole = res.user.email && adminEmails.includes(res.user.email.toLowerCase()) ? 'admin' : role;
+      
+      const userData: User = {
+        uid: res.user.uid,
+        email: res.user.email || "",
+        name: res.user.displayName || "User",
+        nameAr: res.user.displayName || "مستخدم جديد",
+        type: userRole,
+        company: "",
+        location: "Cairo, Egypt",
+        phone: "",
+        avatar: res.user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${res.user.uid}`,
+        // Admin accounts or non-suppliers (customers) signing in with Google are verified immediately.
+        // Suppliers registering with Google still require admin approval (verified: false).
+        verified: userRole === 'admin' || userRole === 'customer',
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(userDocRef, userData);
+      setUser(userData);
+    } else {
+      setUser({ uid: res.user.uid, ...userDoc.data() } as User);
+    }
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, register, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, register, login, signInWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   );

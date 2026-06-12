@@ -99,6 +99,12 @@ export const ProductForm: React.FC<{
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (user?.type === 'supplier' && !user?.verified) {
+      alert(lang === 'ar' ? 'بصفتك مورداً، يجب التحقق من حسابك والموافقة عليه قبل التمكن من نشر المنتجات.' : 'As a supplier, your account must be verified and approved by admin before you can publish products.');
+      return;
+    }
+
     setIsUploading(true);
     
     try {

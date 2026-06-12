@@ -138,8 +138,18 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
 
         {user?.type === 'supplier' && (
           <button 
-            onClick={() => setView('add')}
-            className="bg-solar-blue text-white px-6 py-3 rounded-2xl font-black flex items-center justify-center gap-2 shadow-xl shadow-solar-blue/20 transition active:scale-95"
+            onClick={() => {
+              if (!user?.verified) {
+                alert(isAr ? 'عذراً، حسابك بانتظار توثيق وموافقة الإدارة قبل التمكن من إضافة منتجات.' : 'Your account is pending admin verification and approval before you can add products.');
+                return;
+              }
+              setView('add');
+            }}
+            className={`px-6 py-3 rounded-2xl font-black flex items-center justify-center gap-2 transition active:scale-95 ${
+              !user?.verified 
+                ? 'bg-solar-border text-solar-muted cursor-not-allowed opacity-70' 
+                : 'bg-solar-blue text-white shadow-xl shadow-solar-blue/20 hover:opacity-90'
+            }`}
           >
             <Plus size={20} />
             {t.addNew}
@@ -210,8 +220,18 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
             <p className="text-solar-muted font-bold mb-8">{isAr ? 'ابدأ بإضافة منتجاتك لتظهر لعملائك' : 'Start adding your products to show them to your customers'}</p>
             {user?.type === 'supplier' && (
               <button 
-                onClick={() => setView('add')}
-                className="bg-solar-blue text-white px-8 py-4 rounded-2xl font-black shadow-xl shadow-solar-blue/20 transition hover:scale-105 active:scale-95"
+                onClick={() => {
+                  if (!user?.verified) {
+                    alert(isAr ? 'عذراً، حسابك بانتظار توثيق وموافقة الإدارة قبل التمكن من إضافة منتجات.' : 'Your account is pending admin verification and approval before you can add products.');
+                    return;
+                  }
+                  setView('add');
+                }}
+                className={`px-8 py-4 rounded-2xl font-black transition ${
+                  !user?.verified 
+                    ? 'bg-solar-border text-solar-muted cursor-not-allowed opacity-70' 
+                    : 'bg-solar-blue text-white shadow-xl shadow-solar-blue/20 hover:scale-105 active:scale-95'
+                }`}
               >
                 {t.addNew}
               </button>

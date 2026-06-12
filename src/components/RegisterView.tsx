@@ -4,12 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import { translations } from '../translations';
 import { ViewType } from '../types';
 import { motion } from 'motion/react';
+import { SecurityCaptcha } from './SecurityCaptcha';
 
 export const RegisterView: React.FC<{ 
   lang: 'ar' | 'en'; 
   setView: (view: ViewType) => void;
 }> = ({ lang, setView }) => {
-  const { register } = useAuth();
+  const { register, signInWithGoogle } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
   
@@ -25,6 +26,7 @@ export const RegisterView: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
+  const [captchaVerified, setCaptchaVerified] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +37,11 @@ export const RegisterView: React.FC<{
 
     if (formData.password.length < 6) {
       setError(isAr ? 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' : 'Password must be at least 6 characters');
+      return;
+    }
+
+    if (!captchaVerified) {
+      setError(isAr ? 'يرجى إكمال التحقق الأمني أولاً (أنا لست برنامج روبوت)' : "Please complete the security verification first (I'm not a robot)");
       return;
     }
 
@@ -53,7 +60,7 @@ export const RegisterView: React.FC<{
       
       setTimeout(() => {
         setView('home');
-      }, 2000);
+      }, 5000);
     } catch (err: any) {
       console.error("Registration Error:", err);
       let message = isAr ? 'فشل التسجيل' : 'Registration failed';
@@ -67,9 +74,27 @@ export const RegisterView: React.FC<{
       } else if (err.code === 'auth/invalid-email') {
         message = isAr ? 'البريد الإلكتروني غير صالح' : 'Invalid email address';
       } else if (err.code === 'auth/operation-not-allowed') {
-        message = isAr ? 'هذه العملية غير مسموح بها حالياً' : 'This operation is not allowed right now';
+        message = isAr ? 'تسجيل الموردين بالبريد غير مفعّل في لوحة Firebase الخاصة بك حالياً' : 'Email authentication is not enabled in your Firebase console';
       }
       
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      await signInWithGoogle(role);
+      setIsSuccess(true);
+      setTimeout(() => {
+        setView('home');
+      }, 3000);
+    } catch (err: any) {
+      console.error("Google Registration Error:", err);
+      let message = isAr ? 'فشل التسجيل باستخدام Google' : 'Google registration failed';
       setError(message);
     } finally {
       setIsLoading(false);
@@ -98,10 +123,20 @@ export const RegisterView: React.FC<{
           <h2 className="text-3xl font-black text-solar-text mb-4">
             {isAr ? 'تم التسجيل بنجاح!' : 'Successfully Registered!'}
           </h2>
-          <p className="text-solar-muted font-bold leading-relaxed">
+          <p className="text-solar-muted font-bold leading-relaxed mb-4">
             {isAr 
-              ? 'مرحباً بك في إنرجو (enerjoo). نأخذك الآن إلى لوحة التحكم الخاصة بك...' 
-              : 'Welcome to enerjoo. Redirecting you to your dashboard...'}
+              ? 'مرحباً بك في إنرجو (enerjoo). لقد أرسلنا رابط تفعيل إلى بريدك الإلكتروني.'
+              : 'Welcome to enerjoo. We have sent a verification link to your email.'}
+          </p>
+          {role === 'supplier' && (
+            <div className="p-4 bg-solar-blue/5 text-solar-blue rounded-2xl border border-solar-blue/10 text-xs font-bold mb-4 leading-relaxed">
+              {isAr
+                ? 'ملاحظة للموردين: حسابك الآن حالته "بانتظار موافقة الإدارة" (Pending Approval). لن تتمكن من إضافة منتجاتك حتى يقوم المشرف بتفعيل حسابك.'
+                : 'Notice for Suppliers: Your account is set to "Pending Approval". You cannot publish products until an administrator approves your status.'}
+            </div>
+          )}
+          <p className="text-solar-muted text-xs font-bold">
+            {isAr ? 'جاري توجيهك إلى التطبيق...' : 'Redirecting you to the application...'}
           </p>
         </div>
       </motion.div>
@@ -246,12 +281,35 @@ export const RegisterView: React.FC<{
           )}
         </div>
 
+        <SecurityCaptcha lang={lang} onVerify={setCaptchaVerified} />
+
         <button 
           type="submit"
           disabled={isLoading}
-          className="w-full bg-solar-blue text-white py-4 rounded-2xl font-black hover:bg-opacity-90 shadow-xl shadow-solar-blue/20 transition-all active:scale-95 flex items-center justify-center gap-2 mt-4"
+          className="w-full bg-solar-blue text-white py-4 rounded-xl font-black hover:bg-opacity-90 shadow-xl shadow-solar-blue/20 transition-all active:scale-95 flex items-center justify-center gap-2 mt-4 text-sm"
         >
           {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : t.register}
+        </button>
+
+        <div className="flex items-center my-4">
+          <div className="flex-1 border-t border-solar-border"></div>
+          <span className="px-3 text-xs text-solar-muted font-bold">{isAr ? 'أو' : 'OR'}</span>
+          <div className="flex-1 border-t border-solar-border"></div>
+        </div>
+
+        <button 
+          type="button"
+          disabled={isLoading}
+          onClick={handleGoogleSignUp}
+          className="w-full bg-white text-solar-text border border-solar-border py-4 rounded-xl font-black hover:bg-slate-50 shadow-sm flex items-center justify-center gap-3 transition-all active:scale-95 text-xs"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.48 14.98 1 12 1 7.35 1 3.37 3.65 1.41 7.54l3.88 3C6.22 7.74 8.88 5.04 12 5.04z" />
+            <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.45h6.45c-.28 1.47-1.11 2.72-2.36 3.56l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z" />
+            <path fill="#FBBC05" d="M5.29 14.3C5.03 13.52 4.88 12.69 4.88 11.83c0-.86.15-1.69.41-2.47L1.41 6.36C.51 8.16 0 10.15 0 12.27c0 2.12.51 4.11 1.41 5.91l3.88-3.88z" />
+            <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.1.74-2.5 1.18-4.3 1.18-3.12 0-5.78-2.7-6.71-5.5l-3.88 3C3.37 20.35 7.35 23 12 23z" />
+          </svg>
+          {isAr ? 'تسجيل بواسطة Google' : 'Sign up with Google'}
         </button>
 
         <div className="text-center pt-6 border-t border-solar-border">
