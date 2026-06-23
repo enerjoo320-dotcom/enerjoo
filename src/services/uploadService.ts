@@ -2,8 +2,8 @@
  * Service for uploading files to Cloudinary using Unsigned Uploads.
  */
 export async function uploadFile(file: File): Promise<string> {
-  const cloudName = (import.meta as any).env.VITE_CLOUDINARY_CLOUD_NAME;
-  const uploadPreset = (import.meta as any).env.VITE_CLOUDINARY_UPLOAD_PRESET;
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
   // Graceful fallback if not configured
   if (!cloudName || !uploadPreset) {

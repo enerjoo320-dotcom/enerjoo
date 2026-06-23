@@ -19,6 +19,7 @@ export interface Supplier {
   phone: string;
   location: string;
   verified: boolean;
+  rejected?: boolean;
   lastUpdate: string;
   email?: string;
   avatar?: string;

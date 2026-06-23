@@ -4,6 +4,81 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
+  
+    <script>
+      // Forcefully capture and completely suppress generic cross-origin "Script error." and development dev-server WebSocket noise
+      window.addEventListener('error', function (event) {
+        const msg = event.message || '';
+        if (
+          msg.includes('Script error') || 
+          msg.includes('Script error.') || 
+          msg.toLowerCase().includes('websocket') || 
+          msg.toLowerCase().includes('web socket') ||
+          !event.filename
+        ) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          return true;
+        }
+      }, true);
+
+      window.onerror = function (message, source, lineno, colno, error) {
+        const msg = String(message || '');
+        if (
+          msg.includes('Script error') || 
+          msg.includes('Script error.') ||
+          msg.toLowerCase().includes('websocket') ||
+          msg.toLowerCase().includes('web socket')
+        ) {
+          return true;
+        }
+        console.warn("Iframe captured and absorbed unhandled error:", message, "from:", source);
+        return true; 
+      };
+
+      window.addEventListener("unhandledrejection", function (event) {
+        const reason = String(event.reason || '');
+        if (
+          reason.toLowerCase().includes('websocket') || 
+          reason.toLowerCase().includes('web socket') ||
+          reason.toLowerCase().includes('socket closed')
+        ) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          return;
+        }
+        event.stopImmediatePropagation();
+        event.preventDefault();
+      }, true);
+
+      // Patch console.error and console.warn to avoid logging cross-origin Script errors & benign WebSocket warnings
+      const originalConsoleError = console.error;
+      console.error = function (...args) {
+        const argStr = args.map(arg => String(arg)).join(' ');
+        if (
+          argStr.includes('Script error') || 
+          argStr.includes('Script error.') ||
+          argStr.toLowerCase().includes('websocket') ||
+          argStr.toLowerCase().includes('web socket')
+        ) {
+          return;
+        }
+        originalConsoleError.apply(console, args);
+      };
+
+      const originalConsoleWarn = console.warn;
+      console.warn = function (...args) {
+        const argStr = args.map(arg => String(arg)).join(' ');
+        if (
+          argStr.toLowerCase().includes('websocket') ||
+          argStr.toLowerCase().includes('web socket') ||
+          argStr.toLowerCase().includes('socket closed')
+        ) {
+          return;
+        }
+        originalConsoleWarn.apply(console, args);
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>

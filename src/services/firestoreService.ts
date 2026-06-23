@@ -91,6 +91,7 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
           location: data.location || '',
           phone: data.phone || '',
           verified: data.verified || false,
+          rejected: data.rejected || false,
           email: data.email || '',
           avatar: data.avatar || '',
           rating: data.rating || 0,
@@ -197,7 +198,25 @@ export const deleteProduct = async (productId: string) => {
 export const toggleSupplierVerification = async (uid: string, verified: boolean) => {
   try {
     const docRef = doc(db, USERS_COLLECTION, uid);
-    await updateDoc(docRef, { verified });
+    await updateDoc(docRef, { 
+      verified,
+      rejected: false 
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);
+  }
+};
+
+export const updateSupplierStatus = async (uid: string, status: 'approved' | 'pending' | 'rejected') => {
+  try {
+    const docRef = doc(db, USERS_COLLECTION, uid);
+    if (status === 'approved') {
+      await updateDoc(docRef, { verified: true, rejected: false });
+    } else if (status === 'rejected') {
+      await updateDoc(docRef, { verified: false, rejected: true });
+    } else {
+      await updateDoc(docRef, { verified: false, rejected: false });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);
   }

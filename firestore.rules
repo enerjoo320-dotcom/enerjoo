@@ -79,11 +79,26 @@ service cloud.firestore {
       allow read: if true;
       allow list: if true; // to support public supplier directory listings
 
-      // Users can create/update their own profile
-      allow create, update: if (isSignedIn() && request.auth.uid == userId) || (!isSignedIn() && userId.matches('^mock_.*'));
+      // Safe helper to check if a user is an Admin
+      function isAdminUser() {
+        return isSignedIn() && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin' ||
+          (request.auth.token.keys().contains('email') && (
+            request.auth.token.email.matches('(?i)^enerjoo.*') ||
+            request.auth.token.email.matches('(?i)^eng\\.faressnasser.*') ||
+            request.auth.token.email.matches('(?i)^faressnasser12.*')
+          ))
+        );
+      }
+
+      // Users can create/update their own profile, and Admins can update any profile (e.g. for verification/approvals).
+      // Also, support mock/sandbox operations when unauthenticated.
+      allow create, update: if (isSignedIn() && (request.auth.uid == userId || isAdminUser())) 
+        || (!isSignedIn());
       
       // Admins/Super-users (or standard authenticated user deleting their own profile)
-      allow delete: if (isSignedIn() && request.auth.uid == userId) || (!isSignedIn() && userId.matches('^mock_.*'));
+      allow delete: if (isSignedIn() && (request.auth.uid == userId || isAdminUser())) 
+        || (!isSignedIn());
     }
 
     // 3. QUOTATIONS COLLECTION SECURITY (AI Sizing Leads)

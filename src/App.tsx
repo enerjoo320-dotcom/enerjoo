@@ -35,12 +35,16 @@ import { Product, Supplier, ViewType, Filters, AdvancedFilters } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations } from './translations';
 import { auth } from './lib/firebase';
+import { safeLocalStorage } from './utils/safeStorage';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
   
-  // Default consistently to Arabic
-  const [lang, setLang] = useState<'ar' | 'en'>('ar');
+  // Default consistently to Arabic with safe storage fallback
+  const [lang, setLang] = useState<'ar' | 'en'>(() => {
+    const saved = safeLocalStorage.getItem('enerjoo_lang');
+    return (saved === 'ar' || saved === 'en') ? saved : 'ar';
+  });
 
   const [view, setView] = useState<ViewType>('home');
   const [products, setProducts] = useState<Product[]>([]);
@@ -70,9 +74,9 @@ export default function App() {
   const isAr = lang === 'ar';
   const t = translations[lang];
 
-  // Persist language selections in localStorage & configure document layout dynamically
+  // Persist language selections in safeLocalStorage & configure document layout dynamically
   useEffect(() => {
-    localStorage.setItem('enerjoo_lang', lang);
+    safeLocalStorage.setItem('enerjoo_lang', lang);
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   }, [lang]);
@@ -582,7 +586,9 @@ export default function App() {
 
   return (
     <div className={`min-h-screen bg-solar-bg ${isAr ? 'rtl' : 'ltr'}`} dir={isAr ? 'rtl' : 'ltr'}>
-      <Header lang={lang} setLang={setLang} user={user} onLogout={logout} setView={setView} />
+      {view !== 'login' && view !== 'register' && (
+        <Header lang={lang} setLang={setLang} user={user} onLogout={logout} setView={setView} />
+      )}
       
       {user && (
         <div className="max-w-7xl mx-auto px-4 mt-2">
