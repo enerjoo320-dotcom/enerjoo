@@ -17,7 +17,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang
   const navItems: { id: ViewType; icon: React.ReactNode; label: string; show: boolean }[] = [
     { id: 'home', icon: <Home size={20} strokeWidth={2.5} />, label: t.home, show: true },
     { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: user?.type !== 'admin' },
-    { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: true },
+    { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: user?.type !== 'supplier' },
     { id: 'wishlist', icon: <Heart size={20} strokeWidth={2.5} />, label: t.wishlist, show: user?.type !== 'admin' },
     { 
       id: user?.type === 'admin' ? 'admin-suppliers' : 'add', 

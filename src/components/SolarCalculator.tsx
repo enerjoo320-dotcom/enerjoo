@@ -784,15 +784,147 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
     };
   };
 
-  // Safe Firebase Leads submission to coordinate quotations
-  const submitLeadQuotation = async (e: React.FormEvent, priceSummary: number, systemDetail: string) => {
-    e.preventDefault();
+  // Helper to build fully dynamic WhatsApp message with complete customer, system and package specifications directly from the package object.
+  const buildDynamicWhatsAppMessage = (tier: 'budget' | 'recommended' | 'premium', currentCalc: any) => {
+    const selectedTierData = currentCalc.tiers[tier];
+    if (!selectedTierData) return '';
+
+    const sysLabel = isAr
+      ? (systemType === 'on-grid' ? 'متصل بالشبكة (On-Grid)' : systemType === 'off-grid' ? 'منفصل عن الشبكة (Off-Grid)' : systemType === 'hybrid' ? 'هجين (Hybrid)' : 'طلمبة ري (Solar Pump)')
+      : (systemType === 'on-grid' ? 'On-Grid' : systemType === 'off-grid' ? 'Off-Grid' : systemType === 'hybrid' ? 'Hybrid' : 'Water Pump');
+
+    const tierName = isAr
+      ? (tier === 'budget' ? 'الباقة الاقتصادية' : tier === 'premium' ? 'الباقة الفاخرة' : 'الباقة الموصى بها')
+      : (tier === 'budget' ? 'Budget' : tier === 'premium' ? 'Premium' : 'Recommended');
+
+    const annualYield = selectedTierData.financials?.annualYield || 0;
+    const annualSavings = selectedTierData.financials?.annualSavings || 0;
+
+    // Dynamic extraction of details from selectedTierData and user inputs
+    const customerName = leadForm.name || (isAr ? 'غير محدد' : 'Not Specified');
+    const customerPhone = leadForm.phone || (isAr ? 'غير محدد' : 'Not Specified');
+    const governorate = locationStr || cityChoice || (isAr ? 'غير محدد' : 'Not Specified');
+    const additionalNotes = leadForm.notes || (isAr ? 'لا يوجد' : 'None');
+
+    const panelQty = selectedTierData.panelQty || 0;
+    const panelBrand = selectedTierData.panel?.brand || (isAr ? 'غير محدد' : 'Not Specified');
+    const panelModel = selectedTierData.panel?.nameAr || selectedTierData.panel?.name || (isAr ? 'غير محدد' : 'Not Specified');
+    const panelPower = selectedTierData.panel?.power ? `${selectedTierData.panel.power} W` : (isAr ? 'غير محدد' : 'Not Specified');
+
+    const inverterBrand = selectedTierData.inverter?.brand || (isAr ? 'غير محدد' : 'Not Specified');
+    const inverterModel = selectedTierData.inverter?.nameAr || selectedTierData.inverter?.name || (isAr ? 'غير محدد' : 'Not Specified');
+
+    const batteryQty = selectedTierData.batteryQty || 0;
+    const batteryBrand = batteryQty > 0 ? (selectedTierData.battery?.brand || (isAr ? 'غير محدد' : 'Not Specified')) : (isAr ? 'لا يوجد (بدون بطاريات)' : 'None (No Batteries)');
+    const batteryCapacity = batteryQty > 0 ? `${selectedTierData.batteryPowerTotalKwh?.toFixed(1)} kWh` : (isAr ? 'لا يوجد' : 'None');
+
+    const mountingStructureCost = selectedTierData.mounting ? `${selectedTierData.mounting.toLocaleString()} ${isAr ? 'ج.م' : 'EGP'}` : (isAr ? 'غير محدد' : 'Not Specified');
+    const dcProtectionCost = selectedTierData.protection ? `${Math.round(selectedTierData.protection * 0.5).toLocaleString()} ${isAr ? 'ج.م' : 'EGP'}` : (isAr ? 'غير محدد' : 'Not Specified');
+    const acProtectionCost = selectedTierData.protection ? `${Math.round(selectedTierData.protection * 0.5).toLocaleString()} ${isAr ? 'ج.م' : 'EGP'}` : (isAr ? 'غير محدد' : 'Not Specified');
+    const dcCableCost = selectedTierData.cables ? `${Math.round(selectedTierData.cables * 0.55).toLocaleString()} ${isAr ? 'ج.م' : 'EGP'}` : (isAr ? 'غير محدد' : 'Not Specified');
+    const acCableCost = selectedTierData.cables ? `${Math.round(selectedTierData.cables * 0.45).toLocaleString()} ${isAr ? 'ج.م' : 'EGP'}` : (isAr ? 'غير محدد' : 'Not Specified');
+
+    const annualProductionStr = `${Math.round(annualYield).toLocaleString()} ${isAr ? 'كيلو واط ساعة / سنة' : 'kWh/year'}`;
+    const annualSavingsStr = `${Math.round(annualSavings).toLocaleString()} ${isAr ? 'ج.م / سنة' : 'EGP/year'}`;
+    const totalCostStr = `${selectedTierData.cost?.toLocaleString()} ${isAr ? 'ج.م' : 'EGP'}`;
+    const warrantyStr = isAr 
+      ? `ضمان الألواح حتى 12-25 سنة / الإنفرتر 5 سنوات (طبقاً لشروط المورد المعتمد)` 
+      : `Panels warranty up to 12-25 years / Inverter 5 years (under supplier terms)`;
+
+    if (isAr) {
+      return `مرحباً، أود الحصول على عرض سعر وتفاصيل لهذه الباقة عبر Enerjoo:\n\n` +
+             `👤 *بيانات العميل:*\n` +
+             `- الاسم بالكامل: ${customerName}\n` +
+             `- رقم الهاتف: ${customerPhone}\n` +
+             `- المحافظة/الموقع: ${governorate}\n` +
+             `- ملاحظات إضافية: ${additionalNotes}\n\n` +
+             `⚡ *مواصفات النظام الشمسى (System Details):*\n` +
+             `- نوع النظام: ${sysLabel}\n` +
+             `- الاستهلاك الشهري: ${kwhMonthly ? `${kwhMonthly} كيلو واط ساعة` : 'غير متاح (طلمبة ري)'}\n` +
+             `- الاستهلاك اليومي: ${currentCalc.loads.dailyKwh.toFixed(1)} كيلو واط ساعة / يوم\n` +
+             `- قدرة المحطة المطلوبة: ${selectedTierData.panelPowerTotalKw.toFixed(2)} كيلو واط\n\n` +
+             `📦 *تفاصيل الباقة المختارة (${tierName}):*\n` +
+             `- اسم الباقة: ${tierName}\n` +
+             `- عدد الألواح: ${panelQty} لوح\n` +
+             `- براند الألواح: ${panelBrand}\n` +
+             `- موديل الألواح: ${panelModel}\n` +
+             `- قدرة اللوح الواحد: ${panelPower}\n` +
+             `- براند الإنفرتر: ${inverterBrand}\n` +
+             `- موديل الإنفرتر: ${inverterModel}\n` +
+             `- براند البطاريات: ${batteryBrand}\n` +
+             `- سعة البطارية الإجمالية: ${batteryCapacity}\n` +
+             `- عدد البطاريات: ${batteryQty}\n` +
+             `- هيكل وتثبيت الألواح: هيكل ألومنيوم معتمد مقاوم للرياح (${mountingStructureCost})\n` +
+             `- أجهزة لوحة الحماية DC: شامل مجمع قواطع ومصاهر حماية التيار المستمر (${dcProtectionCost})\n` +
+             `- أجهزة لوحة الحماية AC: شامل قواطع وموانع صواعق وتأريض حماية التيار المتردد (${acProtectionCost})\n` +
+             `- كابلات التيار المستمر DC: كابلات نحاسية معتمدة مقاومة للحرارة والشمس (${dcCableCost})\n` +
+             `- كابلات التيار المتردد AC: كابلات ربط معتمدة شاملة (${acCableCost})\n` +
+             `- إنتاجية الطاقة السنوية المتوقعة: ${annualProductionStr}\n` +
+             `- الوفر المالي السنوي المتوقع: ${annualSavingsStr}\n` +
+             `- التكلفة الإجمالية الاسترشادية للباقة: ${totalCostStr}\n` +
+             `- فترة الضمان: ${warrantyStr}`;
+    } else {
+      return `Hello, I'd like to get a custom quote for this package via Enerjoo:\n\n` +
+             `👤 *Customer Information:*\n` +
+             `- Full Name: ${customerName}\n` +
+             `- Phone Number: ${customerPhone}\n` +
+             `- Governorate/Location: ${governorate}\n` +
+             `- Additional Notes: ${additionalNotes}\n\n` +
+             `⚡ *System Details:*\n` +
+             `- System Type: ${sysLabel}\n` +
+             `- Monthly Consumption: ${kwhMonthly ? `${kwhMonthly} kWh` : 'Not Specified'}\n` +
+             `- Daily Consumption: ${currentCalc.loads.dailyKwh.toFixed(1)} kWh/day\n` +
+             `- Required System Size: ${selectedTierData.panelPowerTotalKw.toFixed(2)} kW\n\n` +
+             `📦 *Selected Package Details (${tierName}):*\n` +
+             `- Package Name: ${tierName}\n` +
+             `- Number of Panels: ${panelQty} panels\n` +
+             `- Panel Brand: ${panelBrand}\n` +
+             `- Panel Model: ${panelModel}\n` +
+             `- Panel Power: ${panelPower}\n` +
+             `- Inverter Brand: ${inverterBrand}\n` +
+             `- Inverter Model: ${inverterModel}\n` +
+             `- Battery Brand: ${batteryBrand}\n` +
+             `- Battery Capacity: ${batteryCapacity}\n` +
+             `- Number of Batteries: ${batteryQty}\n` +
+             `- Mounting Structure: Aluminum structural frame (${mountingStructureCost})\n` +
+             `- DC Protection: DC circuit breakers & fuses protection box (${dcProtectionCost})\n` +
+             `- AC Protection: AC breakers, surge protection devices & grounding system (${acProtectionCost})\n` +
+             `- DC Cable: Thermal resistant solar copper cables (${dcCableCost})\n` +
+             `- AC Cable: Standard connection AC cables set (${acCableCost})\n` +
+             `- Estimated Annual Production: ${annualProductionStr}\n` +
+             `- Estimated Annual Saving: ${annualSavingsStr}\n` +
+             `- Total Estimated Cost: ${totalCostStr}\n` +
+             `- Warranty: ${warrantyStr}`;
+    }
+  };
+
+  // Dynamic WhatsApp package booking with automatic Firestore lead submission
+  const handleRequestPackage = async (tier: 'budget' | 'recommended' | 'premium') => {
     if (!leadForm.name || !leadForm.phone) {
-      setLeadForm(prev => ({ ...prev, error: isAr ? 'يرجى ملء الاسم الكامل ورقم الهاتف الصحيح' : 'Full Name and Phone are required.' }));
+      setLeadForm(prev => ({ 
+        ...prev, 
+        error: isAr 
+          ? 'يرجى كتابة الاسم بالكامل ورقم الهاتف أولاً في قسم "سجل بياناتك" بالأسفل لتضمينها في الطلب.' 
+          : 'Please fill in your Full Name and Phone Number in the section below first to include them in the request.' 
+      }));
+      const element = document.getElementById('lead-form-section');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
       return;
     }
 
     setLeadForm(prev => ({ ...prev, loading: true, error: null }));
+
+    const currentCalc = runSolarCalculations();
+    const selectedTierData = currentCalc.tiers[tier];
+    if (!selectedTierData) {
+      setLeadForm(prev => ({ ...prev, loading: false }));
+      return;
+    }
+
+    const supplierPhone = selectedTierData.panel?.suppliers?.[0]?.phone || '201033253870';
+    const msg = buildDynamicWhatsAppMessage(tier, currentCalc);
 
     try {
       await addDoc(collection(db, 'quotations'), {
@@ -800,19 +932,17 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
         phone: leadForm.phone,
         notes: leadForm.notes || '',
         systemType,
-        targetTier: currentTier,
-        priceEstimate: priceSummary,
-        systemSpecs: systemDetail,
+        targetTier: tier,
+        priceEstimate: selectedTierData.cost,
+        systemSpecs: `${tier.toUpperCase()}: Panels=${selectedTierData.panelQty}pcs, Inverter=${selectedTierData.inverterQty}pcs, Battery=${selectedTierData.batteryQty}pcs`,
         location: locationStr || cityChoice,
         createdAt: serverTimestamp(),
         status: 'pending'
       });
-
       setLeadForm(prev => ({ ...prev, submitted: true, loading: false }));
     } catch (err: any) {
       console.error(err);
       
-      // Maintain complaint structured error reporting as per Firestore Guidelines
       try {
         const errInfo = {
           error: err instanceof Error ? err.message : String(err),
@@ -827,14 +957,76 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
         console.error('Firestore Error:', JSON.stringify(errInfo));
       } catch (logErr) {}
 
+      setLeadForm(prev => ({ ...prev, loading: false }));
+    }
+
+    window.open(`https://wa.me/${supplierPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  // Dynamic WhatsApp contact for a specific supplier with automatic Firestore lead submission
+  const handleRequestSupplierDirect = async (sup: any) => {
+    if (!leadForm.name || !leadForm.phone) {
       setLeadForm(prev => ({ 
         ...prev, 
-        loading: false, 
         error: isAr 
-          ? 'عذراً، فشل تسجيل الطلب في السحابة حالياً، لكن يمكنك مراجعة وتصفح المنتجات في الكتالوج والتواصل مع الموردين بمكالمة هاتفية فورية بالضغط على المنتج.'
-          : 'Failed to submit quote inquiry. Please contact our suppliers directly from the product lists below.' 
+          ? 'يرجى كتابة الاسم بالكامل ورقم الهاتف أولاً في قسم "سجل بياناتك" بالأسفل لتضمينها في الطلب.' 
+          : 'Please fill in your Full Name and Phone Number in the section below first to include them in the request.' 
       }));
+      const element = document.getElementById('lead-form-section');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
     }
+
+    setLeadForm(prev => ({ ...prev, loading: true, error: null }));
+
+    const currentCalc = runSolarCalculations();
+    const selectedTierData = currentCalc.tiers[currentTier];
+    if (!selectedTierData) {
+      setLeadForm(prev => ({ ...prev, loading: false }));
+      return;
+    }
+
+    const cleanPhone = sup.phone.replace(/\+/g, '').replace(/\s+/g, '');
+    const msg = buildDynamicWhatsAppMessage(currentTier, currentCalc);
+
+    try {
+      await addDoc(collection(db, 'quotations'), {
+        name: leadForm.name,
+        phone: leadForm.phone,
+        notes: leadForm.notes || '',
+        systemType,
+        targetTier: currentTier,
+        priceEstimate: selectedTierData.cost,
+        systemSpecs: `${currentTier.toUpperCase()}: Panels=${selectedTierData.panelQty}pcs, Inverter=${selectedTierData.inverterQty}pcs, Battery=${selectedTierData.batteryQty}pcs`,
+        location: locationStr || cityChoice,
+        createdAt: serverTimestamp(),
+        status: 'pending',
+        supplierContacted: sup.name
+      });
+      setLeadForm(prev => ({ ...prev, submitted: true, loading: false }));
+    } catch (err: any) {
+      console.error(err);
+      
+      try {
+        const errInfo = {
+          error: err instanceof Error ? err.message : String(err),
+          operationType: 'create',
+          path: 'quotations',
+          authInfo: {
+            userId: null,
+            email: null,
+            emailVerified: null,
+          }
+        };
+        console.error('Firestore Error:', JSON.stringify(errInfo));
+      } catch (logErr) {}
+
+      setLeadForm(prev => ({ ...prev, loading: false }));
+    }
+
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const currentSelection = step === 'results' ? runSolarCalculations() : null;
@@ -1854,6 +2046,26 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                 </div>
               </div>
 
+              {/* Package Action Button */}
+              <div className="pt-4 border-t border-solar-border/70 flex flex-col items-center">
+                <button
+                  onClick={() => handleRequestPackage(currentTier)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-black text-xs sm:text-sm py-4 px-6 rounded-2xl cursor-pointer flex items-center justify-center gap-2.5 transition duration-200 shadow-lg shadow-emerald-600/15"
+                >
+                  <PhoneCall size={18} />
+                  <span>
+                    {isAr 
+                      ? `اطلب ${currentTier === 'budget' ? 'الباقة الاقتصادية' : currentTier === 'premium' ? 'الباقة الفاخرة' : 'الباقة الموصى بها'} الآن (تواصل عبر WhatsApp) 💬` 
+                      : `Order ${currentTier === 'budget' ? 'Budget' : currentTier === 'premium' ? 'Premium' : 'Recommended'} Package Now (WhatsApp) 💬`}
+                  </span>
+                </button>
+                <p className="text-[10px] text-solar-muted font-bold mt-2 text-center">
+                  {isAr 
+                    ? '* يرجى التأكد من ملء الاسم ورقم الهاتف في قسم "طلب عرض سعر" بالأسفل لتضمينها في الطلب.' 
+                    : '* Please ensure Name and Phone are entered in the registration section below to link your quote.'}
+                </p>
+              </div>
+
               {/* FIRST-CLASS CALL-TO-ACTION FOR PROMOTIONS: WhatsApp & Quote Firestore Registration Form */}
               <div className="bg-solar-light/50 border border-solar-blue/20 rounded-[36px] p-6 md:p-8 space-y-6">
                 
@@ -1872,7 +2084,7 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                   
                   {/* Lead Registration Form */}
-                  <div className="bg-white border border-solar-border p-5 rounded-[28px] shadow-sm text-right space-y-4">
+                  <div id="lead-form-section" className="bg-white border border-solar-border p-5 rounded-[28px] shadow-sm text-right space-y-4">
                     <h5 className="text-xs font-black text-solar-text border-b border-solar-border/70 pb-2 flex items-center justify-end gap-1.5">
                       <Calculator size={14} className="text-solar-blue" />
                       <span>{isAr ? 'سجل بياناتك كطلب عرض سعر' : 'Quotation Inquirer Form'}</span>
@@ -1891,14 +2103,7 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                         </p>
                       </div>
                     ) : (
-                      <form 
-                        onSubmit={(e) => submitLeadQuotation(
-                          e, 
-                          currentSelection.tiers[currentTier].cost, 
-                          `${currentTier.toUpperCase()}: Panels=${currentTierData.panelQty}pcs, Inverter=${currentTierData.inverterQty}pcs, Battery=${currentTierData.batteryQty}pcs`
-                        )} 
-                        className="space-y-3.5"
-                      >
+                      <div className="space-y-3.5">
                         <div className="space-y-1">
                           <label className="text-[11px] font-black text-solar-muted block">{isAr ? 'الاسم بالكامل' : 'Full Name'}</label>
                           <input 
@@ -1935,43 +2140,11 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                         </div>
 
                         {leadForm.error && (
-                          <div className="space-y-2">
-                            <div className="p-3 bg-red-50 text-red-700 text-[11px] font-bold rounded-lg border border-red-100">
-                              ⚠️ {leadForm.error}
-                            </div>
-                            
-                            <a
-                              href={`https://wa.me/${currentTierData?.panel?.suppliers?.[0]?.phone || '201033253870'}?text=${(() => {
-                                const sysLabel = isAr
-                                  ? (systemType === 'on-grid' ? 'متصل بالشبكة (On-Grid)' : systemType === 'off-grid' ? 'منفصل بالشبكة (Off-Grid)' : systemType === 'hybrid' ? 'هجين (Hybrid)' : 'طلمبة ري (Solar Pump)')
-                                  : systemType;
-                                const tierName = isAr
-                                  ? (currentTier === 'budget' ? 'الباقة الاقتصادية' : currentTier === 'premium' ? 'الباقة الفاخرة' : 'الباقة الموصى بها')
-                                  : (currentTier === 'budget' ? 'Budget' : currentTier === 'premium' ? 'Premium' : 'Recommended');
-                                const specsText = currentSelection ? `${currentTier.toUpperCase()}: الألواح=${currentTierData?.panelQty}، الإنفرتر=${currentTierData?.inverterQty}، البطاريات=${currentTierData?.batteryQty || 0}` : '';
-                                
-                                return encodeURIComponent(isAr 
-                                  ? `مرحباً، أود الحصول على عرض سعر عبر Enerjoo:\nالاسم: ${leadForm.name}\nالهاتف: ${leadForm.phone}\nنوع النظام: ${sysLabel}\nالباقة المختارة: ${tierName}\nالتكلفة الاسترشادية: ${(currentSelection?.tiers[currentTier]?.cost || 0).toLocaleString()} ج.م\nالتفاصيل الفنية: ${specsText}\nالموقع: ${locationStr || cityChoice}\nملاحظات: ${leadForm.notes || 'لا يوجد'}`
-                                  : `Hello, I'd like to get a solar quote via Enerjoo:\nName: ${leadForm.name}\nPhone: ${leadForm.phone}\nSystem Type: ${sysLabel}\nChosen Tier: ${tierName}\nCost Estimate: ${(currentSelection?.tiers[currentTier]?.cost || 0).toLocaleString()} EGP\nSpecs: ${specsText}\nLocation: ${locationStr || cityChoice}\nNotes: ${leadForm.notes || 'None'}`
-                                );
-                              })()}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3.5 rounded-xl cursor-pointer flex items-center justify-center gap-2 transition text-center shadow-sm"
-                            >
-                              <span>{isAr ? 'إرسال طلب عروض الأسعار مباشرة للمورد عبر WhatsApp 💬' : 'Send Sizing Inquiry directly via WhatsApp 💬'}</span>
-                            </a>
+                          <div className="p-3 bg-red-50 text-red-700 text-[11px] font-bold rounded-lg border border-red-100">
+                            ⚠️ {leadForm.error}
                           </div>
                         )}
-
-                        <button 
-                          type="submit"
-                          disabled={leadForm.loading}
-                          className="w-full bg-solar-blue hover:bg-solar-blue/95 disabled:bg-solar-blue/50 text-white font-black text-xs py-3 rounded-xl cursor-pointer"
-                        >
-                          {leadForm.loading ? (isAr ? 'جاري الإرسال...' : 'Submitting Inquiry...') : (isAr ? 'إرسال طلب عروض الأسعار المقترحة للـ 3 باقات 🚀' : 'Send Sizing Inquiry to Suppliers 🚀')}
-                        </button>
-                      </form>
+                      </div>
                     )}
                   </div>
 
@@ -1986,14 +2159,12 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                       <div className="space-y-2.5">
                         {currentTierData.panel && currentTierData.panel.suppliers && currentTierData.panel.suppliers.map((sup) => (
                           <div key={sup.id} className="p-3 border border-solar-border/40 hover:border-solar-border bg-solar-light/30 rounded-2xl flex justify-between items-center text-right transition">
-                            <a 
-                              href={`https://wa.me/${sup.phone}?text=${encodeURIComponent(isAr ? `مرحباً، أود الاستفسار عن تفاصيل تركيب المحطة الشمسية التي صممتها عبر Enerjoo بقدرة ${currentTierData.panelPowerTotalKw.toFixed(2)} كيلوواط بالتكلفة الاسترشادية: ${currentSelection.tiers[currentTier].cost.toLocaleString()} ج.م.` : `Hi, I am interested in continuous quote for my solar station designed on Enerjoo.`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button 
+                              onClick={() => handleRequestSupplierDirect(sup)}
                               className="bg-emerald-600 hover:bg-emerald-700 text-white p-2 px-3 rounded-xl text-[10px] font-black cursor-pointer flex items-center gap-1.5 transition shrink-0"
                             >
                               WhatsApp
-                            </a>
+                            </button>
                             
                             <div>
                               <h6 className="text-[11px] font-black text-solar-text flex items-center justify-end gap-1">

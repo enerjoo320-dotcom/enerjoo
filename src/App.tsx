@@ -253,40 +253,42 @@ export default function App() {
         }
         return (
           <div className="space-y-6 pb-20">
-            {/* AI Engineering Solar Sizing Promo Banner */}
-            <motion.div 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-gradient-to-r from-solar-blue via-indigo-600 to-indigo-700 text-white rounded-[32px] p-6 md:p-8 shadow-xl shadow-indigo-600/10 flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative"
-            >
-              <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
-              <div className="absolute bottom-0 left-0 w-48 h-48 bg-solar-blue/10 rounded-full blur-2xl -ml-16 -mb-16"></div>
-              
-              <div className="space-y-2 relative z-10 text-right md:text-right w-full md:w-3/4">
-                <div className="inline-flex items-center gap-1.5 bg-white/10 text-amber-300 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
-                  <Sparkles size={12} className="animate-pulse" />
-                  <span>{isAr ? 'ميزة حصرية هندسية' : 'EXCLUSIVE AI ENGINEERING'}</span>
-                </div>
-                <h2 className="text-xl md:text-2xl font-display font-black tracking-tight leading-snug">
-                  {isAr 
-                    ? 'صمم محطتك الشمسية المتكاملة واحسب تكاليفها بالذكاء الاصطناعي ⚡' 
-                    : 'Design Your Full Solar Station & Estimate Costs Instantly ⚡'}
-                </h2>
-                <p className="text-xs md:text-sm text-white/85 font-medium leading-relaxed max-w-2xl">
-                  {isAr 
-                    ? 'حدد نوع نظامك (متصل بالشبكة، نظام هجين، أو منفصل) واحسب استهلاكك أو حدد قائمة أجهزتك الخاصة، وسيقوم مهندسنا الذكي بمطابقة أفضل القطع والماركات المتاحة من الموردين وتوليد دراسة جدوى استرشادية مخصصة وعروض أسعار في ثوانٍ معدودة!' 
-                    : 'Select your target system architecture, calculate load or select appliances, and we will automatically engineer the design, match best brands, and output real-time Egyptian pricing estimates!'}
-                </p>
-              </div>
+             {/* AI Engineering Solar Sizing Promo Banner */}
+             {user?.type !== 'supplier' && (
+               <motion.div 
+                 initial={{ opacity: 0, y: -20 }}
+                 animate={{ opacity: 1, y: 0 }}
+                 className="bg-gradient-to-r from-solar-blue via-indigo-600 to-indigo-700 text-white rounded-[32px] p-6 md:p-8 shadow-xl shadow-indigo-600/10 flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative"
+               >
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
+                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-solar-blue/10 rounded-full blur-2xl -ml-16 -mb-16"></div>
+                 
+                 <div className="space-y-2 relative z-10 text-right md:text-right w-full md:w-3/4">
+                   <div className="inline-flex items-center gap-1.5 bg-white/10 text-amber-300 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
+                     <Sparkles size={12} className="animate-pulse" />
+                     <span>{isAr ? 'ميزة حصرية هندسية' : 'EXCLUSIVE AI ENGINEERING'}</span>
+                   </div>
+                   <h2 className="text-xl md:text-2xl font-display font-black tracking-tight leading-snug">
+                     {isAr 
+                       ? 'صمم محطتك الشمسية المتكاملة واحسب تكاليفها بالذكاء الاصطناعي ⚡' 
+                       : 'Design Your Full Solar Station & Estimate Costs Instantly ⚡'}
+                   </h2>
+                   <p className="text-xs md:text-sm text-white/85 font-medium leading-relaxed max-w-2xl">
+                     {isAr 
+                       ? 'حدد نوع نظامك (متصل بالشبكة، نظام هجين، أو منفصل) واحسب استهلاكك أو حدد قائمة أجهزتك الخاصة، وسيقوم مهندسنا الذكي بمطابقة أفضل القطع والماركات المتاحة من الموردين وتوليد دراسة جدوى استرشادية مخصصة وعروض أسعار في ثوانٍ معدودة!' 
+                       : 'Select your target system architecture, calculate load or select appliances, and we will automatically engineer the design, match best brands, and output real-time Egyptian pricing estimates!'}
+                   </p>
+                 </div>
 
-              <button 
-                onClick={() => setView('calculator')}
-                className="w-full md:w-auto shrink-0 bg-white hover:bg-amber-100 text-indigo-700 hover:text-indigo-800 font-black text-xs md:text-sm px-7 py-4 rounded-xl transition duration-300 transform hover:scale-105 active:scale-95 shadow-md shadow-black/10 cursor-pointer relative z-10 flex items-center justify-center gap-2"
-              >
-                <Calculator size={18} />
-                <span>{isAr ? 'ابدأ التصميم والاحتساب الذكي' : 'Start Sizing & Design'}</span>
-              </button>
-            </motion.div>
+                 <button 
+                   onClick={() => setView('calculator')}
+                   className="w-full md:w-auto shrink-0 bg-white hover:bg-amber-100 text-indigo-700 hover:text-indigo-800 font-black text-xs md:text-sm px-7 py-4 rounded-xl transition duration-300 transform hover:scale-105 active:scale-95 shadow-md shadow-black/10 cursor-pointer relative z-10 flex items-center justify-center gap-2"
+                 >
+                   <Calculator size={18} />
+                   <span>{isAr ? 'ابدأ التصميم والاحتساب الذكي' : 'Start Sizing & Design'}</span>
+                 </button>
+               </motion.div>
+             )}
 
             <FilterBar 
               lang={lang} 
