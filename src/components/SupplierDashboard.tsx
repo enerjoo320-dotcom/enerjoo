@@ -1,9 +1,11 @@
-import React from 'react';
-import { Package, Plus, Edit, Trash2, Search } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Package, Plus, Edit, Trash2, Search, Camera, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { translations } from '../translations';
 import { motion } from 'motion/react';
 import { Product, Supplier, ViewType } from '../types';
+import { uploadSupplierProfileImage } from '../services/uploadService';
+import { updateSupplierProfileImage } from '../services/firestoreService';
 
 interface SupplierDashboardProps {
   lang: 'ar' | 'en';
@@ -28,9 +30,30 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
   setAdminSearch,
   adminFilterId
 }) => {
-  const { user } = useAuth();
+  const { user, updateUserProfile } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    try {
+      setIsUploading(true);
+      const secureUrl = await uploadSupplierProfileImage(file);
+      await updateSupplierProfileImage(user.uid, secureUrl);
+      await updateUserProfile({ profileImage: secureUrl, avatar: secureUrl });
+    } catch (err) {
+      console.error('Error updating supplier profile image in dashboard:', err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
   const myProducts = products.filter(p => {
     if (adminFilterId) {
@@ -95,21 +118,74 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
       className="pb-20"
     >
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-        <div className="text-left">
-          <h1 className="text-3xl font-black text-solar-text">{t.dashboard}</h1>
-          <div className="text-solar-muted text-sm">
-            {adminFilterId ? (
-              <span className="flex items-center gap-2">
-                <span className="text-solar-blue font-black underline">
-                  {isAr ? suppliers.find(s => s.id === adminFilterId)?.nameAr || suppliers.find(s => s.id === adminFilterId)?.name : suppliers.find(s => s.id === adminFilterId)?.name}
+        <div className="flex items-center gap-3">
+          {adminFilterId ? (
+            (() => {
+              const currentSup = suppliers.find(s => s.id === adminFilterId || s.id?.toString() === adminFilterId?.toString());
+              const supImg = currentSup?.profileImage || currentSup?.avatar;
+              const supInit = (isAr ? currentSup?.nameAr || currentSup?.name : currentSup?.name)?.charAt(0)?.toUpperCase() || 'S';
+              return (
+                <div className="w-10 h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                  {supImg ? (
+                    <img src={supImg} alt={currentSup?.name || 'Supplier'} className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    <span className="font-black text-sm text-solar-blue">{supInit}</span>
+                  )}
+                </div>
+              );
+            })()
+          ) : user ? (
+            <div className="relative group">
+              <div 
+                onClick={() => !isUploading && fileInputRef.current?.click()}
+                className="w-10 h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm cursor-pointer hover:ring-2 hover:ring-solar-blue/40 transition relative"
+                title={isAr ? 'تغيير صورة المورد' : 'Change profile picture'}
+              >
+                {user.profileImage || user.avatar ? (
+                  <img src={user.profileImage || user.avatar} alt={user.name} className="w-full h-full rounded-full object-cover" />
+                ) : (
+                  <span className="font-black text-sm text-solar-blue">
+                    {(isAr ? user.nameAr || user.name : user.name)?.charAt(0)?.toUpperCase() || 'S'}
+                  </span>
+                )}
+
+                {isUploading ? (
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                    <Loader2 size={14} className="text-white animate-spin" />
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 bg-black/30 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                    <Camera size={13} className="text-white" />
+                  </div>
+                )}
+              </div>
+              <input 
+                ref={fileInputRef}
+                type="file" 
+                accept="image/jpeg,image/png,image/webp,image/jpg" 
+                className="hidden" 
+                onChange={handleAvatarUpload}
+                disabled={isUploading}
+              />
+            </div>
+          ) : null}
+
+          <div className="text-left">
+            <h1 className="text-2xl sm:text-3xl font-black text-solar-text">{t.dashboard}</h1>
+            <div className="text-solar-muted text-xs sm:text-sm">
+              {adminFilterId ? (
+                <span className="flex items-center gap-2">
+                  <span className="text-solar-blue font-black underline">
+                    {isAr ? suppliers.find(s => s.id === adminFilterId)?.nameAr || suppliers.find(s => s.id === adminFilterId)?.name : suppliers.find(s => s.id === adminFilterId)?.name}
+                  </span>
+                  <span className="text-solar-muted">({t.products})</span>
                 </span>
-                <span className="text-solar-muted">({t.products})</span>
-              </span>
-            ) : (
-              <>
-                {t.welcomeBack}, <span className="text-solar-blue font-black">{isAr ? user?.nameAr || user?.name : user?.name}</span>
-              </>
-            )}
+              ) : (
+                <>
+                  {t.welcomeBack}, <span className="text-solar-blue font-black">{isAr ? user?.nameAr || user?.name : user?.name}</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
 

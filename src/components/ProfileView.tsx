@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   User, 
   LogIn, 
@@ -13,11 +13,17 @@ import {
   ChevronLeft, 
   ChevronRight,
   LogOut,
-  Sparkles
+  Sparkles,
+  Camera,
+  Loader2,
+  Check
 } from 'lucide-react';
 import { User as UserType, ViewType } from '../types';
 import { translations } from '../translations';
 import { motion } from 'motion/react';
+import { useAuth } from '../context/AuthContext';
+import { uploadSupplierProfileImage } from '../services/uploadService';
+import { updateSupplierProfileImage } from '../services/firestoreService';
 
 interface ProfileViewProps {
   lang: 'ar' | 'en';
@@ -42,39 +48,141 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const t = translations[lang];
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { updateUserProfile } = useAuth();
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    // Clear previous feedback
+    setUploadError(null);
+    setUploadSuccess(false);
+
+    // Instant local preview
+    const tempPreview = URL.createObjectURL(file);
+    setPreviewImage(tempPreview);
+
+    try {
+      setIsUploading(true);
+      const secureUrl = await uploadSupplierProfileImage(file);
+      await updateSupplierProfileImage(user.uid, secureUrl);
+      await updateUserProfile({ profileImage: secureUrl, avatar: secureUrl });
+      
+      setPreviewImage(secureUrl);
+      setUploadSuccess(true);
+      setTimeout(() => setUploadSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Error updating supplier profile image:', err);
+      setUploadError(err.message || (isAr ? 'فشل رفع وتحديث الصورة' : 'Failed to upload and update image'));
+      setPreviewImage(null);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const currentImage = previewImage || user?.profileImage || user?.avatar;
+  const userInitial = (isAr ? user?.nameAr || user?.name : user?.name)?.trim()?.charAt(0)?.toUpperCase() || 'S';
 
   return (
     <div className="min-h-screen bg-slate-50/60 pb-32 pt-6 px-4 md:px-8">
       <div className="max-w-2xl mx-auto space-y-6">
         
         {/* User Header Profile Card */}
-        <div className="flex flex-col items-center text-center py-6">
-          <div className="w-24 h-24 bg-amber-50 rounded-full flex items-center justify-center border-4 border-white shadow-md relative overflow-hidden">
-            {user?.avatar ? (
-              <img 
-                src={user.avatar} 
-                className="w-full h-full object-cover" 
-                alt={user.name} 
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="w-16 h-16 bg-amber-100 text-amber-500 rounded-full flex items-center justify-center">
-                <User size={36} strokeWidth={2} />
-              </div>
+        <div className="flex flex-col items-center text-center py-4">
+          <div className="relative inline-block">
+            {/* Small circular avatar: 48x48px visually */}
+            <div 
+              onClick={() => user && !isUploading && fileInputRef.current?.click()}
+              className={`w-14 h-14 rounded-full bg-solar-bg border border-solar-border shadow-sm flex items-center justify-center overflow-hidden relative ${user ? 'cursor-pointer group hover:ring-2 hover:ring-solar-blue/40 transition-all' : ''}`}
+              title={user ? (isAr ? 'اضغط لتغيير الصورة' : 'Click to change image') : undefined}
+            >
+              {currentImage ? (
+                <img 
+                  src={currentImage} 
+                  className="w-full h-full rounded-full object-cover" 
+                  alt={user?.name || 'User'} 
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-full h-full rounded-full bg-solar-light flex items-center justify-center font-black text-solar-blue text-base">
+                  {user ? userInitial : <User size={22} className="text-solar-muted" />}
+                </div>
+              )}
+
+              {/* Upload spinner */}
+              {isUploading && (
+                <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center z-10">
+                  <Loader2 size={16} className="text-white animate-spin" />
+                </div>
+              )}
+
+              {/* Hover camera overlay */}
+              {user && !isUploading && (
+                <div className="absolute inset-0 bg-black/30 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity z-10">
+                  <Camera size={14} className="text-white" />
+                </div>
+              )}
+            </div>
+
+            {/* Profile Image Edit/Camera Button */}
+            {user && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="absolute -bottom-1 -right-1 bg-solar-blue text-white p-1.5 rounded-full border-2 border-white shadow-sm hover:bg-solar-blue/90 active:scale-95 transition cursor-pointer"
+                  title={isAr ? 'تغيير صورة الحساب' : 'Change profile picture'}
+                >
+                  <Camera size={11} />
+                </button>
+                <input 
+                  ref={fileInputRef}
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,image/jpg" 
+                  className="hidden" 
+                  onChange={handleAvatarUpload}
+                  disabled={isUploading}
+                />
+              </>
             )}
+
+            {/* Verified badge */}
             {user?.verified && (
-              <div className="absolute bottom-1 right-1 bg-solar-success text-white p-1 rounded-full border-2 border-white shadow-sm">
-                <ShieldCheck size={14} />
+              <div className="absolute -top-1 -right-1 bg-solar-success text-white p-0.5 rounded-full border border-white shadow-sm">
+                <ShieldCheck size={11} />
               </div>
             )}
           </div>
           
-          <h2 className="text-xl font-black text-solar-text mt-4">
+          <h2 className="text-lg font-black text-solar-text mt-2.5">
             {user ? (isAr ? user.nameAr || user.name : user.name) : (isAr ? 'مستخدم زائر' : 'Guest User')}
           </h2>
-          <p className="text-xs text-solar-muted font-bold mt-1.5 leading-relaxed">
+          <p className="text-xs text-solar-muted font-bold mt-0.5 leading-relaxed">
             {user ? user.email : (isAr ? 'قم بتسجيل الدخول للحصول على الميزات الكاملة' : 'Please log in to access full features')}
           </p>
+
+          {/* Upload notifications */}
+          {uploadError && (
+            <p className="text-[11px] text-solar-danger font-bold mt-2 bg-solar-danger/10 px-3 py-1 rounded-full">
+              {uploadError}
+            </p>
+          )}
+          {uploadSuccess && (
+            <p className="text-[11px] text-solar-success font-bold mt-2 bg-solar-success/10 px-3 py-1 rounded-full flex items-center gap-1">
+              <Check size={12} />
+              <span>{isAr ? 'تم تحديث صورة المورد بنجاح' : 'Supplier image updated successfully'}</span>
+            </p>
+          )}
         </div>
 
         {/* Section: Account block */}

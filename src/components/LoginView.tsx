@@ -24,6 +24,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
   const [isNotAllowedError, setIsNotAllowedError] = useState(false);
   const [isPopupBlockedError, setIsPopupBlockedError] = useState(false);
 
+  const [isUnauthorizedDomainError, setIsUnauthorizedDomainError] = useState(false);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState('');
+  const [isNetworkError, setIsNetworkError] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!captchaVerified) {
@@ -34,6 +38,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     setError('');
     setIsNotAllowedError(false);
     setIsPopupBlockedError(false);
+    setIsUnauthorizedDomainError(false);
+    setIsNetworkError(false);
     try {
       await login(email, password);
       setView('home');
@@ -45,8 +51,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
       if (error.code === 'auth/user-not-found') message = isAr ? 'المستخدم غير موجود' : 'User not found';
       else if (error.code === 'auth/wrong-password') message = isAr ? 'كلمة مرور خاطئة' : 'Wrong password';
       else if (error.code === 'auth/invalid-credential') message = isAr ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة' : 'Invalid email or password credentials.';
-      else if (error.code === 'auth/network-request-failed') message = isAr ? 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت' : 'Network error. Please check your internet connection or browser settings.';
-      else if (isNotAllowed) {
+      else if (error.code === 'auth/network-request-failed') {
+        setIsNetworkError(true);
+        message = isAr ? 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت أو فتح التطبيق في نافذة جديدة.' : 'Network error. Please check your internet connection or open the app in a new tab.';
+      } else if (isNotAllowed) {
         setIsNotAllowedError(true);
         message = isAr ? 'تسجيل الدخول بالبريد غير مفعّل في لوحة Firebase الخاصة بك حالياً.' : 'Email authentication is not enabled in your Firebase console.';
       }
@@ -61,20 +69,54 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     setError('');
     setIsPopupBlockedError(false);
     setIsNotAllowedError(false);
+    setIsUnauthorizedDomainError(false);
+    setIsNetworkError(false);
     try {
       await signInWithGoogle('customer');
       setView('home');
     } catch (err: any) {
       console.error("Google Sign In Error:", err);
       let message = isAr ? 'فشل تسجيل الدخول باستخدام Google' : 'Google sign in failed';
-      const isPopupBlocked = err.code === 'auth/popup-blocked' || err.message?.includes('auth/popup-blocked');
-      if (err.code === 'auth/account-exists-with-different-credential') {
-        message = isAr ? 'الحساب موجود بالفعل بطريقة تسجيل دخول مختلفة' : 'Account exists with different credential';
+      const isPopupBlocked = err.code === 'auth/popup-blocked' || 
+                             err.code === 'auth/cancelled-popup-request' ||
+                             err.message?.includes('auth/popup-blocked');
+      const isUnauthorized = err.code === 'auth/unauthorized-domain' || 
+                             err.message?.includes('auth/unauthorized-domain');
+      const isNotAllowed = err.code === 'auth/operation-not-allowed' || 
+                           err.message?.includes('auth/operation-not-allowed');
+      const isPopupClosed = err.code === 'auth/popup-closed-by-user';
+      const isNetworkErr = err.code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
+
+      if (isUnauthorized) {
+        setIsUnauthorizedDomainError(true);
+        const currentHost = window.location.hostname || 'enerjoo.com';
+        setUnauthorizedDomain(currentHost);
+        message = isAr 
+          ? `النطاق الحالي (${currentHost}) غير مصرح به في Firebase Authentication.`
+          : `The current domain (${currentHost}) is not authorized in Firebase Authentication.`;
       } else if (isPopupBlocked) {
         setIsPopupBlockedError(true);
         message = isAr 
-          ? 'تم حظر نافذة تسجيل الدخول المنبثقة من قبل متصفحك.' 
-          : 'Google sign-in popup was blocked by your browser.';
+          ? 'تم حظر نافذة تسجيل الدخول المنبثقة من قبل المتصفح أو بيئة الإطار (iframe).' 
+          : 'Google sign-in popup was blocked by your browser or iframe sandbox.';
+      } else if (isPopupClosed) {
+        message = isAr 
+          ? 'تم إغلاق نافذة تسجيل الدخول بـ Google قبل إكمال العملية.'
+          : 'Google sign-in popup was closed before completion.';
+      } else if (isNotAllowed) {
+        setIsNotAllowedError(true);
+        message = isAr 
+          ? 'تسجيل الدخول بواسطة Google غير مفعّل في لوحة Firebase Console.'
+          : 'Google Sign-in is not enabled in your Firebase Console.';
+      } else if (isNetworkErr) {
+        setIsNetworkError(true);
+        message = isAr 
+          ? 'تعذر الاتصال بـ Google من داخل إطار المعاينة (iframe). يُرجى فتح التطبيق في نافذة مستقلة جديدة.' 
+          : 'Could not connect to Google from inside the preview iframe. Please open the app in a new tab.';
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        message = isAr ? 'الحساب موجود بالفعل بطريقة تسجيل دخول مختلفة' : 'Account exists with different credential';
+      } else if (err.message) {
+        message = `${isAr ? 'خطأ' : 'Error'}: ${err.message}`;
       }
       setError(message);
     } finally {
@@ -184,13 +226,48 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
               {isNotAllowedError && (
                 <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-1.5">
                   <span className="text-amber-500 block">🎛️ تفعيل المصادقة في لوحة Firebase:</span>
-                  <p>اذهب لـ Authentication ثم Sign-in method وقم بتمكين خيار Email/Password ثم احفظ التغييرات.</p>
+                  <p>اذهب إلى Firebase Console &gt; Authentication &gt; Sign-in method وقم بتمكين خيار Google أو Email/Password ثم احفظ التغييرات.</p>
+                </div>
+              )}
+
+              {isUnauthorizedDomainError && (
+                <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-2">
+                  <span className="text-amber-600 font-black block">⚙️ إضافة النطاق إلى Firebase Authorized Domains:</span>
+                  <p className="text-solar-text">
+                    النطاق الحالي <code className="bg-slate-100 px-1 py-0.5 rounded text-solar-blue font-mono font-bold">{unauthorizedDomain}</code> غير مضاف في قائمة النطاقات المسموحة.
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1 text-solar-muted">
+                    <li>افتح <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-solar-blue underline font-bold">لوحة تحكم Firebase</a>.</li>
+                    <li>اختر <b>Authentication</b> ثم اذهب إلى تبويب <b>Settings</b>.</li>
+                    <li>انتقل إلى <b>Authorized domains</b> واضغط <b>Add domain</b> وأضف: <span className="font-mono text-solar-blue">{unauthorizedDomain}</span></li>
+                  </ol>
                 </div>
               )}
 
               {isPopupBlockedError && (
-                <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right leading-relaxed">
-                  <span>يرجى فتح التطبيق في نافذة مستقلة جديدة عبر النقر على زر السهم أعلى اليمين ثم إعادة تسجيل الدخول لتجنب قيود المتصفح الأمنية للـ iframe.</span>
+                <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-2 leading-relaxed">
+                  <p>لأن المتصفح يحظر النوافذ المنبثقة داخل إطارات المعاينة (iframe)، يمكنك الضغط أدناه لفتح التطبيق في نافذة مستقلة:</p>
+                  <button
+                    type="button"
+                    onClick={() => window.open(window.location.href, '_blank')}
+                    className="w-full bg-solar-blue text-white py-2 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <span>فتح التطبيق في نافذة جديدة</span>
+                  </button>
+                </div>
+              )}
+
+              {isNetworkError && (
+                <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-2 leading-relaxed">
+                  <p className="text-solar-text font-black">🌐 حل مشكلة الاتصال في المعاينة (Network Request Failed):</p>
+                  <p>تحدث هذه المشكلة عندما يمنع المتصفح تبادل الاتصال بين نافذة تسجيل الدخول وإطار المعاينة (iframe). الحل هو فتح التطبيق مباشرة في تبويب جديد:</p>
+                  <button
+                    type="button"
+                    onClick={() => window.open(window.location.href, '_blank')}
+                    className="w-full bg-solar-blue text-white py-2.5 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <span>فتح التطبيق في نافذة مستقلة جديدة</span>
+                  </button>
                 </div>
               )}
             </div>

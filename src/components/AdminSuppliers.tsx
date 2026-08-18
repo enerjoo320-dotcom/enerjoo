@@ -74,22 +74,27 @@ export const AdminSuppliers: React.FC<AdminSuppliersProps> = ({ lang }) => {
                 {supplier.verified ? (isAr ? 'معتمد' : 'Verified') : (isAr ? 'غير معتمد' : 'Unverified')}
               </div>
 
-              <div className="flex items-start gap-4 mb-6 pt-4">
-                <div className="w-16 h-16 rounded-2xl bg-solar-bg border border-solar-border flex items-center justify-center overflow-hidden">
-                  {supplier.avatar ? (
-                    <img src={supplier.avatar} alt={supplier.name} className="w-full h-full object-cover" />
+              <div className="flex items-center gap-3.5 mb-5 pt-3">
+                <div className="w-10 h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                  {supplier.profileImage || supplier.avatar ? (
+                    <img 
+                      src={supplier.profileImage || supplier.avatar} 
+                      alt={supplier.name} 
+                      className="w-full h-full rounded-full object-cover" 
+                      referrerPolicy="no-referrer"
+                    />
                   ) : (
-                    <span className="text-2xl font-black text-solar-blue">
-                      {(isAr ? supplier.nameAr || supplier.name : supplier.name).charAt(0)}
+                    <span className="text-sm font-black text-solar-blue">
+                      {(isAr ? supplier.nameAr || supplier.name : supplier.name).charAt(0).toUpperCase()}
                     </span>
                   )}
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-solar-text leading-tight">
+                  <h3 className="text-lg font-black text-solar-text leading-tight">
                     {isAr ? supplier.nameAr || supplier.name : supplier.name}
                   </h3>
-                  <div className="flex items-center gap-1 mt-1 text-solar-blue">
-                    <MapPin size={14} />
+                  <div className="flex items-center gap-1 mt-0.5 text-solar-blue">
+                    <MapPin size={12} />
                     <span className="text-xs font-bold">{supplier.location}</span>
                   </div>
                 </div>

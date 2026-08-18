@@ -82,11 +82,18 @@ export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = (
             <LogOut size={20} className={isAr ? "" : "rotate-180"} />
           </button>
           <div className="relative">
-            <img 
-              src={user?.avatar || defaultAvatar} 
-              alt="Admin" 
-              className="w-10 h-10 rounded-full border-2 border-solar-border object-cover" 
-            />
+            {user?.profileImage || user?.avatar ? (
+              <img 
+                src={user.profileImage || user.avatar} 
+                alt="Admin" 
+                className="w-10 h-10 rounded-full border-2 border-solar-border object-cover" 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-solar-light border-2 border-solar-border flex items-center justify-center font-black text-solar-blue text-sm">
+                {(isAr ? user?.nameAr || user?.name : user?.name)?.charAt(0)?.toUpperCase() || 'A'}
+              </div>
+            )}
             <span className="absolute -bottom-0.5 -right-0.5 bg-green-500 w-3.5 h-3.5 rounded-full border-2 border-white"></span>
           </div>
           {/* Active indicator Pill */}
@@ -234,12 +241,17 @@ export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = (
               exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white rounded-3xl p-5 border border-solar-border shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5 hover:border-solar-blue/20 transition-all"
             >
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-solar-light hover:bg-solar-border/40 border border-solar-border rounded-2xl flex items-center justify-center font-black text-solar-blue text-xl shrink-0 shadow-inner overflow-hidden">
-                  {supplier.avatar ? (
-                    <img src={supplier.avatar} alt={supplier.name} className="w-full h-full object-cover" />
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 bg-solar-light hover:bg-solar-border/40 border border-solar-border rounded-full flex items-center justify-center font-black text-solar-blue text-sm shrink-0 shadow-sm overflow-hidden">
+                  {supplier.profileImage || supplier.avatar ? (
+                    <img 
+                      src={supplier.profileImage || supplier.avatar} 
+                      alt={supplier.name} 
+                      className="w-full h-full rounded-full object-cover" 
+                      referrerPolicy="no-referrer"
+                    />
                   ) : (
-                    (isAr ? supplier.nameAr : supplier.name)?.[0] || 'S'
+                    (isAr ? supplier.nameAr || supplier.name : supplier.name)?.charAt(0)?.toUpperCase() || 'S'
                   )}
                 </div>
                 <div className="space-y-1">

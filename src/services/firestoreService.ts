@@ -3,6 +3,7 @@ import {
   getDocs, 
   addDoc, 
   updateDoc, 
+  setDoc,
   deleteDoc, 
   doc, 
   query, 
@@ -84,6 +85,7 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
     const suppliers = snapshot.docs
       .map(doc => {
         const data = doc.data();
+        const imgUrl = data.profileImage || data.avatar || '';
         return {
           id: doc.id,
           name: data.name || '',
@@ -93,7 +95,8 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
           verified: data.verified || false,
           rejected: data.rejected || false,
           email: data.email || '',
-          avatar: data.avatar || '',
+          avatar: imgUrl,
+          profileImage: imgUrl,
           rating: data.rating || 0,
           totalSales: data.totalSales || 0,
           lastUpdate: data.updatedAt || '',
@@ -217,6 +220,19 @@ export const updateSupplierStatus = async (uid: string, status: 'approved' | 'pe
     } else {
       await updateDoc(docRef, { verified: false, rejected: false });
     }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);
+  }
+};
+
+export const updateSupplierProfileImage = async (uid: string, imageUrl: string) => {
+  try {
+    const docRef = doc(db, USERS_COLLECTION, uid);
+    await setDoc(docRef, {
+      profileImage: imageUrl,
+      avatar: imageUrl,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);
   }

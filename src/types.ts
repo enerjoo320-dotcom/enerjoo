@@ -23,6 +23,7 @@ export interface Supplier {
   lastUpdate: string;
   email?: string;
   avatar?: string;
+  profileImage?: string;
 }
 
 export interface Product {
@@ -64,6 +65,7 @@ export interface User {
   location?: string;
   phone?: string;
   avatar: string;
+  profileImage?: string;
   verified: boolean;
   createdAt: string;
 }

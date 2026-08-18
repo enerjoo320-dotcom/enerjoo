@@ -29,6 +29,9 @@ export const RegisterView: React.FC<{
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [isNotAllowedError, setIsNotAllowedError] = useState(false);
   const [isPopupBlockedError, setIsPopupBlockedError] = useState(false);
+  const [isUnauthorizedDomainError, setIsUnauthorizedDomainError] = useState(false);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState('');
+  const [isNetworkError, setIsNetworkError] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +54,8 @@ export const RegisterView: React.FC<{
     setError('');
     setIsNotAllowedError(false);
     setIsPopupBlockedError(false);
+    setIsUnauthorizedDomainError(false);
+    setIsNetworkError(false);
 
     try {
       await register(formData.email, formData.password, {
@@ -71,6 +76,7 @@ export const RegisterView: React.FC<{
       
       const errorCode = err.code || (err.message && err.message.includes('auth/email-already-in-use') ? 'auth/email-already-in-use' : '');
       const isNotAllowed = err.code === 'auth/operation-not-allowed' || err.message?.includes('auth/operation-not-allowed');
+      const isNetwork = err.code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
       
       if (errorCode === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use')) {
         message = isAr ? 'هذا البريد الإلكتروني مستخدم بالفعل' : 'This email is already in use';
@@ -78,6 +84,9 @@ export const RegisterView: React.FC<{
         message = isAr ? 'كلمة المرور ضعيفة جداً' : 'The password is too weak';
       } else if (err.code === 'auth/invalid-email') {
         message = isAr ? 'البريد الإلكتروني غير صالح' : 'Invalid email address';
+      } else if (isNetwork) {
+        setIsNetworkError(true);
+        message = isAr ? 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت أو فتح التطبيق في نافذة مستقلة.' : 'Network error. Please check your connection or open in a new tab.';
       } else if (isNotAllowed) {
         setIsNotAllowedError(true);
         message = isAr 
@@ -96,6 +105,8 @@ export const RegisterView: React.FC<{
     setError('');
     setIsPopupBlockedError(false);
     setIsNotAllowedError(false);
+    setIsUnauthorizedDomainError(false);
+    setIsNetworkError(false);
     try {
       await signInWithGoogle(role);
       setIsSuccess(true);
@@ -105,12 +116,46 @@ export const RegisterView: React.FC<{
     } catch (err: any) {
       console.error("Google Registration Error:", err);
       let message = isAr ? 'فشل التسجيل باستخدام Google' : 'Google registration failed';
-      const isPopupBlocked = err.code === 'auth/popup-blocked' || err.message?.includes('auth/popup-blocked');
-      if (isPopupBlocked) {
+      const isPopupBlocked = err.code === 'auth/popup-blocked' || 
+                             err.code === 'auth/cancelled-popup-request' ||
+                             err.message?.includes('auth/popup-blocked');
+      const isUnauthorized = err.code === 'auth/unauthorized-domain' || 
+                             err.message?.includes('auth/unauthorized-domain');
+      const isNotAllowed = err.code === 'auth/operation-not-allowed' || 
+                           err.message?.includes('auth/operation-not-allowed');
+      const isPopupClosed = err.code === 'auth/popup-closed-by-user';
+      const isNetworkErr = err.code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
+
+      if (isUnauthorized) {
+        setIsUnauthorizedDomainError(true);
+        const currentHost = window.location.hostname || 'enerjoo.com';
+        setUnauthorizedDomain(currentHost);
+        message = isAr 
+          ? `النطاق الحالي (${currentHost}) غير مصرح به في Firebase Authentication.`
+          : `The current domain (${currentHost}) is not authorized in Firebase Authentication.`;
+      } else if (isPopupBlocked) {
         setIsPopupBlockedError(true);
         message = isAr 
-          ? 'تم حظر نافذة التسجيل المنبثقة من قبل متصفحك.' 
-          : 'Google sign-up popup was blocked by your browser.';
+          ? 'تم حظر نافذة التسجيل المنبثقة من قبل المتصفح أو بيئة الإطار (iframe).' 
+          : 'Google sign-up popup was blocked by your browser or iframe sandbox.';
+      } else if (isPopupClosed) {
+        message = isAr 
+          ? 'تم إغلاق نافذة تسجيل الدخول بـ Google قبل إكمال العملية.'
+          : 'Google sign-up popup was closed before completion.';
+      } else if (isNotAllowed) {
+        setIsNotAllowedError(true);
+        message = isAr 
+          ? 'تسجيل الدخول بواسطة Google غير مفعّل في لوحة Firebase Console.'
+          : 'Google Sign-in is not enabled in your Firebase Console.';
+      } else if (isNetworkErr) {
+        setIsNetworkError(true);
+        message = isAr 
+          ? 'تعذر الاتصال بـ Google من داخل إطار المعاينة (iframe). يُرجى فتح التطبيق في نافذة مستقلة جديدة.' 
+          : 'Could not connect to Google from inside the preview iframe. Please open the app in a new tab.';
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        message = isAr ? 'الحساب موجود بالفعل بطريقة تسجيل دخول مختلفة' : 'Account exists with different credential';
+      } else if (err.message) {
+        message = `${isAr ? 'خطأ' : 'Error'}: ${err.message}`;
       }
       setError(message);
     } finally {
@@ -247,8 +292,25 @@ export const RegisterView: React.FC<{
               </div>
             )}
 
+            {isUnauthorizedDomainError && (
+              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-right leading-relaxed space-y-2">
+                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
+                  {isAr ? '⚙️ إضافة النطاق إلى Firebase Authorized Domains:' : '⚙️ Add Domain to Firebase Authorized Domains:'}
+                </p>
+                <p className="text-[11px] text-solar-muted">
+                  {isAr ? 'النطاق الحالي الذي يعمل عليه التطبيق: ' : 'Current domain: '}
+                  <code className="bg-slate-100 px-1 py-0.5 rounded text-solar-blue font-mono font-bold">{unauthorizedDomain}</code>
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-solar-muted">
+                  <li>{isAr ? 'افتح لوحة تحكم Firebase ثم Authentication' : 'Open Firebase Console > Authentication'}</li>
+                  <li>{isAr ? 'اذهب لتبويب Settings ثم Authorized domains' : 'Go to Settings > Authorized domains'}</li>
+                  <li>{isAr ? 'اضغط Add domain وأضف: ' : 'Click Add domain and add: '}<span className="font-mono text-solar-blue font-bold">{unauthorizedDomain}</span></li>
+                </ol>
+              </div>
+            )}
+
             {isPopupBlockedError && (
-              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-left leading-relaxed space-y-2">
+              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-right leading-relaxed space-y-2">
                 <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
                   {isAr ? '🌐 حل مشكلة حظر النافذة المنبثقة للـ iframe:' : '🌐 How to fix iframe popup blocking:'}
                 </p>
@@ -257,11 +319,33 @@ export const RegisterView: React.FC<{
                     ? 'لأن هذا التطبيق يعمل كمعاينة داخل إطار (iframe)، فإن المتصفحات تحظر أزرار النوافذ المنبثقة من Google لغايات أمنية.' 
                     : 'Because this app runs inside a preview iframe, modern browsers automatically block secondary Google sign-in popups.'}
                 </p>
-                <div className="mt-3 p-2 bg-solar-blue/10 text-solar-blue rounded-lg border border-solar-blue/20 text-center font-bold text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => window.open(window.location.href, '_blank')}
+                  className="w-full bg-solar-blue text-white py-2 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-1.5 shadow-sm mt-2"
+                >
+                  <span>{isAr ? 'فتح التطبيق في نافذة جديدة' : 'Open Application in New Tab'}</span>
+                </button>
+              </div>
+            )}
+
+            {isNetworkError && (
+              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-right leading-relaxed space-y-2">
+                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
+                  {isAr ? '🌐 حل مشكلة الاتصال في المعاينة (Network Request Failed):' : '🌐 Resolving Network Connection Error:'}
+                </p>
+                <p className="text-[11px] text-solar-muted">
                   {isAr 
-                    ? '👉 يرجى فتح التطبيق في نافذة مستقلة جديدة عبر النقر على زر السهم أعلى الزاوية اليمنى من شاشتك ثم إعادة التجربة!' 
-                    : '👉 Please open this application in a new tab by clicking the "Open in new tab" arrow icon at the top-right of your screen and try again!'}
-                </div>
+                    ? 'تحدث هذه المشكلة عندما يمنع المتصفح تبادل الاتصال بين نافذة تسجيل الدخول وإطار المعاينة (iframe). يمكنك فتح التطبيق في تبويب مستقل لتسجيل الدخول بـ Google بسهولة:' 
+                    : 'This happens when the browser restricts communication between the auth popup and the preview iframe. Open the app in a new tab to complete sign in:'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.open(window.location.href, '_blank')}
+                  className="w-full bg-solar-blue text-white py-2.5 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-2 shadow-sm mt-2"
+                >
+                  <span>{isAr ? 'فتح التطبيق في نافذة مستقلة جديدة' : 'Open Application in New Tab'}</span>
+                </button>
               </div>
             )}
           </div>

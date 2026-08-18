@@ -314,8 +314,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 >
                   <div className="flex justify-between items-center mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-solar-bg rounded-2xl flex items-center justify-center font-black text-solar-blue border border-solar-border">
-                        {isAr ? s.nameAr?.[0] : s.name?.[0]}
+                      <div className="w-10 h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-solar-blue overflow-hidden shrink-0 shadow-sm">
+                        {s.profileImage || s.avatar ? (
+                          <img 
+                            src={s.profileImage || s.avatar} 
+                            alt={s.name} 
+                            className="w-full h-full rounded-full object-cover" 
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <span className="text-sm font-black text-solar-blue">
+                            {(isAr ? s.nameAr || s.name : s.name)?.charAt(0)?.toUpperCase() || 'S'}
+                          </span>
+                        )}
                       </div>
                       <div>
                         <div className="font-black text-solar-text group-hover:text-solar-blue transition">{isAr ? s.nameAr : s.name}</div>

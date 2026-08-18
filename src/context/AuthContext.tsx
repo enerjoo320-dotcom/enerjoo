@@ -18,6 +18,7 @@ type AuthContextType = {
   register: (email: string, password: string, additionalData?: any) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (role?: 'customer' | 'supplier') => Promise<void>;
+  updateUserProfile: (data: Partial<User>) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -74,14 +75,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             );
             const userType = isAdminEmail ? 'admin' : 'customer';
 
-            setUser({
+            const newUserData: User = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || "",
-              name: "User",
-              nameAr: "مستخدم",
+              name: firebaseUser.displayName || "User",
+              nameAr: firebaseUser.displayName || "مستخدم",
               type: userType,
-              verified: true
-            } as User);
+              avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+              verified: true,
+              createdAt: new Date().toISOString()
+            };
+
+            try {
+              await setDoc(userDocRef, newUserData, { merge: true });
+            } catch (saveErr) {
+              console.warn("Could not save initial user doc:", saveErr);
+            }
+            setUser(newUserData);
           }
           setLoading(false);
         }, (err) => {
@@ -236,6 +246,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signInWithGoogle = async (role: 'customer' | 'supplier' = 'customer') => {
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
     const res = await signInWithPopup(auth, provider);
     const userDocRef = doc(db, "users", res.user.uid);
     const userDoc = await getDoc(userDocRef);
@@ -268,6 +281,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateUserProfile = async (data: Partial<User>) => {
+    if (!user) return;
+    const updatedUser = { ...user, ...data };
+    setUser(updatedUser);
+
+    try {
+      const userDocRef = doc(db, "users", user.uid);
+      await setDoc(userDocRef, {
+        ...data,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (err) {
+      console.error("Error updating user document in Firestore:", err);
+    }
+  };
+
   const logout = async () => {
     await signOut(auth);
     safeLocalStorage.removeItem("enerjoo_mock_auth_uid");
@@ -275,7 +304,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, register, login, signInWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, loading, register, login, signInWithGoogle, updateUserProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

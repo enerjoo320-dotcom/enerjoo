@@ -66,7 +66,18 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
                 className="flex items-center gap-2 bg-solar-light px-3 py-1.5 rounded-full cursor-pointer hover:bg-solar-border transition"
                 onClick={() => setView('profile')}
               >
-                <img src={user.avatar} className="w-7 h-7 rounded-full border border-solar-border" alt={user.name} />
+                {user.profileImage || user.avatar ? (
+                  <img 
+                    src={user.profileImage || user.avatar} 
+                    className="w-7 h-7 rounded-full border border-solar-border object-cover" 
+                    alt={user.name} 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-xs text-solar-blue">
+                    {(isAr ? user.nameAr || user.name : user.name)?.charAt(0)?.toUpperCase() || 'U'}
+                  </div>
+                )}
                 <span className="text-xs font-bold text-solar-text hidden md:block">{isAr ? user.nameAr : user.name}</span>
               </div>
               <button 
