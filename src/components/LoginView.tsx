@@ -5,6 +5,7 @@ import { translations } from '../translations';
 import { ViewType } from '../types';
 import { motion } from 'motion/react';
 import { SecurityCaptcha } from './SecurityCaptcha';
+import { auth } from '../lib/firebase';
 
 interface LoginViewProps {
   lang: 'ar' | 'en';
@@ -73,19 +74,25 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     setIsNetworkError(false);
     try {
       await signInWithGoogle('customer');
-      setView('home');
+      if (auth.currentUser) {
+        setView('home');
+      }
     } catch (err: any) {
-      console.error("Google Sign In Error:", err);
+      const isPopupClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request';
+      if (isPopupClosed) {
+        console.info("Google Sign In popup was closed by the user.");
+        return;
+      }
+
+      console.warn("Google Sign In Notice:", err);
       let message = isAr ? 'فشل تسجيل الدخول باستخدام Google' : 'Google sign in failed';
-      const isPopupBlocked = err.code === 'auth/popup-blocked' || 
-                             err.code === 'auth/cancelled-popup-request' ||
-                             err.message?.includes('auth/popup-blocked');
-      const isUnauthorized = err.code === 'auth/unauthorized-domain' || 
-                             err.message?.includes('auth/unauthorized-domain');
-      const isNotAllowed = err.code === 'auth/operation-not-allowed' || 
-                           err.message?.includes('auth/operation-not-allowed');
-      const isPopupClosed = err.code === 'auth/popup-closed-by-user';
-      const isNetworkErr = err.code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
+      const isPopupBlocked = err?.code === 'auth/popup-blocked' || 
+                             err?.message?.includes('auth/popup-blocked');
+      const isUnauthorized = err?.code === 'auth/unauthorized-domain' || 
+                             err?.message?.includes('auth/unauthorized-domain');
+      const isNotAllowed = err?.code === 'auth/operation-not-allowed' || 
+                           err?.message?.includes('auth/operation-not-allowed');
+      const isNetworkErr = err?.code === 'auth/network-request-failed' || err?.message?.includes('auth/network-request-failed');
 
       if (isUnauthorized) {
         setIsUnauthorizedDomainError(true);
@@ -234,12 +241,31 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
                 <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-2">
                   <span className="text-amber-600 font-black block">⚙️ إضافة النطاق إلى Firebase Authorized Domains:</span>
                   <p className="text-solar-text">
-                    النطاق الحالي <code className="bg-slate-100 px-1 py-0.5 rounded text-solar-blue font-mono font-bold">{unauthorizedDomain}</code> غير مضاف في قائمة النطاقات المسموحة.
+                    النطاق الحالي <code className="bg-slate-100 px-1 py-0.5 rounded text-solar-blue font-mono font-bold">{unauthorizedDomain}</code> غير مضاف في قائمة النطاقات المسموحة في Firebase Authentication.
                   </p>
-                  <ol className="list-decimal list-inside space-y-1 text-solar-muted">
-                    <li>افتح <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-solar-blue underline font-bold">لوحة تحكم Firebase</a>.</li>
-                    <li>اختر <b>Authentication</b> ثم اذهب إلى تبويب <b>Settings</b>.</li>
-                    <li>انتقل إلى <b>Authorized domains</b> واضغط <b>Add domain</b> وأضف: <span className="font-mono text-solar-blue">{unauthorizedDomain}</span></li>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(unauthorizedDomain);
+                        alert(isAr ? 'تم نسخ النطاق بنجاح!' : 'Domain copied!');
+                      }}
+                      className="bg-solar-blue/10 text-solar-blue px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-solar-blue/20 transition"
+                    >
+                      📋 {isAr ? 'نسخ اسم النطاق' : 'Copy Domain'}
+                    </button>
+                    <a 
+                      href="https://console.firebase.google.com/project/gen-lang-client-0409057996/authentication/settings" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="bg-solar-blue text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-opacity-90 transition flex items-center gap-1"
+                    >
+                      🚀 {isAr ? 'فتح إعدادات Firebase مباشرة' : 'Open Firebase Settings'}
+                    </a>
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1 text-solar-muted pt-1">
+                    <li>في صفحة الإعدادات، مرر للأسفل إلى قسم <b>Authorized domains</b>.</li>
+                    <li>اضغط على <b>Add domain</b>، ثم ألصق النطاق المنسوخ واضغط <b>Done</b>.</li>
                   </ol>
                 </div>
               )}

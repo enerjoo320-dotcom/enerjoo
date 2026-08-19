@@ -7,6 +7,7 @@ import { ProductCard } from './ProductCard';
 import { useAuth } from '../context/AuthContext';
 import { subscribeToProductReviews, addProductReview, deleteProductReview } from '../services/firestoreService';
 import { auth } from '../lib/firebase';
+import { getUnifiedWhatsAppUrl, UNIFIED_PHONE_DISPLAY } from '../constants/contact';
 
 interface ProductDetailProps {
   product: Product;
@@ -359,15 +360,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             <div className="flex gap-4 mt-10">
               <button 
                 onClick={() => {
-                  const firstSupplier = product.suppliers?.[0];
-                  if (firstSupplier?.phone) {
-                    const phone = firstSupplier.phone.replace(/\+/g, '').replace(/\s+/g, '');
-                    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(isAr ? `مرحبا، أنا مهتم بمنتج ${product.nameAr}` : `Hi, I am interested in ${product.name}`)}`, '_blank');
-                  }
+                  const message = isAr 
+                    ? `مرحباً، أنا مهتم بطلب / الاستفسار عن منتج: ${product.nameAr || product.name}` 
+                    : `Hi, I am interested in ordering/inquiring about: ${product.name}`;
+                  window.open(getUnifiedWhatsAppUrl(message), '_blank');
                 }}
-                className="flex-[2] bg-solar-blue text-white py-5 rounded-[24px] font-black shadow-2xl shadow-solar-blue/30 transition hover:bg-opacity-90 active:scale-95 text-lg"
+                className="flex-[2] bg-solar-blue text-white py-5 rounded-[24px] font-black shadow-2xl shadow-solar-blue/30 transition hover:bg-opacity-90 active:scale-95 text-lg flex items-center justify-center gap-2"
               >
-                {t.contactSupplier}
+                <span>{t.contactSupplier}</span>
+                <span className="text-xs font-normal opacity-80" dir="ltr">({UNIFIED_PHONE_DISPLAY})</span>
               </button>
               <button 
                 onClick={() => onCompare(product)}

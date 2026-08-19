@@ -24,6 +24,21 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const EXCLUDED_ADMIN_EMAILS = [
+  'enerjoo320@gmail.com',
+  'eng.faressnasser@gmail.com',
+  'faressnasser12@gmail.com'
+];
+
+const checkIsAdminEmail = (emailStr: string | null | undefined): boolean => {
+  if (!emailStr) return false;
+  const clean = emailStr.toLowerCase().trim();
+  if (EXCLUDED_ADMIN_EMAILS.includes(clean)) {
+    return false;
+  }
+  return clean === 'enerjoo365@gmail.com';
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,15 +62,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const data = userDoc.data();
             
             const emailStr = (firebaseUser.email || "").toLowerCase();
-            const isAdminEmail = emailStr && (
-              ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com', 'enerjoo365@gmail.com'].includes(emailStr) ||
-              emailStr.startsWith('enerjoo')
-            );
+            const isAdminEmail = checkIsAdminEmail(emailStr);
+            const isExcluded = EXCLUDED_ADMIN_EMAILS.includes(emailStr);
 
             if (isAdminEmail && data.type !== 'admin') {
               await setDoc(userDocRef, { type: 'admin', verified: true }, { merge: true });
               data.type = 'admin';
               data.verified = true;
+            } else if (isExcluded && data.type === 'admin') {
+              // Revoke admin permissions
+              await setDoc(userDocRef, { type: 'customer' }, { merge: true });
+              data.type = 'customer';
             }
 
             let isVerified = data.type === 'customer' || data.type === 'admin' || data.verified || firebaseUser.emailVerified;
@@ -69,10 +86,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setUser({ uid: firebaseUser.uid, ...data, verified: isVerified } as User);
           } else {
             const emailStr = (firebaseUser.email || "").toLowerCase();
-            const isAdminEmail = emailStr && (
-              ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com', 'enerjoo365@gmail.com'].includes(emailStr) ||
-              emailStr.startsWith('enerjoo')
-            );
+            const isAdminEmail = checkIsAdminEmail(emailStr);
             const userType = isAdminEmail ? 'admin' : 'customer';
 
             const newUserData: User = {
@@ -105,7 +119,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const userDocRef = doc(db, "users", mockUid);
           unsubUserDoc = onSnapshot(userDocRef, (userDoc) => {
             if (userDoc.exists()) {
-              setUser({ uid: mockUid, ...userDoc.data() } as User);
+              const data = userDoc.data();
+              const mockEmail = (data.email || '').toLowerCase();
+              if (EXCLUDED_ADMIN_EMAILS.includes(mockEmail) && data.type === 'admin') {
+                data.type = 'customer';
+                setDoc(doc(db, "users", mockUid), { type: 'customer' }, { merge: true });
+              }
+              setUser({ uid: mockUid, ...data } as User);
             } else {
               setUser(null);
               safeLocalStorage.removeItem("enerjoo_mock_auth_uid");
@@ -131,10 +151,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const register = async (email: string, password: string, additionalData: any = {}) => {
     const emailStr = email.toLowerCase();
-    const isAdminEmail = emailStr && (
-      ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com', 'enerjoo365@gmail.com'].includes(emailStr) ||
-      emailStr.startsWith('enerjoo')
-    );
+    const isAdminEmail = checkIsAdminEmail(emailStr);
     const userRole = isAdminEmail ? 'admin' : (additionalData.type || "customer");
 
     try {
@@ -161,7 +178,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (isNotAllowed) {
         console.warn("Email/Password Auth disabled or misconfigured in Firebase console. Initializing Sandbox Mode fallback.");
         
-        // Generate a valid mock user ID that is unique but deterministic per email
         const cleanEmail = email.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_');
         const mockUid = `mock_${cleanEmail}_${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -175,11 +191,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           location: additionalData.location || "Cairo, Egypt",
           phone: additionalData.phone || "",
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${mockUid}`,
-          verified: true, // Auto-verify in Sandbox/Mock Mode to make development and tests smooth
+          verified: true,
           createdAt: new Date().toISOString()
         };
 
-        // Save to Firestore and LocalStorage
         await setDoc(doc(db, "users", mockUid), userData);
         safeLocalStorage.setItem("enerjoo_mock_auth_uid", mockUid);
         setUser(userData);
@@ -198,7 +213,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (isNotAllowed) {
         console.warn("Email/Password Auth is disabled or misconfigured in Firebase. Logging in via Sandbox fallback.");
         
-        // Check if there is an existing user in Firestore with this email
         const q = query(collection(db, "users"), where("email", "==", email.toLowerCase().trim()));
         const querySnapshot = await getDocs(q);
         
@@ -206,18 +220,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const userDoc = querySnapshot.docs[0];
           const userData = userDoc.data();
           const mockUid = userDoc.id;
+          const emailStr = email.toLowerCase();
+          if (EXCLUDED_ADMIN_EMAILS.includes(emailStr) && userData.type === 'admin') {
+            userData.type = 'customer';
+            await setDoc(doc(db, "users", mockUid), { type: 'customer' }, { merge: true });
+          }
           safeLocalStorage.setItem("enerjoo_mock_auth_uid", mockUid);
           setUser({ uid: mockUid, ...userData } as User);
         } else {
-          // If no user exists, let's auto-create one programmatically so that the test runner's login succeeds immediately!
           console.log("No existing user found for mock login. Dynamic provisioning initiated.");
           const cleanEmail = email.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_');
           const mockUid = `mock_${cleanEmail}_${Math.floor(1000 + Math.random() * 9000)}`;
           const emailStr = email.toLowerCase();
-          const isAdminEmail = emailStr && (
-            ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com', 'enerjoo365@gmail.com'].includes(emailStr) ||
-            emailStr.startsWith('enerjoo')
-          );
+          const isAdminEmail = checkIsAdminEmail(emailStr);
           const userRole = isAdminEmail ? 'admin' : "customer";
 
           const userData: User = {
@@ -245,39 +260,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signInWithGoogle = async (role: 'customer' | 'supplier' = 'customer') => {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({
-      prompt: 'select_account'
-    });
-    const res = await signInWithPopup(auth, provider);
-    const userDocRef = doc(db, "users", res.user.uid);
-    const userDoc = await getDoc(userDocRef);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      const res = await signInWithPopup(auth, provider);
+      if (!res || !res.user) return;
+      const userDocRef = doc(db, "users", res.user.uid);
+      const userDoc = await getDoc(userDocRef);
 
-    if (!userDoc.exists()) {
-      const emailStr = (res.user.email || "").toLowerCase();
-      const isAdminEmail = emailStr && (
-        ['enerjoo320@gmail.com', 'eng.faressnasser@gmail.com', 'faressnasser12@gmail.com', 'enerjoo365@gmail.com'].includes(emailStr) ||
-        emailStr.startsWith('enerjoo')
-      );
-      const userRole = isAdminEmail ? 'admin' : role;
-      
-      const userData: User = {
-        uid: res.user.uid,
-        email: res.user.email || "",
-        name: res.user.displayName || "User",
-        nameAr: res.user.displayName || "مستخدم جديد",
-        type: userRole,
-        company: "",
-        location: "Cairo, Egypt",
-        phone: "",
-        avatar: res.user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${res.user.uid}`,
-        verified: userRole === 'admin' || userRole === 'customer',
-        createdAt: new Date().toISOString()
-      };
-      await setDoc(userDocRef, userData);
-      setUser(userData);
-    } else {
-      setUser({ uid: res.user.uid, ...userDoc.data() } as User);
+      if (!userDoc.exists()) {
+        const emailStr = (res.user.email || "").toLowerCase();
+        const isAdminEmail = checkIsAdminEmail(emailStr);
+        const userRole = isAdminEmail ? 'admin' : role;
+        
+        const userData: User = {
+          uid: res.user.uid,
+          email: res.user.email || "",
+          name: res.user.displayName || "User",
+          nameAr: res.user.displayName || "مستخدم جديد",
+          type: userRole,
+          company: "",
+          location: "Cairo, Egypt",
+          phone: "",
+          avatar: res.user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${res.user.uid}`,
+          verified: userRole === 'admin' || userRole === 'customer',
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(userDocRef, userData);
+        setUser(userData);
+      } else {
+        const data = userDoc.data();
+        const emailStr = (res.user.email || "").toLowerCase();
+        if (EXCLUDED_ADMIN_EMAILS.includes(emailStr) && data.type === 'admin') {
+          data.type = 'customer';
+          await setDoc(userDocRef, { type: 'customer' }, { merge: true });
+        }
+        setUser({ uid: res.user.uid, ...data } as User);
+      }
+    } catch (err: any) {
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        console.info("Google Sign In popup was closed or cancelled by the user.");
+        return;
+      }
+      throw err;
     }
   };
 

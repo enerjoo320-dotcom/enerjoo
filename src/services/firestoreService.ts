@@ -14,7 +14,6 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Product, Supplier, ProductReview } from '../types';
-import { productsData } from '../data/mockData';
 
 const PRODUCTS_COLLECTION = 'products';
 const USERS_COLLECTION = 'users';
@@ -60,19 +59,8 @@ export const subscribeToProducts = (callback: (products: Product[]) => void) => 
     const products = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
     callback(products);
   }, (error) => {
-    const errInfo: FirestoreErrorInfo = {
-      error: error instanceof Error ? error.message : String(error),
-      authInfo: {
-        userId: auth.currentUser?.uid,
-        email: auth.currentUser?.email,
-        emailVerified: auth.currentUser?.emailVerified,
-      },
-      operationType: OperationType.LIST,
-      path: PRODUCTS_COLLECTION
-    };
-    console.error('Firestore Error:', JSON.stringify(errInfo));
-    console.warn("Falling back to local static solar products catalog.");
-    callback(productsData);
+    console.error('Firestore Products Error:', error);
+    callback([]);
   });
 };
 
@@ -105,62 +93,26 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
       });
     callback(suppliers);
   }, (error) => {
-    const errInfo: FirestoreErrorInfo = {
-      error: error instanceof Error ? error.message : String(error),
-      authInfo: {
-        userId: auth.currentUser?.uid,
-        email: auth.currentUser?.email,
-        emailVerified: auth.currentUser?.emailVerified,
-      },
-      operationType: OperationType.LIST,
-      path: USERS_COLLECTION
-    };
-    console.error('Firestore Error:', JSON.stringify(errInfo));
-    console.warn("Falling back to local static suppliers database.");
-    
-    // Dynamically build supplier list from productsData
-    const fallbackSuppliers: Supplier[] = [];
-    productsData.forEach(p => {
-      p.suppliers.forEach(s => {
-        if (!fallbackSuppliers.some(existing => existing.id === s.id)) {
-          fallbackSuppliers.push(s);
-        }
-      });
-    });
-    callback(fallbackSuppliers);
+    console.error('Firestore Suppliers Error:', error);
+    callback([]);
   });
 };
 
 export const seedInitialData = async () => {
+  // Clear any existing products from Firestore as requested by user
   try {
     const productsSnapshot = await getDocs(collection(db, PRODUCTS_COLLECTION));
-    if (productsSnapshot.empty) {
-      if (!auth.currentUser) {
-        console.log("Seeding skipped: No authenticated user to perform writes.");
-        return;
-      }
-
-      console.log("Seeding initial products...");
-      for (const p of productsData) {
-        const { id, ...productWithoutId } = p;
-        const normalizedProduct = {
-          ...productWithoutId,
-          supplierId: String(productWithoutId.supplierId),
-          updatedAt: serverTimestamp()
-        };
+    if (!productsSnapshot.empty) {
+      for (const productDoc of productsSnapshot.docs) {
         try {
-          await addDoc(collection(db, PRODUCTS_COLLECTION), normalizedProduct);
-        } catch (e: any) {
-          if (e.code === 'permission-denied') {
-            console.warn("Seeding failed for a product due to permissions. You may need to sign in as an admin.");
-            break;
-          }
-          throw e;
+          await deleteDoc(doc(db, PRODUCTS_COLLECTION, productDoc.id));
+        } catch (delErr) {
+          console.warn("Could not delete product doc:", productDoc.id, delErr);
         }
       }
     }
   } catch (error) {
-    console.error("Error checking or seeding data:", error);
+    console.error("Error during product cleanup:", error);
   }
 };
 

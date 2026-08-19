@@ -4,6 +4,7 @@ import { translations } from '../translations';
 import { uploadFile } from '../services/uploadService';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { UNIFIED_PHONE_DISPLAY } from '../constants/contact';
 
 export const ProductForm: React.FC<{ 
   lang: 'ar' | 'en'; 
@@ -21,7 +22,7 @@ export const ProductForm: React.FC<{
     brand: initialData?.brand || '',
     category: (initialData?.category as string) || 'panels',
     price: initialData?.price?.toString() || '',
-    phone: initialData?.suppliers?.[0]?.phone || user?.phone || '',
+    phone: UNIFIED_PHONE_DISPLAY,
     description: initialData?.specs?.description || '',
     // Dynamic specs
     power: initialData?.power?.toString() || '',
@@ -46,7 +47,7 @@ export const ProductForm: React.FC<{
   });
 
   const getFieldsForCategory = (cat: string) => {
-    const common = ['price', 'warranty', 'phone'];
+    const common = ['price', 'warranty'];
     switch (cat) {
       case 'panels':
         return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'area', 'weight'];
@@ -55,17 +56,17 @@ export const ProductForm: React.FC<{
       case 'batteries':
         return [...common, 'capacity', 'voltage', 'type', 'weight'];
       case 'cables':
-        return ['price', 'crossSection', 'length', 'voltage', 'material', 'color', 'phone'];
+        return ['price', 'crossSection', 'length', 'voltage', 'material', 'color'];
       case 'mounting':
-        return ['price', 'material', 'maxWind', 'warranty', 'phone'];
+        return ['price', 'material', 'maxWind', 'warranty'];
       case 'protection':
-        return ['price', 'poles', 'current', 'voltage', 'type', 'phone'];
+        return ['price', 'poles', 'current', 'voltage', 'type'];
       case 'combiner':
-        return ['price', 'ipRating', 'poles', 'voltage', 'current', 'phone'];
+        return ['price', 'ipRating', 'poles', 'voltage', 'current'];
       case 'mc4':
       case 'sealings':
       case 'clamps':
-        return ['price', 'quantity', 'material', 'type', 'phone'];
+        return ['price', 'quantity', 'material', 'type'];
       default:
         return [...common, 'power', 'efficiency', 'type'];
     }
@@ -157,7 +158,7 @@ export const ProductForm: React.FC<{
             name: user?.name || 'New Supplier',
             nameAr: user?.nameAr || 'مورد جديد',
             price: parseInt(formData.price) || 0,
-            phone: formData.phone,
+            phone: UNIFIED_PHONE_DISPLAY,
             location: user?.location || 'Cairo, Egypt',
             verified: user?.verified || false,
             lastUpdate: new Date().toLocaleDateString()
@@ -489,19 +490,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, area: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="2.1"
-              required
-            />
-          </div>
-        )}
-        {fields.includes('phone') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{lang === 'ar' ? 'رقم الهاتف (الواتساب)' : 'Phone (WhatsApp)'}</label>
-            <input 
-              type="text" 
-              value={formData.phone}
-              onChange={e => setFormData(p => ({...p, phone: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="+201234567890"
               required
             />
           </div>

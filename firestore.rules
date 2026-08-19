@@ -84,9 +84,7 @@ service cloud.firestore {
         return isSignedIn() && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin' ||
           (request.auth.token.keys().contains('email') && (
-            request.auth.token.email.matches('(?i)^enerjoo.*') ||
-            request.auth.token.email.matches('(?i)^eng\\.faressnasser.*') ||
-            request.auth.token.email.matches('(?i)^faressnasser12.*')
+            request.auth.token.email.matches('(?i)^enerjoo365@.*')
           ))
         );
       }

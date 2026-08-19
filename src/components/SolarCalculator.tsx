@@ -35,7 +35,7 @@ import { translations } from '../translations';
 import { Product } from '../types';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { productsData } from '../data/mockData';
+import { UNIFIED_PHONE_DISPLAY, UNIFIED_WHATSAPP_NUMBER } from '../constants/contact';
 
 interface SolarCalculatorProps {
   lang: 'ar' | 'en';
@@ -594,40 +594,41 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
     // 4. Solar Target Panel Capacity in kW
     const solarCapacityKw = dailyKwh / (psh * systemLosses);
 
-    // Dynamic Sizing of 3 specific options with realistic products matched from database:
-    const availableProducts = products && products.length > 0 ? products : productsData;
+    // Filter strictly available products from the store database
+    const realPanels = (products || []).filter(p => p.category === 'panels');
+    const realInverters = (products || []).filter(p => p.category === 'inverters');
+    const realBatteries = (products || []).filter(p => p.category === 'batteries');
 
     // Option A: Budget Sizing
-    // - Panels: Trina Solar 410W or JA Solar 395W
-    // - Inverter: growatt 5000TL equivalent
-    const budgetPanel = availableProducts.find(p => p.category === 'panels' && p.power <= 410) || availableProducts.find(p => p.category === 'panels') || productsData[1];
-    const budgetInverter = availableProducts.find(p => p.category === 'inverters') || productsData[3];
-    const budgetQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / (budgetPanel?.power || 410)));
-    const budgetRealKw = (budgetQtyPanels * (budgetPanel?.power || 410)) / 1000;
-    const budgetInverterQty = Math.ceil(budgetRealKw / 5); // 5kW increments
+    const budgetPanel = realPanels.find(p => p.power <= 410) || realPanels[0] || null;
+    const budgetInverter = realInverters[0] || null;
+    const budgetPanelPower = budgetPanel ? budgetPanel.power : 550;
+    const budgetPanelArea = budgetPanel ? (budgetPanel.area || 2.1) : 2.1;
+    const budgetQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / budgetPanelPower));
+    const budgetRealKw = (budgetQtyPanels * budgetPanelPower) / 1000;
+    const budgetInverterQty = Math.ceil(budgetRealKw / 5);
     
     // Option B: Recommended Option Sizing
-    // - Panels: LONGi Hi-MO 5 540W
-    // - Inverter: Growatt SPF 5000TL
-    const recPanel = availableProducts.find(p => p.category === 'panels' && p.brand.toLowerCase() === 'longi') || availableProducts.find(p => p.category === 'panels') || productsData[2];
-    const recInverter = availableProducts.find(p => p.category === 'inverters' && p.brand.toLowerCase() === 'growatt') || availableProducts.find(p => p.category === 'inverters') || productsData[3];
-    const recQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / (recPanel?.power || 540)));
-    const recRealKw = (recQtyPanels * (recPanel?.power || 540)) / 1000;
+    const recPanel = realPanels.find(p => p.brand?.toLowerCase() === 'longi') || (realPanels.length > 1 ? realPanels[1] : realPanels[0]) || null;
+    const recInverter = realInverters.find(p => p.brand?.toLowerCase() === 'growatt') || (realInverters.length > 1 ? realInverters[1] : realInverters[0]) || null;
+    const recPanelPower = recPanel ? recPanel.power : 550;
+    const recPanelArea = recPanel ? (recPanel.area || 2.1) : 2.1;
+    const recQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1000) / recPanelPower));
+    const recRealKw = (recQtyPanels * recPanelPower) / 1000;
     const recInverterQty = Math.ceil(recRealKw / 5);
 
     // Option C: Premium Option Sizing
-    // - Panels: Jinko Solar 450W
-    // - Inverter: Growatt high standard configured
-    const premiumPanel = availableProducts.find(p => p.category === 'panels' && p.brand.toLowerCase() === 'jinko') || availableProducts.find(p => p.category === 'panels') || productsData[0];
-    const premiumInverter = availableProducts.find(p => p.category === 'inverters') || productsData[3];
-    const premiumQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1150) / (premiumPanel?.power || 450))); // highly engineered safety markup
-    const premiumRealKw = (premiumQtyPanels * (premiumPanel?.power || 450)) / 1000;
+    const premiumPanel = realPanels.find(p => p.brand?.toLowerCase() === 'jinko') || (realPanels.length > 2 ? realPanels[2] : realPanels[0]) || null;
+    const premiumInverter = (realInverters.length > 2 ? realInverters[2] : realInverters[0]) || null;
+    const premiumPanelPower = premiumPanel ? premiumPanel.power : 550;
+    const premiumPanelArea = premiumPanel ? (premiumPanel.area || 2.1) : 2.1;
+    const premiumQtyPanels = Math.max(2, Math.ceil((solarCapacityKw * 1150) / premiumPanelPower));
+    const premiumRealKw = (premiumQtyPanels * premiumPanelPower) / 1000;
     const premiumInverterQty = Math.ceil(premiumRealKw / 5);
 
     // 5. Battery sizing (None for On-Grid, off-grid consumes full nightly storage, hybrid consumes ~40% backup storage)
-    const activeBattery = availableProducts.find(p => p.category === 'batteries') || productsData[4];
-    const batteryUnitKwh = 2.4; // Pylontech US2000C is 2.4kWh (48V 50Ah)
-    const batteryCapacityPrice = activeBattery ? activeBattery.price : 22000;
+    const activeBattery = realBatteries[0] || null;
+    const batteryUnitKwh = activeBattery?.power ? activeBattery.power / 1000 : 2.4;
 
     let budgetQtyBattery = 0;
     let recQtyBattery = 0;
@@ -656,53 +657,59 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
     const recMounting = recQtyPanels * 1500;
     const premiumMounting = premiumQtyPanels * 1900;
 
-    // Summing pricing EGP
-    const costBudget = 
-      (budgetQtyPanels * budgetPanel.price) + 
-      (budgetInverterQty * budgetInverter.price) + 
-      (budgetQtyBattery * batteryCapacityPrice) + 
-      budgetProtection + budgetCables + budgetMounting;
+    const hasRealBudgetProducts = Boolean(budgetPanel && budgetInverter);
+    const hasRealRecProducts = Boolean(recPanel && recInverter);
+    const hasRealPremiumProducts = Boolean(premiumPanel && premiumInverter);
 
-    const costRec = 
-      (recQtyPanels * recPanel.price) + 
-      (recInverterQty * recInverter.price) + 
-      (recQtyBattery * batteryCapacityPrice) + 
-      recProtection + recCables + recMounting;
+    // Summing pricing in EGP if real products exist in store
+    const costBudget = hasRealBudgetProducts
+      ? (budgetQtyPanels * (budgetPanel?.price || 0)) + 
+        (budgetInverterQty * (budgetInverter?.price || 0)) + 
+        (budgetQtyBattery * (activeBattery?.price || 0)) + 
+        budgetProtection + budgetCables + budgetMounting
+      : 0;
 
-    const costPremium = 
-      (premiumQtyPanels * premiumPanel.price) + 
-      (premiumInverterQty * premiumInverter.price) + 
-      (premiumQtyBattery * batteryCapacityPrice) + 
-      premiumProtection + premiumCables + premiumMounting;
+    const costRec = hasRealRecProducts
+      ? (recQtyPanels * (recPanel?.price || 0)) + 
+        (recInverterQty * (recInverter?.price || 0)) + 
+        (recQtyBattery * (activeBattery?.price || 0)) + 
+        recProtection + recCables + recMounting
+      : 0;
+
+    const costPremium = hasRealPremiumProducts
+      ? (premiumQtyPanels * (premiumPanel?.price || 0)) + 
+        (premiumInverterQty * (premiumInverter?.price || 0)) + 
+        (premiumQtyBattery * (activeBattery?.price || 0)) + 
+        premiumProtection + premiumCables + premiumMounting
+      : 0;
 
     // Financial calculations: Annual yield (kWh), savings (EGP), Payback (Years), ROI (%)
-    // Assuming average Egyptian electricity tariff savings value: 2.2 EGP per kWh (integrated residential/commercial blends)
     const valuePerKwh = 2.25; 
-    const annualKwhYieldBase = dailyKwh * 365 * 0.95; // 5% cloud outage allocation
+    const annualKwhYieldBase = dailyKwh * 365 * 0.95;
 
     let annualSavingsBudget = annualKwhYieldBase * valuePerKwh;
     if (systemType === 'pump') {
       const activeHp = pumpHp ? Number(pumpHp) : 10;
-      annualSavingsBudget = activeHp * 6 * 230 * 6.0; // 6h per day, 230 irrigation days per year, 6.0 EGP index savings per HP/hour (diesel & engine wear replacement)
+      annualSavingsBudget = activeHp * 6 * 230 * 6.0;
     }
-    const paybackBudget = costBudget / annualSavingsBudget;
-    const roiBudget = (annualSavingsBudget / costBudget) * 100;
+    const paybackBudget = costBudget > 0 ? (costBudget / annualSavingsBudget) : 0;
+    const roiBudget = costBudget > 0 ? ((annualSavingsBudget / costBudget) * 100) : 0;
 
-    let annualSavingsRec = annualKwhYieldBase * 1.05 * valuePerKwh; // more efficient panel margins
+    let annualSavingsRec = annualKwhYieldBase * 1.05 * valuePerKwh;
     if (systemType === 'pump') {
       const activeHp = pumpHp ? Number(pumpHp) : 10;
-      annualSavingsRec = activeHp * 6 * 230 * 7.5; // Premium Deye VFD efficiency
+      annualSavingsRec = activeHp * 6 * 230 * 7.5;
     }
-    const paybackRec = costRec / annualSavingsRec;
-    const roiRec = (annualSavingsRec / costRec) * 100;
+    const paybackRec = costRec > 0 ? (costRec / annualSavingsRec) : 0;
+    const roiRec = costRec > 0 ? ((annualSavingsRec / costRec) * 100) : 0;
 
-    let annualSavingsPremium = annualKwhYieldBase * 1.10 * valuePerKwh; // top components performance
+    let annualSavingsPremium = annualKwhYieldBase * 1.10 * valuePerKwh;
     if (systemType === 'pump') {
       const activeHp = pumpHp ? Number(pumpHp) : 10;
-      annualSavingsPremium = activeHp * 6 * 230 * 9.0; // Ultra high-frequency variable speed zero-loss
+      annualSavingsPremium = activeHp * 6 * 230 * 9.0;
     }
-    const paybackPremium = costPremium / annualSavingsPremium;
-    const roiPremium = (annualSavingsPremium / costPremium) * 100;
+    const paybackPremium = costPremium > 0 ? (costPremium / annualSavingsPremium) : 0;
+    const roiPremium = costPremium > 0 ? ((annualSavingsPremium / costPremium) * 100) : 0;
 
     return {
       loads: {
@@ -715,10 +722,11 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
           titleAr: 'الخيار الاقتصادي (أقل تكلفة بمنتجات قياسية متميزة)',
           titleEn: 'Budget Option (Standard stable entry setup)',
           cost: costBudget,
+          hasRealProducts: hasRealBudgetProducts,
           panel: budgetPanel,
           panelQty: budgetQtyPanels,
           panelPowerTotalKw: budgetRealKw,
-          panelArea: budgetQtyPanels * budgetPanel.area,
+          panelArea: budgetQtyPanels * budgetPanelArea,
           inverter: budgetInverter,
           inverterQty: budgetInverterQty,
           battery: activeBattery,
@@ -738,10 +746,11 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
           titleAr: 'الخيار الموصى به (أفضل قيمة وسعر مقابل الفاعلية والأطول عمراً)',
           titleEn: 'Recommended Option (Optimal payback and elite lifespan)',
           cost: costRec,
+          hasRealProducts: hasRealRecProducts,
           panel: recPanel,
           panelQty: recQtyPanels,
           panelPowerTotalKw: recRealKw,
-          panelArea: recQtyPanels * recPanel.area,
+          panelArea: recQtyPanels * recPanelArea,
           inverter: recInverter,
           inverterQty: recInverterQty,
           battery: activeBattery,
@@ -761,10 +770,11 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
           titleAr: 'الخيار الفاخر (أقصى قدرة للتشغيل، أعلى كفاءة وضمانات ممتدة)',
           titleEn: 'Premium Option (Ultimate performance, maximum backup and elite protection)',
           cost: costPremium,
+          hasRealProducts: hasRealPremiumProducts,
           panel: premiumPanel,
           panelQty: premiumQtyPanels,
           panelPowerTotalKw: premiumRealKw,
-          panelArea: premiumQtyPanels * premiumPanel.area,
+          panelArea: premiumQtyPanels * premiumPanelArea,
           inverter: premiumInverter,
           inverterQty: premiumInverterQty,
           battery: activeBattery,
@@ -923,7 +933,6 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       return;
     }
 
-    const supplierPhone = selectedTierData.panel?.suppliers?.[0]?.phone || '201033253870';
     const msg = buildDynamicWhatsAppMessage(tier, currentCalc);
 
     try {
@@ -960,7 +969,7 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       setLeadForm(prev => ({ ...prev, loading: false }));
     }
 
-    window.open(`https://wa.me/${supplierPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/${UNIFIED_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   // Dynamic WhatsApp contact for a specific supplier with automatic Firestore lead submission
@@ -988,7 +997,6 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       return;
     }
 
-    const cleanPhone = sup.phone.replace(/\+/g, '').replace(/\s+/g, '');
     const msg = buildDynamicWhatsAppMessage(currentTier, currentCalc);
 
     try {
@@ -1026,7 +1034,7 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       setLeadForm(prev => ({ ...prev, loading: false }));
     }
 
-    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/${UNIFIED_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const currentSelection = step === 'results' ? runSolarCalculations() : null;
@@ -1816,11 +1824,19 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                 </div>
 
                 <div className="mt-4 md:mt-0 md:text-left flex-shrink-0">
-                  <div className="text-[10px] text-solar-muted font-bold uppercase tracking-widest">{isAr ? 'التكلفة الإجمالية الاسترشادية' : 'TOTAL RETAL ESTIMATION'}</div>
-                  <div className="text-3xl md:text-4xl font-display font-black text-solar-text tracking-tighter flex items-baseline gap-1 bg-solar-light/60 px-5 py-2.5 rounded-2xl border border-solar-border/10">
-                    {currentSelection.tiers[currentTier].cost.toLocaleString()}
-                    <span className="text-sm font-bold text-solar-muted">{isAr ? 'ج.م' : 'EGP'}</span>
-                  </div>
+                  <div className="text-[10px] text-solar-muted font-bold uppercase tracking-widest">{isAr ? 'التكلفة الإجمالية' : 'TOTAL ESTIMATION'}</div>
+                  {currentTierData.hasRealProducts ? (
+                    <div className="text-3xl md:text-4xl font-display font-black text-solar-text tracking-tighter flex items-baseline gap-1 bg-solar-light/60 px-5 py-2.5 rounded-2xl border border-solar-border/10">
+                      {currentSelection.tiers[currentTier].cost.toLocaleString()}
+                      <span className="text-sm font-bold text-solar-muted">{isAr ? 'ج.م' : 'EGP'}</span>
+                    </div>
+                  ) : (
+                    <div className="bg-solar-light/60 px-4 py-2.5 rounded-2xl border border-solar-border/20 text-center mt-1">
+                      <span className="text-xs font-black text-solar-blue">
+                        {isAr ? 'تحدد حسب عروض الموردين المباشرة' : 'Subject to Direct RFQ Quote'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1828,152 +1844,168 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
               <div className="space-y-4">
                 <h4 className="text-sm font-black text-solar-text flex items-center justify-end gap-1.5 text-right">
                   <Layers size={16} className="text-solar-blue" />
-                  <span>{isAr ? 'المعدات والمنتجات المقترحة من كتالوج Enerjoo المتاح' : 'Recommended Marketplace Products Lineup'}</span>
+                  <span>{isAr ? 'المعدات والمنتجات المقترحة من متجر Enerjoo' : 'Recommended Marketplace Products Lineup'}</span>
                 </h4>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Solar Panel Card */}
-                  {currentTierData && currentTierData.panel && (
-                    <div className="border border-solar-border rounded-[24px] overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between h-fit bg-solar-light/10 text-right">
-                      <div className="p-4 flex items-start gap-4">
-                        <img 
-                          src={currentTierData.panel.image} 
-                          alt={currentTierData.panel.name} 
-                          className="w-20 h-20 rounded-xl object-cover shrink-0 border border-solar-border/50"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="space-y-1">
-                          <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
-                            {isAr ? 'فئة الألواح الشمسية' : 'Solar Board'}
-                          </span>
-                          <h5 
-                            onClick={() => onProductClick(currentTierData.panel)}
-                            className="text-xs font-black text-solar-text hover:text-solar-blue transition-colors cursor-pointer"
-                          >
-                            {isAr ? currentTierData.panel.nameAr : currentTierData.panel.name}
-                          </h5>
-                          <p className="text-[10px] text-solar-muted font-bold">
-                            {isAr 
-                              ? `العلامة: ${currentTierData.panel.brand} | الكفاءة: ${currentTierData.panel.efficiency}%`
-                              : `Brand: ${currentTierData.panel.brand} | Efficiency: ${currentTierData.panel.efficiency}%`}
-                          </p>
+                {(!currentTierData.panel && !currentTierData.inverter) ? (
+                  <div className="bg-solar-light/20 border border-dashed border-solar-border/80 p-6 rounded-[28px] text-center space-y-3">
+                    <div className="w-12 h-12 bg-solar-blue/10 text-solar-blue rounded-2xl flex items-center justify-center mx-auto text-xl font-black">
+                      <Layers size={22} className="text-solar-blue" />
+                    </div>
+                    <h5 className="text-sm font-black text-solar-text">
+                      {isAr ? 'لا توجد منتجات مضافة في المتجر حالياً لهذه الباقة' : 'No Store Products Currently Listed for this Tier'}
+                    </h5>
+                    <p className="text-xs text-solar-muted font-bold max-w-lg mx-auto leading-relaxed">
+                      {isAr 
+                        ? `تم حساب وتحديد القدرة الهندسية لمحطتك بدقة (${currentTierData.panelPowerTotalKw.toFixed(2)} كيلو واط). يمكنك إرسال المواصفات لتلقي عروض أسعار وتوريد معتمدة مباشرة من الموردين.`
+                        : `Your required target capacity has been precisely sized to (${currentTierData.panelPowerTotalKw.toFixed(2)} kW). You can submit a direct quote request to receive proposals from certified suppliers.`}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Solar Panel Card */}
+                    {currentTierData && currentTierData.panel && (
+                      <div className="border border-solar-border rounded-[24px] overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between h-fit bg-solar-light/10 text-right">
+                        <div className="p-4 flex items-start gap-4">
+                          <img 
+                            src={currentTierData.panel.image} 
+                            alt={currentTierData.panel.name} 
+                            className="w-20 h-20 rounded-xl object-cover shrink-0 border border-solar-border/50"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
+                              {isAr ? 'فئة الألواح الشمسية' : 'Solar Board'}
+                            </span>
+                            <h5 
+                              onClick={() => onProductClick(currentTierData.panel)}
+                              className="text-xs font-black text-solar-text hover:text-solar-blue transition-colors cursor-pointer"
+                            >
+                              {isAr ? currentTierData.panel.nameAr : currentTierData.panel.name}
+                            </h5>
+                            <p className="text-[10px] text-solar-muted font-bold">
+                              {isAr 
+                                ? `العلامة: ${currentTierData.panel.brand} | الكفاءة: ${currentTierData.panel.efficiency}%`
+                                : `Brand: ${currentTierData.panel.brand} | Efficiency: ${currentTierData.panel.efficiency}%`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50">
+                          <div className="text-[11px] font-black text-solar-blue">
+                            {isAr ? `الكمية الموصى بها: ${currentTierData.panelQty}` : `Qty needed: ${currentTierData.panelQty}`}
+                          </div>
+                          <div className="text-[11px] text-solar-text font-black">
+                            {(currentTierData.panel.price * currentTierData.panelQty).toLocaleString()} {t.egp}
+                          </div>
                         </div>
                       </div>
+                    )}
 
-                      <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50">
-                        <div className="text-[11px] font-black text-solar-blue">
-                          {isAr ? `الكمية الموصى بها: ${currentTierData.panelQty}` : `Qty needed: ${currentTierData.panelQty}`}
+                    {/* Solar Inverter Card */}
+                    {currentTierData && currentTierData.inverter && (
+                      <div className="border border-solar-border rounded-[24px] overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between h-fit bg-solar-light/10 text-right">
+                        <div className="p-4 flex items-start gap-4">
+                          <img 
+                            src={currentTierData.inverter.image} 
+                            alt={currentTierData.inverter.name} 
+                            className="w-20 h-20 rounded-xl object-cover shrink-0 border border-solar-border/50"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
+                              {systemType === 'pump'
+                                ? (isAr ? 'مغير السرعة والإنفرتر (VFD/Drive)' : 'Pump Inverter (VFD)')
+                                : (isAr ? 'فئة العواكس / الإنفرتر' : 'Solar Inverter')}
+                            </span>
+                            <h5 
+                              onClick={() => onProductClick(currentTierData.inverter)}
+                              className="text-xs font-black text-solar-text hover:text-solar-blue transition-colors cursor-pointer"
+                            >
+                              {isAr ? currentTierData.inverter.nameAr : currentTierData.inverter.name}
+                            </h5>
+                            <p className="text-[10px] text-solar-muted font-bold">
+                              {isAr 
+                                ? `القدرة التشغيلية: ${currentTierData.inverter.power} وات`
+                                : `Rated Output: ${currentTierData.inverter.power}W`}
+                            </p>
+                          </div>
                         </div>
+
+                        <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50">
+                          <div className="text-[11px] font-black text-solar-blue">
+                            {isAr ? `الكمية الموصى بها: ${currentTierData.inverterQty}` : `Qty needed: ${currentTierData.inverterQty}`}
+                          </div>
+                          <div className="text-[11px] text-solar-text font-black">
+                            {(currentTierData.inverter.price * currentTierData.inverterQty).toLocaleString()} {t.egp}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Battery Storage Pack Card */}
+                    {currentTierData && currentTierData.batteryQty > 0 && currentTierData.battery && (
+                      <div className="border border-solar-border rounded-[24px] overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between h-fit bg-solar-light/10 text-right">
+                        <div className="p-4 flex items-start gap-4">
+                          <img 
+                            src={currentTierData.battery.image} 
+                            alt={currentTierData.battery.name} 
+                            className="w-20 h-20 rounded-xl object-cover shrink-0 border border-solar-border/50"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
+                              {isAr ? 'تخزين الطاقة والبطاريات' : 'Battery Energy Storage'}
+                            </span>
+                            <h5 
+                              onClick={() => onProductClick(currentTierData.battery)}
+                              className="text-xs font-black text-solar-text hover:text-solar-blue transition-colors cursor-pointer"
+                            >
+                              {isAr ? currentTierData.battery.nameAr : currentTierData.battery.name}
+                            </h5>
+                            <p className="text-[10px] text-solar-muted font-bold">
+                              {isAr 
+                                ? `سعة التخزين: ${currentTierData.batteryPowerTotalKwh.toFixed(1)} kWh`
+                                : `Total storage: ${currentTierData.batteryPowerTotalKwh.toFixed(1)} kWh`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50">
+                          <div className="text-[11px] font-black text-solar-blue">
+                            {isAr ? `الكمية الموصى بها: ${currentTierData.batteryQty}` : `Qty needed: ${currentTierData.batteryQty}`}
+                          </div>
+                          <div className="text-[11px] text-solar-text font-black">
+                            {(currentTierData.battery.price * currentTierData.batteryQty).toLocaleString()} {t.egp}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Standard Premium Cables & Accessories Sizing (Real values calculated in EGP) */}
+                    <div className="border border-solar-border rounded-[24px] p-4 bg-solar-light/10 flex flex-col justify-between text-right h-full text-right">
+                      <div className="space-y-2">
+                        <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
+                          {isAr ? 'الإكسسوارات وهندسة التركيب' : 'Mounting, Cables & Surge Protection'}
+                        </span>
+                        <h5 className="text-xs font-black text-solar-text">{isAr ? 'قائمة الإكسسوارات ومجمعات الحماية الشاملة' : 'Integrated Electrical Protections List'}</h5>
+                        
+                        <ul className="text-[10px] text-solar-muted font-bold space-y-1 list-disc list-inside">
+                          <li>{isAr ? `كابلات نحاسية معتمدة: ${currentTierData.cables.toLocaleString()} ج.م` : `Approved cables: ${currentTierData.cables.toLocaleString()} EGP`}</li>
+                          <li>{isAr ? `هيكل تثبيت ألومنيوم مقاوم للرياح: ${currentTierData.mounting.toLocaleString()} ج.م` : `Aluminum structural frame: ${currentTierData.mounting.toLocaleString()} EGP`}</li>
+                          <li>{isAr ? `أجهزة حماية AC/DC وقواطع مفاتيح: ${currentTierData.protection.toLocaleString()} ج.م` : `DC breakers & SPD sets: ${currentTierData.protection.toLocaleString()} EGP`}</li>
+                        </ul>
+                      </div>
+
+                      <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50 -mx-4 -mb-4 mt-4">
+                        <div className="text-[10px] font-black text-solar-blue">{isAr ? 'جاهز للتركيب الشامل' : 'Turnkey configured'}</div>
                         <div className="text-[11px] text-solar-text font-black">
-                          {(currentTierData.panel.price * currentTierData.panelQty).toLocaleString()} {t.egp}
+                          {((currentTierData.cables + currentTierData.mounting + currentTierData.protection)).toLocaleString()} {t.egp}
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Solar Inverter Card */}
-                  {currentTierData && currentTierData.inverter && (
-                    <div className="border border-solar-border rounded-[24px] overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between h-fit bg-solar-light/10 text-right">
-                      <div className="p-4 flex items-start gap-4">
-                        <img 
-                          src={currentTierData.inverter.image} 
-                          alt={currentTierData.inverter.name} 
-                          className="w-20 h-20 rounded-xl object-cover shrink-0 border border-solar-border/50"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="space-y-1">
-                          <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
-                            {systemType === 'pump'
-                              ? (isAr ? 'مغير السرعة والإنفرتر (VFD/Drive)' : 'Pump Inverter (VFD)')
-                              : (isAr ? 'فئة العواكس / الإنفرتر' : 'Solar Inverter')}
-                          </span>
-                          <h5 
-                            onClick={() => onProductClick(currentTierData.inverter)}
-                            className="text-xs font-black text-solar-text hover:text-solar-blue transition-colors cursor-pointer"
-                          >
-                            {isAr ? currentTierData.inverter.nameAr : currentTierData.inverter.name}
-                          </h5>
-                          <p className="text-[10px] text-solar-muted font-bold">
-                            {isAr 
-                              ? `القدرة التشغيلية: ${currentTierData.inverter.power} وات`
-                              : `Rated Output: ${currentTierData.inverter.power}W`}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50">
-                        <div className="text-[11px] font-black text-solar-blue">
-                          {isAr ? `الكمية الموصى بها: ${currentTierData.inverterQty}` : `Qty needed: ${currentTierData.inverterQty}`}
-                        </div>
-                        <div className="text-[11px] text-solar-text font-black">
-                          {(currentTierData.inverter.price * currentTierData.inverterQty).toLocaleString()} {t.egp}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Battery Storage Pack Card */}
-                  {currentTierData && currentTierData.batteryQty > 0 && currentTierData.battery && (
-                    <div className="border border-solar-border rounded-[24px] overflow-hidden hover:shadow-lg transition-all flex flex-col justify-between h-fit bg-solar-light/10 text-right">
-                      <div className="p-4 flex items-start gap-4">
-                        <img 
-                          src={currentTierData.battery.image} 
-                          alt={currentTierData.battery.name} 
-                          className="w-20 h-20 rounded-xl object-cover shrink-0 border border-solar-border/50"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="space-y-1">
-                          <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
-                            {isAr ? 'تخزين الطاقة والبطاريات' : 'Battery Energy Storage'}
-                          </span>
-                          <h5 
-                            onClick={() => onProductClick(currentTierData.battery)}
-                            className="text-xs font-black text-solar-text hover:text-solar-blue transition-colors cursor-pointer"
-                          >
-                            {isAr ? currentTierData.battery.nameAr : currentTierData.battery.name}
-                          </h5>
-                          <p className="text-[10px] text-solar-muted font-bold">
-                            {isAr 
-                              ? `سعة التخزين: ${currentTierData.batteryPowerTotalKwh.toFixed(1)} kWh`
-                              : `Total storage: ${currentTierData.batteryPowerTotalKwh.toFixed(1)} kWh`}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50">
-                        <div className="text-[11px] font-black text-solar-blue">
-                          {isAr ? `الكمية الموصى بها: ${currentTierData.batteryQty}` : `Qty needed: ${currentTierData.batteryQty}`}
-                        </div>
-                        <div className="text-[11px] text-solar-text font-black">
-                          {(currentTierData.battery.price * currentTierData.batteryQty).toLocaleString()} {t.egp}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Standard Premium Cables & Accessories Sizing (Real values calculated in EGP) */}
-                  <div className="border border-solar-border rounded-[24px] p-4 bg-solar-light/10 flex flex-col justify-between text-right h-full text-right">
-                    <div className="space-y-2">
-                      <span className="text-[9px] font-black uppercase text-solar-muted bg-white border border-solar-border/30 px-2.5 py-0.5 rounded-md">
-                        {isAr ? 'الإكسسوارات وهندسة التركيب' : 'Mounting, Cables & Surge Protection'}
-                      </span>
-                      <h5 className="text-xs font-black text-solar-text">{isAr ? 'قائمة الإكسسوارات ومجمعات الحماية الشاملة' : 'Integrated Electrical Protections List'}</h5>
-                      
-                      <ul className="text-[10px] text-solar-muted font-bold space-y-1 list-disc list-inside">
-                        <li>{isAr ? `كابلات نحاسية معتمدة: ${currentTierData.cables.toLocaleString()} ج.م` : `Approved cables: ${currentTierData.cables.toLocaleString()} EGP`}</li>
-                        <li>{isAr ? `هيكل تثبيت ألومنيوم مقاوم للرياح: ${currentTierData.mounting.toLocaleString()} ج.م` : `Aluminum structural frame: ${currentTierData.mounting.toLocaleString()} EGP`}</li>
-                        <li>{isAr ? `أجهزة حماية AC/DC وقواطع مفاتيح: ${currentTierData.protection.toLocaleString()} ج.م` : `DC breakers & SPD sets: ${currentTierData.protection.toLocaleString()} EGP`}</li>
-                      </ul>
-                    </div>
-
-                    <div className="bg-solar-light/70 p-3 flex justify-between items-center border-t border-solar-border/50 -mx-4 -mb-4 mt-4">
-                      <div className="text-[10px] font-black text-solar-blue">{isAr ? 'جاهز للتركيب الشامل' : 'Turnkey configured'}</div>
-                      <div className="text-[11px] text-solar-text font-black">
-                        {((currentTierData.cables + currentTierData.mounting + currentTierData.protection)).toLocaleString()} {t.egp}
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* TECHNICAL DESIGN REPORT SUMMARY */}
@@ -2036,12 +2068,20 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
 
                   <div className="bg-white/80 p-4 rounded-2xl border border-solar-border/50 text-right">
                     <span className="text-[10px] text-solar-muted font-extrabold block uppercase leading-none">{isAr ? 'فترة استرداد رأس المال' : 'PAYBACK PERIOD'}</span>
-                    <span className="text-xl font-black text-solar-blue mt-1.5 block">{currentTierData.financials.payback.toFixed(1)} {isAr ? 'سنوات' : 'Years'}</span>
+                    <span className="text-xl font-black text-solar-blue mt-1.5 block">
+                      {currentTierData.financials.payback > 0 
+                        ? `${currentTierData.financials.payback.toFixed(1)} ${isAr ? 'سنوات' : 'Years'}` 
+                        : (isAr ? 'حسب عرض السعر' : 'RFQ Based')}
+                    </span>
                   </div>
 
                   <div className="bg-white/80 p-4 rounded-2xl border border-solar-border/50 text-right">
                     <span className="text-[10px] text-solar-muted font-extrabold block uppercase leading-none">{isAr ? 'معدل العائد الاستثماري (ROI)' : 'RETURN ON INVESTMENT'}</span>
-                    <span className="text-xl font-black text-indigo-700 mt-1.5 block">{currentTierData.financials.roi.toFixed(1)} %</span>
+                    <span className="text-xl font-black text-indigo-700 mt-1.5 block">
+                      {currentTierData.financials.roi > 0 
+                        ? `${currentTierData.financials.roi.toFixed(1)} %` 
+                        : (isAr ? 'حسب عرض السعر' : 'RFQ Based')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2157,24 +2197,34 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                       </h5>
 
                       <div className="space-y-2.5">
-                        {currentTierData.panel && currentTierData.panel.suppliers && currentTierData.panel.suppliers.map((sup) => (
-                          <div key={sup.id} className="p-3 border border-solar-border/40 hover:border-solar-border bg-solar-light/30 rounded-2xl flex justify-between items-center text-right transition">
-                            <button 
-                              onClick={() => handleRequestSupplierDirect(sup)}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white p-2 px-3 rounded-xl text-[10px] font-black cursor-pointer flex items-center gap-1.5 transition shrink-0"
-                            >
-                              WhatsApp
-                            </button>
-                            
-                            <div>
-                              <h6 className="text-[11px] font-black text-solar-text flex items-center justify-end gap-1">
-                                {isAr ? sup.nameAr : sup.name}
-                                {sup.verified && <span className="w-1.5 h-1.5 bg-solar-blue rounded-full" title="Verified" />}
-                              </h6>
-                              <span className="text-[9px] text-solar-muted font-bold mt-0.5 block">{sup.location}</span>
+                        {currentTierData.panel && currentTierData.panel.suppliers && currentTierData.panel.suppliers.length > 0 ? (
+                          currentTierData.panel.suppliers.map((sup) => (
+                            <div key={sup.id} className="p-3 border border-solar-border/40 hover:border-solar-border bg-solar-light/30 rounded-2xl flex justify-between items-center text-right transition">
+                              <button 
+                                onClick={() => handleRequestSupplierDirect(sup)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white p-2 px-3 rounded-xl text-[10px] font-black cursor-pointer flex items-center gap-1.5 transition shrink-0"
+                              >
+                                WhatsApp
+                              </button>
+                              
+                              <div>
+                                <h6 className="text-[11px] font-black text-solar-text flex items-center justify-end gap-1">
+                                  {isAr ? sup.nameAr : sup.name}
+                                  {sup.verified && <span className="w-1.5 h-1.5 bg-solar-blue rounded-full" title="Verified" />}
+                                </h6>
+                                <span className="text-[9px] text-solar-muted font-bold mt-0.5 block">{sup.location}</span>
+                              </div>
                             </div>
+                          ))
+                        ) : (
+                          <div className="p-4 bg-solar-light/20 rounded-2xl border border-solar-border/40 text-center">
+                            <p className="text-[11px] text-solar-muted font-bold leading-relaxed">
+                              {isAr 
+                                ? 'سيتم ربط طلبك فوراً بشبكة الموردين والشركات المعتمدة في منطقتك لتزويدك بأفضل الأسعار.' 
+                                : 'Your request will be routed directly to certified regional solar installers upon registration.'}
+                            </p>
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
 

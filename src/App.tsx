@@ -36,6 +36,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { translations } from './translations';
 import { auth } from './lib/firebase';
 import { safeLocalStorage } from './utils/safeStorage';
+import { UNIFIED_PHONE_DISPLAY, getUnifiedWhatsAppUrl } from './constants/contact';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -353,12 +354,9 @@ export default function App() {
                               <p className="text-xs text-solar-muted font-bold mt-1.5 flex flex-wrap items-center gap-1.5">
                                 <span>📍 {activeSup.location}</span>
                                 <span className="text-solar-border/70">|</span>
-                                <span className="cursor-pointer text-solar-blue hover:underline" onClick={() => {
-                                  if (activeSup.phone) {
-                                    const phone = activeSup.phone.replace(/\+/g, '').replace(/\s+/g, '');
-                                    window.open(`https://wa.me/${phone}`, '_blank');
-                                  }
-                                }}>📞 {activeSup.phone}</span>
+                                <span className="cursor-pointer text-solar-blue hover:underline flex items-center gap-1 font-bold" onClick={() => {
+                                  window.open(getUnifiedWhatsAppUrl(isAr ? `مرحباً، أود الاستفسار عن منتجات ${activeSup.nameAr || activeSup.name}` : `Hi, I want to inquire about products from ${activeSup.name}`), '_blank');
+                                }}>📞 {UNIFIED_PHONE_DISPLAY}</span>
                               </p>
                             </div>
                           </div>
@@ -444,12 +442,18 @@ export default function App() {
               )
             ) : (
               <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm">
-                <div className="text-6xl mb-6 grayscale opacity-20">🔎</div>
-                <h3 className="text-2xl font-black text-solar-text">{t.noData}</h3>
-                <p className="text-solar-muted font-bold mt-2 max-w-xs mx-auto">
-                  {isAr ? 'لم نجد نتائج مطابقة لبحثك. جرب كلمات بحث أخرى أو قم بتصفية الفلاتر.' : 'No matching results found. Try different keywords or clear filters.'}
+                <div className="text-6xl mb-6 grayscale opacity-20">📦</div>
+                <h3 className="text-2xl font-black text-solar-text">
+                  {products.length === 0 
+                    ? (isAr ? 'لا توجد منتجات معروضة حالياً' : 'No Products Available Currently') 
+                    : t.noData}
+                </h3>
+                <p className="text-solar-muted font-bold mt-2 max-w-md mx-auto">
+                  {products.length === 0
+                    ? (isAr ? 'تم مسح المنتجات السابقة، وبإمكان الموردين المعتمدين الآن إضافة ونشر منتجاتهم الجديدة من لوحة المورد.' : 'Products catalog is currently clear. Verified suppliers can publish new products from their dashboard.')
+                    : (isAr ? 'لم نجد نتائج مطابقة لبحثك. جرب كلمات بحث أخرى أو قم بتصفية الفلاتر.' : 'No matching results found. Try different keywords or clear filters.')}
                 </p>
-                {(activeFilters.category !== 'all' || advancedFilters.brand !== 'all' || advancedFilters.minPower || advancedFilters.maxPower || advancedFilters.minPrice || advancedFilters.maxPrice || advancedFilters.minEfficiency || supplierFilterId) && (
+                {(activeFilters.category !== 'all' || advancedFilters.brand !== 'all' || advancedFilters.minPower || advancedFilters.maxPower || advancedFilters.minPrice || advancedFilters.maxPrice || advancedFilters.minEfficiency || supplierFilterId || searchTerm) && (
                   <button 
                     onClick={() => {
                       setActiveFilters({ category: 'all', sort: 'power' });
