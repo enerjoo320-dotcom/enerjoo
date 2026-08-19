@@ -643,6 +643,22 @@ export default function App() {
         </motion.div>
       )}
 
+      {/* Floating Enerjoo WhatsApp Direct Contact Button */}
+      <a
+        href={getUnifiedWhatsAppUrl(isAr ? 'مرحباً منصة Enerjoo، أود الاستفسار عن المنتجات وحلول الطاقة الشمسية.' : 'Hello Enerjoo, I would like to inquire about solar products and energy solutions.')}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Contact Enerjoo on WhatsApp"
+        className="fixed bottom-20 md:bottom-6 left-4 z-40 bg-emerald-500 hover:bg-emerald-600 text-white p-3 md:px-4 md:py-3 rounded-full shadow-2xl hover:shadow-emerald-500/30 flex items-center gap-2.5 transition-all transform hover:scale-105 active:scale-95 group border-2 border-white/20"
+        title={`WhatsApp: ${UNIFIED_PHONE_DISPLAY}`}
+      >
+        <span className="text-xl leading-none">💬</span>
+        <div className="hidden sm:flex flex-col text-left rtl:text-right">
+          <span className="text-[11px] font-black leading-tight">{isAr ? 'خدمة عملاء Enerjoo' : 'Enerjoo Support'}</span>
+          <span className="text-[9px] opacity-90 font-bold leading-tight" dir="ltr">{UNIFIED_PHONE_DISPLAY}</span>
+        </div>
+      </a>
+
       <BottomNav currentView={view} setView={setView} lang={lang} user={user} />
     </div>
   );

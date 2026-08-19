@@ -1,6 +1,6 @@
 {
-  "name": "enerjoo",
-  "description": "Comprehensive solar energy platform in Egypt for comparing products, brands, and suppliers with AI-powered search and real-time data.",
+  "name": "Enerjoo | المتجر اللانهائي للطاقة",
+  "description": "المتجر اللانهائي للطاقة  اكتشف منتجات وحلول الطاقة الشمسية والأنظمة الذكية من مكان واحد.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

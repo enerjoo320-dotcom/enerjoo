@@ -1,6 +1,6 @@
 export const translations = {
   en: {
-    appName: "enerjoo",
+    appName: "Enerjoo | The Infinite Energy Store",
     home: "Home",
     compare: "Compare",
     compareProducts: "Compare Products",
@@ -138,7 +138,7 @@ export const translations = {
     unitPrice: "Unit Price",
   },
   ar: {
-    appName: "إنرجو (enerjoo)",
+    appName: "Enerjoo | المتجر اللانهائي للطاقة",
     home: "الرئيسية",
     compare: "مقارنة",
     compareProducts: "مقارنة المنتجات",
