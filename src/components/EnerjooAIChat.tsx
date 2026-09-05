@@ -93,7 +93,11 @@ export default function EnerjooAIChat({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Filter out any previous "[object Object]" error messages so the user doesn't see old error artifacts
+          const cleaned = parsed.filter(m => typeof m?.text === 'string' && !m.text.includes('[object Object]'));
+          if (cleaned.length > 0) {
+            return cleaned;
+          }
         }
       }
     } catch {
@@ -179,18 +183,9 @@ export default function EnerjooAIChat({
         chatInput: text
       };
 
+      // Send request: Call n8n webhook directly (works on custom domains & Vercel with CORS), fallback to proxy if needed
       let response: Response;
       try {
-        response = await fetch('/api/n8n-chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/plain, */*'
-          },
-          body: JSON.stringify(payload)
-        });
-      } catch (proxyErr) {
-        // Fallback to direct webhook call if needed
         response = await fetch(N8N_WEBHOOK_URL, {
           method: 'POST',
           headers: {
@@ -199,22 +194,52 @@ export default function EnerjooAIChat({
           },
           body: JSON.stringify(payload)
         });
+      } catch (directErr) {
+        // Fallback to server proxy if direct browser fetch hits a client network/CORS issue
+        try {
+          response = await fetch('/api/n8n-chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json, text/plain, */*'
+            },
+            body: JSON.stringify(payload)
+          });
+        } catch {
+          throw directErr;
+        }
       }
 
       if (!response.ok) {
         let errorMessage = 'نأسف، حدث خطأ أثناء الاتصال بمساعد Enerjoo الذكي.';
         
         try {
-          const errData = await response.json();
-          if (errData?.hint?.includes('workflow must be active') || errData?.message?.includes('not registered')) {
-            errorMessage = '⚠️ مسار عمل الذكاء الاصطناعي (n8n Workflow) قيد التفعيل في لوحة التحكم. برجاء تفعيل زر (Active) في أعلى يمين شاشة n8n للاستجابة التلقائية.';
-          } else if (errData?.message) {
-            errorMessage = `⚠️ تنبيه: ${errData.message}`;
-          } else if (errData?.error) {
-            errorMessage = `⚠️ تنبيه: ${errData.error}`;
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const errData = await response.json();
+            const hint = typeof errData?.hint === 'string' ? errData.hint : '';
+            const rawMsg = typeof errData?.message === 'string' 
+              ? errData.message 
+              : (typeof errData?.message?.message === 'string' ? errData.message.message : '');
+            const rawErr = typeof errData?.error === 'string'
+              ? errData.error
+              : (typeof errData?.error?.message === 'string' ? errData.error.message : '');
+
+            if (hint.includes('workflow must be active') || rawMsg.includes('not registered')) {
+              errorMessage = '⚠️ مسار عمل الذكاء الاصطناعي (n8n Workflow) قيد التفعيل في لوحة التحكم. برجاء تفعيل زر (Active) في أعلى يمين شاشة n8n للاستجابة التلقائية.';
+            } else if (rawMsg && rawMsg !== 'NOT_FOUND' && rawMsg !== 'The page could not be found') {
+              errorMessage = `⚠️ تنبيه: ${rawMsg}`;
+            } else if (rawErr) {
+              errorMessage = `⚠️ تنبيه: ${rawErr}`;
+            }
+          } else {
+            const textErr = await response.text();
+            if (textErr.includes('workflow must be active') || textErr.includes('not registered')) {
+              errorMessage = '⚠️ مسار عمل الذكاء الاصطناعي (n8n Workflow) قيد التفعيل في لوحة التحكم. برجاء تفعيل زر (Active) في أعلى يمين شاشة n8n للاستجابة التلقائية.';
+            }
           }
         } catch {
-          // If response is not JSON
+          // If response is not parseable
         }
 
         const errorReply: ChatMessage = {
@@ -228,24 +253,37 @@ export default function EnerjooAIChat({
         return;
       }
 
-      // Handle successful n8n response
+      // Handle successful n8n response safely
       let botReplyText = '';
       try {
-        const data = await response.json();
-        if (typeof data === 'string') {
-          botReplyText = data;
-        } else if (typeof data?.output === 'string') {
-          botReplyText = data.output;
-        } else if (typeof data?.text === 'string') {
-          botReplyText = data.text;
-        } else if (typeof data?.message === 'string') {
-          botReplyText = data.message;
-        } else if (typeof data?.message?.text === 'string') {
-          botReplyText = data.message.text;
-        } else if (Array.isArray(data) && data.length > 0) {
-          botReplyText = data[0]?.output ?? data[0]?.text ?? JSON.stringify(data[0]);
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (typeof data === 'string') {
+            botReplyText = data;
+          } else if (typeof data?.output === 'string') {
+            botReplyText = data.output;
+          } else if (typeof data?.text === 'string') {
+            botReplyText = data.text;
+          } else if (typeof data?.message === 'string') {
+            botReplyText = data.message;
+          } else if (typeof data?.message?.text === 'string') {
+            botReplyText = data.message.text;
+          } else if (typeof data?.message?.output === 'string') {
+            botReplyText = data.message.output;
+          } else if (Array.isArray(data) && data.length > 0) {
+            const first = data[0];
+            botReplyText = typeof first === 'string' 
+              ? first 
+              : (first?.output ?? first?.text ?? first?.message ?? '');
+          } else if (data && typeof data === 'object') {
+            const firstStringVal = Object.values(data).find(v => typeof v === 'string');
+            if (firstStringVal) {
+              botReplyText = firstStringVal as string;
+            }
+          }
         } else {
-          botReplyText = JSON.stringify(data);
+          botReplyText = await response.text();
         }
       } catch {
         botReplyText = await response.text();

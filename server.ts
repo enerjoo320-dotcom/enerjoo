@@ -391,14 +391,18 @@ async function startServer() {
         body: JSON.stringify(payload)
       });
 
-      // If the workflow is currently running in test mode on the n8n canvas, attempt fallback to the test URL
+      // If the workflow is currently running in test mode on the n8n canvas, attempt fallback to the test URL (with 3s timeout)
       if (n8nRes.status === 404) {
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
           const testRes = await fetch(N8N_TEST_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
           if (testRes.ok) {
             n8nRes = testRes;
           }
