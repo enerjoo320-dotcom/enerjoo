@@ -7,7 +7,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
-import { doc, getDoc, setDoc, collection, query, where, getDocs, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, query, where, getDocs, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { User } from "../types";
 import { safeLocalStorage } from "../utils/safeStorage";
@@ -56,6 +56,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Clear mock local auth
         safeLocalStorage.removeItem("enerjoo_mock_auth_uid");
         
+        // 1. Sync customer record in customers/{uid}
+        try {
+          const custDocRef = doc(db, "customers", firebaseUser.uid);
+          const custDocSnap = await getDoc(custDocRef);
+          if (!custDocSnap.exists()) {
+            await setDoc(custDocRef, {
+              uid: firebaseUser.uid,
+              fullName: firebaseUser.displayName || 'عميل إينرجو',
+              email: firebaseUser.email || '',
+              authProvider: 'google',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              lastLoginAt: serverTimestamp(),
+            }, { merge: true });
+          } else {
+            await setDoc(custDocRef, {
+              lastLoginAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
+        } catch (custCheckErr) {
+          console.warn("Notice checking customers collection:", custCheckErr);
+        }
+
         const userDocRef = doc(db, "users", firebaseUser.uid);
         unsubUserDoc = onSnapshot(userDocRef, async (userDoc) => {
           if (userDoc.exists()) {
@@ -83,18 +107,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               isVerified = true;
             }
 
-            setUser({ uid: firebaseUser.uid, ...data, verified: isVerified } as User);
+            setUser({ 
+              uid: firebaseUser.uid, 
+              name: data.name || firebaseUser.displayName || 'User',
+              nameAr: data.nameAr || firebaseUser.displayName || 'مستخدم',
+              email: data.email || firebaseUser.email || '',
+              avatar: data.avatar || firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+              ...data, 
+              verified: isVerified 
+            } as User);
           } else {
             const emailStr = (firebaseUser.email || "").toLowerCase();
             const isAdminEmail = checkIsAdminEmail(emailStr);
-            const userType = isAdminEmail ? 'admin' : 'customer';
+            const userRole = isAdminEmail ? 'admin' : 'customer';
 
             const newUserData: User = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || "",
               name: firebaseUser.displayName || "User",
               nameAr: firebaseUser.displayName || "مستخدم",
-              type: userType,
+              type: userRole,
+              phone: firebaseUser.phoneNumber || "",
               avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
               verified: true,
               createdAt: new Date().toISOString()
@@ -176,7 +209,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const isNotAllowed = err.code === 'auth/operation-not-allowed' || 
                            err.message?.includes('auth/operation-not-allowed');
       if (isNotAllowed) {
-        console.warn("Email/Password Auth disabled or misconfigured in Firebase console. Initializing Sandbox Mode fallback.");
+        console.warn("Email/Password Auth disabled in Firebase. Sandbox fallback activated.");
         
         const cleanEmail = email.toLowerCase().replace(/[^a-zA-Z0-9]/g, '_');
         const mockUid = `mock_${cleanEmail}_${Math.floor(1000 + Math.random() * 9000)}`;
@@ -267,38 +300,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
       const res = await signInWithPopup(auth, provider);
       if (!res || !res.user) return;
-      const userDocRef = doc(db, "users", res.user.uid);
+
+      const firebaseUser = res.user;
+      const userDocRef = doc(db, "users", firebaseUser.uid);
       const userDoc = await getDoc(userDocRef);
 
+      const emailStr = (firebaseUser.email || "").toLowerCase();
+      const isAdminEmail = checkIsAdminEmail(emailStr);
+      const userRole = isAdminEmail ? 'admin' : role;
+
       if (!userDoc.exists()) {
-        const emailStr = (res.user.email || "").toLowerCase();
-        const isAdminEmail = checkIsAdminEmail(emailStr);
-        const userRole = isAdminEmail ? 'admin' : role;
-        
         const userData: User = {
-          uid: res.user.uid,
-          email: res.user.email || "",
-          name: res.user.displayName || "User",
-          nameAr: res.user.displayName || "مستخدم جديد",
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || "",
+          name: firebaseUser.displayName || "User",
+          nameAr: firebaseUser.displayName || "مستخدم جديد",
           type: userRole,
           company: "",
           location: "Cairo, Egypt",
           phone: "",
-          avatar: res.user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${res.user.uid}`,
-          verified: userRole === 'admin' || userRole === 'customer',
+          avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+          verified: true,
           createdAt: new Date().toISOString()
         };
         await setDoc(userDocRef, userData);
         setUser(userData);
       } else {
         const data = userDoc.data();
-        const emailStr = (res.user.email || "").toLowerCase();
         if (EXCLUDED_ADMIN_EMAILS.includes(emailStr) && data.type === 'admin') {
           data.type = 'customer';
           await setDoc(userDocRef, { type: 'customer' }, { merge: true });
         }
-        setUser({ uid: res.user.uid, ...data } as User);
+        setUser({ 
+          uid: firebaseUser.uid, 
+          name: firebaseUser.displayName || data.name || 'User',
+          nameAr: firebaseUser.displayName || data.nameAr || 'مستخدم',
+          email: firebaseUser.email || data.email || '',
+          avatar: firebaseUser.photoURL || data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
+          ...data 
+        } as User);
       }
+
+      // Also ensure customer record is registered in customers/{uid}
+      try {
+        const custDocRef = doc(db, "customers", firebaseUser.uid);
+        await setDoc(custDocRef, {
+          uid: firebaseUser.uid,
+          fullName: firebaseUser.displayName || 'عميل إينرجو',
+          email: firebaseUser.email || '',
+          authProvider: 'google',
+          updatedAt: serverTimestamp(),
+          lastLoginAt: serverTimestamp()
+        }, { merge: true });
+      } catch (custErr) {
+        console.warn("Customer sync notice:", custErr);
+      }
+
     } catch (err: any) {
       if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         console.info("Google Sign In popup was closed or cancelled by the user.");
@@ -319,6 +376,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         ...data,
         updatedAt: new Date().toISOString()
       }, { merge: true });
+
+      // Also update customers/{uid} if customer
+      if (user.type === 'customer') {
+        const custDocRef = doc(db, "customers", user.uid);
+        await setDoc(custDocRef, {
+          fullName: data.name || data.nameAr || user.name,
+          phoneNumber: data.phone || user.phone || '',
+          governorate: data.governorate || user.governorate || 'القاهرة',
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
     } catch (err) {
       console.error("Error updating user document in Firestore:", err);
     }
@@ -331,7 +399,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, register, login, signInWithGoogle, updateUserProfile, logout }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      loading, 
+      register, 
+      login, 
+      signInWithGoogle, 
+      updateUserProfile, 
+      logout 
+    }}>
       {children}
     </AuthContext.Provider>
   );

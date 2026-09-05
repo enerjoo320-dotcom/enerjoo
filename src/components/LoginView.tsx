@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, LogIn, ArrowLeft, ArrowRight, ShieldCheck, Check } from 'lucide-react';
+import { Mail, Lock, LogIn, ArrowLeft, ArrowRight, ShieldCheck, Check, User, MapPin, RefreshCw, Zap, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { translations } from '../translations';
 import { ViewType } from '../types';
@@ -17,10 +17,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
   const t = translations[lang];
   const isAr = lang === 'ar';
   
+  const [activeTab, setActiveTab] = useState<'customer_google' | 'email'>('customer_google');
+
+  // Email / Supplier state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [isNotAllowedError, setIsNotAllowedError] = useState(false);
   const [isPopupBlockedError, setIsPopupBlockedError] = useState(false);
@@ -33,10 +37,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     e.preventDefault();
     if (!captchaVerified) {
       setError(isAr ? 'يرجى إكمال التحقق الأمني أولاً (أنا لست برنامج روبوت)' : "Please complete the security verification first (I'm not a robot)");
+      setErrorCode(null);
       return;
     }
     setLoading(true);
     setError('');
+    setErrorCode(null);
     setIsNotAllowedError(false);
     setIsPopupBlockedError(false);
     setIsUnauthorizedDomainError(false);
@@ -46,18 +52,27 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
       setView('home');
     } catch (error: any) {
       console.error("Login Error:", error);
+      const code = error?.code || '';
+      setErrorCode(code || null);
       let message = isAr ? 'خطأ في البريد الإلكتروني أو كلمة المرور' : 'Invalid email or password';
-      const isNotAllowed = error.code === 'auth/operation-not-allowed' || error.message?.includes('auth/operation-not-allowed');
+      const isNotAllowed = code === 'auth/operation-not-allowed' || error.message?.includes('auth/operation-not-allowed');
       
-      if (error.code === 'auth/user-not-found') message = isAr ? 'المستخدم غير موجود' : 'User not found';
-      else if (error.code === 'auth/wrong-password') message = isAr ? 'كلمة مرور خاطئة' : 'Wrong password';
-      else if (error.code === 'auth/invalid-credential') message = isAr ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة' : 'Invalid email or password credentials.';
-      else if (error.code === 'auth/network-request-failed') {
+      if (code === 'auth/user-not-found') message = isAr ? 'المستخدم غير موجود' : 'User not found';
+      else if (code === 'auth/wrong-password') message = isAr ? 'كلمة مرور خاطئة' : 'Wrong password';
+      else if (code === 'auth/invalid-credential') message = isAr ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة' : 'Invalid email or password credentials.';
+      else if (code === 'auth/network-request-failed') {
         setIsNetworkError(true);
         message = isAr ? 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت أو فتح التطبيق في نافذة جديدة.' : 'Network error. Please check your internet connection or open the app in a new tab.';
       } else if (isNotAllowed) {
         setIsNotAllowedError(true);
         message = isAr ? 'تسجيل الدخول بالبريد غير مفعّل في لوحة Firebase الخاصة بك حالياً.' : 'Email authentication is not enabled in your Firebase console.';
+      } else if (code === 'auth/unauthorized-domain') {
+        setIsUnauthorizedDomainError(true);
+        const currentHost = window.location.hostname || 'enerjoo.com';
+        setUnauthorizedDomain(currentHost);
+        message = isAr
+          ? `النطاق الحالي (${currentHost}) غير مصرح به في Firebase Authentication.`
+          : `The current domain (${currentHost}) is not authorized in Firebase Authentication.`;
       }
       setError(message);
     } finally {
@@ -68,6 +83,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError('');
+    setErrorCode(null);
     setIsPopupBlockedError(false);
     setIsNotAllowedError(false);
     setIsUnauthorizedDomainError(false);
@@ -78,7 +94,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
         setView('home');
       }
     } catch (err: any) {
-      const isPopupClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request';
+      const code = err?.code || '';
+      setErrorCode(code || null);
+      const isPopupClosed = code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
       if (isPopupClosed) {
         console.info("Google Sign In popup was closed by the user.");
         return;
@@ -86,13 +104,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
 
       console.warn("Google Sign In Notice:", err);
       let message = isAr ? 'فشل تسجيل الدخول باستخدام Google' : 'Google sign in failed';
-      const isPopupBlocked = err?.code === 'auth/popup-blocked' || 
+      const isPopupBlocked = code === 'auth/popup-blocked' || 
                              err?.message?.includes('auth/popup-blocked');
-      const isUnauthorized = err?.code === 'auth/unauthorized-domain' || 
+      const isUnauthorized = code === 'auth/unauthorized-domain' || 
                              err?.message?.includes('auth/unauthorized-domain');
-      const isNotAllowed = err?.code === 'auth/operation-not-allowed' || 
+      const isNotAllowed = code === 'auth/operation-not-allowed' || 
                            err?.message?.includes('auth/operation-not-allowed');
-      const isNetworkErr = err?.code === 'auth/network-request-failed' || err?.message?.includes('auth/network-request-failed');
+      const isNetworkErr = code === 'auth/network-request-failed' || err?.message?.includes('auth/network-request-failed');
 
       if (isUnauthorized) {
         setIsUnauthorizedDomainError(true);
@@ -120,7 +138,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
         message = isAr 
           ? 'تعذر الاتصال بـ Google من داخل إطار المعاينة (iframe). يُرجى فتح التطبيق في نافذة مستقلة جديدة.' 
           : 'Could not connect to Google from inside the preview iframe. Please open the app in a new tab.';
-      } else if (err.code === 'auth/account-exists-with-different-credential') {
+      } else if (code === 'auth/account-exists-with-different-credential') {
         message = isAr ? 'الحساب موجود بالفعل بطريقة تسجيل دخول مختلفة' : 'Account exists with different credential';
       } else if (err.message) {
         message = `${isAr ? 'خطأ' : 'Error'}: ${err.message}`;
@@ -163,16 +181,103 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
         </div>
 
         {/* Headings */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <h2 className="text-3xl font-black text-solar-text mb-2 tracking-tight">
             {isAr ? 'مرحباً بك مجدداً' : 'Welcome Back'}
           </h2>
           <p className="text-solar-muted text-sm font-bold opacity-80">
-            {isAr ? 'أدخل بياناتك للوصول إلى حسابك' : 'Enter your credentials to access your account'}
+            {isAr ? 'سجّل دخولك لحفظ طلباتك وعروض الأسعار' : 'Sign in to access your saved requests and quotes'}
           </p>
         </div>
 
-        {/* Login Form */}
+        {/* Tab Switcher */}
+        <div className="flex bg-solar-light p-1.5 rounded-2xl border border-solar-border mb-6">
+          <button
+            type="button"
+            onClick={() => { setActiveTab('customer_google'); setError(''); }}
+            className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'customer_google'
+                ? 'bg-white text-solar-blue shadow-sm'
+                : 'text-solar-muted hover:text-solar-text'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+              <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.48 14.98 1 12 1 7.35 1 3.37 3.65 1.41 7.54l3.88 3C6.22 7.74 8.88 5.04 12 5.04z" />
+              <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.45h6.45c-.28 1.47-1.11 2.72-2.36 3.56l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z" />
+              <path fill="#FBBC05" d="M5.29 14.3C5.03 13.52 4.88 12.69 4.88 11.83c0-.86.15-1.69.41-2.47L1.41 6.36C.51 8.16 0 10.15 0 12.27c0 2.12.51 4.11 1.41 5.91l3.88-3.88z" />
+              <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.1.74-2.5 1.18-4.3 1.18-3.12 0-5.78-2.7-6.71-5.5l-3.88 3C3.37 20.35 7.35 23 12 23z" />
+            </svg>
+            <span>{isAr ? 'دخول العملاء (Google)' : 'Customer (Google Login)'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setActiveTab('email'); setError(''); }}
+            className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'email'
+                ? 'bg-white text-solar-blue shadow-sm'
+                : 'text-solar-muted hover:text-solar-text'
+            }`}
+          >
+            <Mail size={14} />
+            <span>{isAr ? 'الموردين / الإدارة' : 'Suppliers / Admin'}</span>
+          </button>
+        </div>
+
+        {activeTab === 'customer_google' ? (
+          <div className="space-y-6 pt-2">
+            <div className="p-4 bg-solar-light rounded-2xl border border-solar-border text-center space-y-2">
+              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto shadow-sm">
+                <Sparkles size={18} className="text-solar-blue animate-pulse" />
+              </div>
+              <h3 className="font-black text-sm text-solar-text">
+                {isAr ? 'تسجيل دخول العملاء السريع' : 'Instant Customer Sign-In'}
+              </h3>
+              <p className="text-xs text-solar-muted leading-relaxed">
+                {isAr 
+                  ? 'سجّل دخولك بحساب Google / Gmail بضغطة واحدة لمتابعة وتصميم محطاتك الشمسية وحفظ عروض الأسعار تلقائياً.' 
+                  : 'Sign in with your Google / Gmail account in one click to manage and track your solar station designs.'}
+              </p>
+            </div>
+
+            {/* Prominent Google Login Button */}
+            <button 
+              type="button"
+              disabled={loading}
+              onClick={handleGoogleSignIn}
+              className="w-full bg-white text-solar-text border-2 border-slate-200 hover:border-solar-blue/60 rounded-2xl py-4.5 font-black hover:bg-slate-50 shadow-md shadow-slate-100 flex items-center justify-center gap-3 transition-all active:scale-98 text-sm cursor-pointer"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-solar-blue/30 border-t-solar-blue rounded-full animate-spin" />
+              ) : (
+                <>
+                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.48 14.98 1 12 1 7.35 1 3.37 3.65 1.41 7.54l3.88 3C6.22 7.74 8.88 5.04 12 5.04z" />
+                    <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.45h6.45c-.28 1.47-1.11 2.72-2.36 3.56l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z" />
+                    <path fill="#FBBC05" d="M5.29 14.3C5.03 13.52 4.88 12.69 4.88 11.83c0-.86.15-1.69.41-2.47L1.41 6.36C.51 8.16 0 10.15 0 12.27c0 2.12.51 4.11 1.41 5.91l3.88-3.88z" />
+                    <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.1.74-2.5 1.18-4.3 1.18-3.12 0-5.78-2.7-6.71-5.5l-3.88 3C3.37 20.35 7.35 23 12 23z" />
+                  </svg>
+                  <span>{isAr ? 'المتابعة باستخدام حساب Google' : 'Continue with Google Account'}</span>
+                </>
+              )}
+            </button>
+
+            {error && (
+              <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-2xl text-xs font-bold border border-solar-danger/20 text-center space-y-2 leading-relaxed">
+                <p>{error}</p>
+                {isPopupBlockedError && (
+                  <button
+                    type="button"
+                    onClick={() => window.open(window.location.href, '_blank')}
+                    className="w-full bg-solar-blue text-white py-2 px-3 rounded-xl font-black text-xs mt-2"
+                  >
+                    <span>فتح التطبيق في نافذة جديدة</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+        /* Supplier/Admin Email Login Form */
         <form onSubmit={handleSubmit} className="space-y-6">
           
           {/* Email input field */}
@@ -227,12 +332,22 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
           <SecurityCaptcha lang={lang} onVerify={setCaptchaVerified} />
 
           {error && (
-            <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-2xl text-xs font-bold border border-solar-danger/20 text-center space-y-2 leading-relaxed">
-              <div>{error}</div>
+            <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-2xl text-xs font-bold border border-solar-danger/20 text-center space-y-2.5 leading-relaxed">
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <span>{error}</span>
+                {errorCode && (
+                  <span className="font-mono text-[10px] bg-solar-danger/20 text-solar-danger px-2 py-0.5 rounded-md" dir="ltr">
+                    {errorCode}
+                  </span>
+                )}
+              </div>
               
               {isNotAllowedError && (
                 <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-1.5">
                   <span className="text-amber-500 block">🎛️ تفعيل المصادقة في لوحة Firebase:</span>
+                  <p>
+                    المشروع المرتبط: <strong className="font-mono text-solar-blue" dir="ltr">gen-lang-client-0409057996</strong>
+                  </p>
                   <p>اذهب إلى Firebase Console &gt; Authentication &gt; Sign-in method وقم بتمكين خيار Google أو Email/Password ثم احفظ التغييرات.</p>
                 </div>
               )}
@@ -263,43 +378,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
                       🚀 {isAr ? 'فتح إعدادات Firebase مباشرة' : 'Open Firebase Settings'}
                     </a>
                   </div>
-                  <ol className="list-decimal list-inside space-y-1 text-solar-muted pt-1">
-                    <li>في صفحة الإعدادات، مرر للأسفل إلى قسم <b>Authorized domains</b>.</li>
-                    <li>اضغط على <b>Add domain</b>، ثم ألصق النطاق المنسوخ واضغط <b>Done</b>.</li>
-                  </ol>
-                </div>
-              )}
-
-              {isPopupBlockedError && (
-                <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-2 leading-relaxed">
-                  <p>لأن المتصفح يحظر النوافذ المنبثقة داخل إطارات المعاينة (iframe)، يمكنك الضغط أدناه لفتح التطبيق في نافذة مستقلة:</p>
-                  <button
-                    type="button"
-                    onClick={() => window.open(window.location.href, '_blank')}
-                    className="w-full bg-solar-blue text-white py-2 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <span>فتح التطبيق في نافذة جديدة</span>
-                  </button>
-                </div>
-              )}
-
-              {isNetworkError && (
-                <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-2 leading-relaxed">
-                  <p className="text-solar-text font-black">🌐 حل مشكلة الاتصال في المعاينة (Network Request Failed):</p>
-                  <p>تحدث هذه المشكلة عندما يمنع المتصفح تبادل الاتصال بين نافذة تسجيل الدخول وإطار المعاينة (iframe). الحل هو فتح التطبيق مباشرة في تبويب جديد:</p>
-                  <button
-                    type="button"
-                    onClick={() => window.open(window.location.href, '_blank')}
-                    className="w-full bg-solar-blue text-white py-2.5 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-2 shadow-sm"
-                  >
-                    <span>فتح التطبيق في نافذة مستقلة جديدة</span>
-                  </button>
                 </div>
               )}
             </div>
           )}
 
-          {/* Solid Blue submit styled button with leftward arrow */}
+          {/* Solid Blue submit styled button */}
           <button 
             type="submit" 
             disabled={loading}
@@ -312,41 +396,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
                 {isAr ? (
                   <>
                     <ArrowLeft size={18} className="group-hover:-translate-x-1.5 transition-transform" />
-                    <span>تسجيل الدخول</span>
+                    <span>تسجيل الدخول للموردين</span>
                   </>
                 ) : (
                   <>
-                    <span>Sign In</span>
+                    <span>Supplier Sign In</span>
                     <ArrowRight size={18} className="group-hover:translate-x-1.5 transition-transform" />
                   </>
                 )}
               </div>
             )}
           </button>
-
-          {/* Divider with central Or text */}
-          <div className="flex items-center py-2">
-            <div className="flex-1 border-t border-solar-border/70"></div>
-            <span className="px-3 text-xs text-solar-muted font-bold opacity-80">{isAr ? 'أو' : 'OR'}</span>
-            <div className="flex-1 border-t border-solar-border/70"></div>
-          </div>
-
-          {/* Clean Google Single Sign-On Button with official assets */}
-          <button 
-            type="button"
-            disabled={loading}
-            onClick={handleGoogleSignIn}
-            className="w-full bg-white text-solar-text border border-solar-border rounded-2xl py-4 font-black hover:bg-slate-50 shadow-sm flex items-center justify-center gap-3 transition-all active:scale-95 text-xs"
-          >
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-              <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.48 14.98 1 12 1 7.35 1 3.37 3.65 1.41 7.54l3.88 3C6.22 7.74 8.88 5.04 12 5.04z" />
-              <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.45h6.45c-.28 1.47-1.11 2.72-2.36 3.56l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z" />
-              <path fill="#FBBC05" d="M5.29 14.3C5.03 13.52 4.88 12.69 4.88 11.83c0-.86.15-1.69.41-2.47L1.41 6.36C.51 8.16 0 10.15 0 12.27c0 2.12.51 4.11 1.41 5.91l3.88-3.88z" />
-              <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.1.74-2.5 1.18-4.3 1.18-3.12 0-5.78-2.7-6.71-5.5l-3.88 3C3.37 20.35 7.35 23 12 23z" />
-            </svg>
-            <span>{isAr ? 'تسجيل الدخول بواسطة Google' : 'Sign in with Google'}</span>
-          </button>
         </form>
+        )}
 
         {/* Footer info/redirection */}
         <div className="mt-8 text-center pt-6 border-t border-solar-border/70">

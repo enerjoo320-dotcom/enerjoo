@@ -14,6 +14,7 @@ import {
   BadgePercent,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
   Info,
   Plus,
   Minus,
@@ -29,13 +30,17 @@ import {
   Layers,
   Wrench,
   X,
-  Droplet
+  Droplet,
+  Mail
 } from 'lucide-react';
 import { translations } from '../translations';
 import { Product } from '../types';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { UNIFIED_PHONE_DISPLAY, UNIFIED_WHATSAPP_NUMBER } from '../constants/contact';
+import { useAuth } from '../context/AuthContext';
+import { createSolarRequest, createQuotation, generateSolarRequestId } from '../services/firestoreService';
+import { normalizeEgyptianPhone, isValidEgyptianPhone, formatEgyptianPhoneDisplay } from '../utils/phoneUtils';
 
 interface SolarCalculatorProps {
   lang: 'ar' | 'en';
@@ -72,7 +77,7 @@ export const SolarCalculator: React.FC<SolarCalculatorProps> = ({
   const t = translations[lang];
   const isAr = lang === 'ar';
 
-  const [step, setStep] = useState<'system_type' | 'consumption_method' | 'bill_input' | 'appliance_calculator' | 'pump_hp_input' | 'location' | 'calculating' | 'results'>('system_type');
+  const [step, setStep] = useState<'system_type' | 'consumption_method' | 'bill_input' | 'appliance_calculator' | 'pump_hp_input' | 'location' | 'phone_input' | 'calculating' | 'results'>('system_type');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [systemType, setSystemType] = useState<'on-grid' | 'off-grid' | 'hybrid' | 'pump' | null>(null);
   const [consumptionMethod, setConsumptionMethod] = useState<'bill' | 'appliances' | null>(null);
@@ -84,6 +89,8 @@ export const SolarCalculator: React.FC<SolarCalculatorProps> = ({
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [inputMessage, setInputMessage] = useState<string>('');
   
+  const { user } = useAuth();
+
   // Custom design tier selection
   const [currentTier, setCurrentTier] = useState<'budget' | 'recommended' | 'premium'>('recommended');
   
@@ -94,8 +101,20 @@ export const SolarCalculator: React.FC<SolarCalculatorProps> = ({
     notes: '',
     submitted: false,
     loading: false,
-    error: null as string | null
+    error: null as string | null,
+    lastRequestId: ''
   });
+
+  // Autofill user credentials if logged in
+  useEffect(() => {
+    if (user) {
+      setLeadForm(prev => ({
+        ...prev,
+        name: prev.name || user.name || '',
+        phone: prev.phone || user.phone || ''
+      }));
+    }
+  }, [user]);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -408,7 +427,7 @@ Step 3: To figure out your regional peak solar irradiance metrics, please write 
     setCityChoice(city);
     setLocationStr(city);
 
-    const userText = isAr ? `أنا مهتم بالتركيب في مدينة: ${city}` : `Installation target city: ${city}`;
+    const userText = isAr ? `أنا مهتم بالتركيب في مدينة/محافظة: ${city}` : `Installation target city: ${city}`;
     
     setMessages(prev => [
       ...prev,
@@ -418,28 +437,171 @@ Step 3: To figure out your regional peak solar irradiance metrics, please write 
     setChatLoading(true);
 
     setTimeout(() => {
-      const aiReplyAr = `رائع! الإشعاع الشمسي في ${city} كافٍ جداً ومثالي لمردود استثماري من الدرجة الأولى.
+      const aiReplyAr = `ممتاز جداً! الإشعاع الشمسي في ${city} كافٍ ومثالي لتحقيق أعلى إنتاجية وتوفير في فاتورة الكهرباء.
 
-الخطوة 4: سأقوم الآن كمهندس طاقة شمسية بطحن الأرقام وحساب كافة المعايير: سعة المصفوفة، وزن الشاسيهات، عاكس الموالفة الفنية، الحساب المالي، والبطاريات لتقديم 3 عروض متميزة من كتالوج منصة Enerjoo...`;
+الخطوة 4: لربط مقايسة وتصميم النظام بحسابك وتوثيق عرض السعر الهندسي وتسهيل تواصل مهندس الاستشارات الفنية معك للمعاينة، يرجى تزويدنا برقم هاتفك المحمول (رقم مصري):`;
       
-      const aiReplyEn = `Stellar! Peak sun values for ${city} are exceptional, yielding prime solar savings.
+      const aiReplyEn = `Great! Peak sun values for ${city} are exceptional, yielding prime solar savings.
 
-Step 4: I will now run specialized calculations to model: system peak ratios, panel allocations, matched inverters, battery capacity configurations, and localized financial payoffs. Preparing 3 tailored catalogs available on Enerjoo...`;
+Step 4: To link this quotation with your account and enable our engineering advisor to review feasibility, please provide your Egyptian mobile phone number:`;
 
       setMessages(prev => [
         ...prev,
         { id: 'ai-resp-' + Date.now(), sender: 'ai', text: isAr ? aiReplyAr : aiReplyEn, timestamp: new Date() }
       ]);
       
-      setStep('calculating');
+      setStep('phone_input');
+      setChatLoading(false);
+    }, 700);
+  };
+
+  // Dedicated handler for phone verification and instant quotation persistence
+  const handlePhoneSubmit = async (phoneToValidate?: string) => {
+    const rawPhone = phoneToValidate || leadForm.phone;
+    if (!rawPhone || !rawPhone.trim()) {
+      setLeadForm(prev => ({
+        ...prev,
+        error: isAr ? 'يرجى إدخال رقم الهاتف المحمول أولاً' : 'Please enter your mobile phone number first'
+      }));
+      return;
+    }
+
+    if (!isValidEgyptianPhone(rawPhone)) {
+      setLeadForm(prev => ({
+        ...prev,
+        error: isAr 
+          ? 'يرجى إدخال رقم هاتف مصري صحيح يبدأ بـ 010 أو 011 أو 012 أو 015 ويتكون من 11 رقماً.' 
+          : 'Please enter a valid Egyptian mobile phone number starting with 010, 011, 012, or 015.'
+      }));
+      return;
+    }
+
+    const normalized = normalizeEgyptianPhone(rawPhone);
+    setLeadForm(prev => ({
+      ...prev,
+      phone: normalized,
+      error: null
+    }));
+
+    const userText = isAr 
+      ? `رقم الهاتف للتواصل: ${formatEgyptianPhoneDisplay(normalized)}` 
+      : `Contact Phone: ${formatEgyptianPhoneDisplay(normalized)}`;
+
+    setMessages(prev => [
+      ...prev,
+      { id: 'u-' + Date.now(), sender: 'user', text: userText, timestamp: new Date() }
+    ]);
+
+    setChatLoading(true);
+
+    const assignedRequestId = generateSolarRequestId();
+    const currentCalc = runSolarCalculations();
+    const selectedTierData = currentCalc.tiers['recommended'];
+
+    try {
+      // 1. Save to solarRequests collection
+      await createSolarRequest({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        customerName: leadForm.name || user?.name || 'عميل إينرجو',
+        customerPhone: normalized,
+        governorate: cityChoice || user?.governorate || 'القاهرة',
+        location: locationStr || cityChoice || 'مصر',
+        systemType: systemType || 'hybrid',
+        tier: 'recommended',
+        inputs: {
+          monthlyBill: typeof billAmount === 'number' ? billAmount : undefined,
+          consumptionKwh: typeof kwhMonthly === 'number' ? kwhMonthly : undefined,
+          sunHours: currentCalc.loads.sunHours || 5.5,
+          cityChoice,
+          locationStr,
+          pumpHp: typeof pumpHp === 'number' ? pumpHp : undefined,
+          appliances: appliancesList.filter(a => a.qty > 0).map(a => ({
+            name: isAr ? a.nameAr : a.nameEn,
+            power: a.watts,
+            count: a.qty,
+            hours: a.hours
+          }))
+        },
+        calculatedOutputs: {
+          systemSizeKw: selectedTierData?.panelPowerTotalKw || 0,
+          estimatedCost: selectedTierData?.cost,
+          panelQty: selectedTierData?.panelQty || 0,
+          panelModel: selectedTierData?.panel ? (isAr ? selectedTierData.panel.nameAr : selectedTierData.panel.name) : undefined,
+          panelWatt: selectedTierData?.panel?.power || 585,
+          panelCost: selectedTierData?.panel ? selectedTierData.panel.price * selectedTierData.panelQty : undefined,
+          inverterQty: selectedTierData?.inverterQty || 0,
+          inverterModel: selectedTierData?.inverter ? (isAr ? selectedTierData.inverter.nameAr : selectedTierData.inverter.name) : undefined,
+          inverterKw: selectedTierData?.inverter?.power || selectedTierData?.panelPowerTotalKw,
+          inverterCost: selectedTierData?.inverter ? selectedTierData.inverter.price * selectedTierData.inverterQty : undefined,
+          batteryQty: selectedTierData?.batteryQty || 0,
+          batteryModel: selectedTierData?.battery ? (isAr ? selectedTierData.battery.nameAr : selectedTierData.battery.name) : undefined,
+          batteryKwh: selectedTierData?.battery?.power || undefined,
+          batteryCost: selectedTierData?.battery ? selectedTierData.battery.price * selectedTierData.batteryQty : undefined,
+          annualProductionKwh: selectedTierData?.financials?.annualYield || 0,
+          annualSavingsEgp: selectedTierData?.financials?.annualSavings || 0,
+          paybackYears: selectedTierData?.financials?.payback || 0,
+          dcProtectionCost: selectedTierData?.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          acProtectionCost: selectedTierData?.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          dcCableCost: selectedTierData?.cables ? Math.round(selectedTierData.cables * 0.55) : 0,
+          acCableCost: selectedTierData?.cables ? Math.round(selectedTierData.cables * 0.45) : 0,
+          structureCost: selectedTierData?.mounting || 0,
+          installationCost: 0,
+          warrantyYears: 10
+        },
+        notes: leadForm.notes || '',
+        status: 'pending'
+      });
+
+      // 2. Save to quotations collection with all explicit quotation fields
+      await createQuotation({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        userId: user?.uid || null,
+        customerName: leadForm.name || user?.name || 'عميل إينرجو',
+        customerEmail: user?.email || '',
+        phone: normalized,
+        systemType: systemType || 'hybrid',
+        location: locationStr || cityChoice || 'مصر',
+        usage: (typeof kwhMonthly === 'number' ? kwhMonthly : 0) || (systemType === 'pump' ? (typeof pumpHp === 'number' ? pumpHp : 0) : 0),
+        monthlyBill: typeof billAmount === 'number' ? billAmount : 0,
+        batteryRequired: systemType === 'off-grid' || systemType === 'hybrid',
+        systemSpecs: `RECOMMENDED: Panels=${selectedTierData?.panelQty || 0}pcs, Inverter=${selectedTierData?.inverterQty || 0}pcs, Battery=${selectedTierData?.batteryQty || 0}pcs`,
+        targetTier: 'recommended',
+        priceEstimate: selectedTierData?.cost || 0,
+        status: 'pending',
+        notes: leadForm.notes || ''
+      });
+
+      setLeadForm(prev => ({
+        ...prev,
+        lastRequestId: assignedRequestId
+      }));
+    } catch (err) {
+      console.error('Error auto-saving quotation:', err);
+    }
+
+    setTimeout(() => {
+      const aiReplyAr = `تم توثيق رقم الهاتف بنجاح: ${formatEgyptianPhoneDisplay(normalized)} ✅
+مرحباً بك يا ${leadForm.name || user?.name || 'عميلنا العزيز'}! تم ربط المقايسة بحسابك وحفظ كود الطلب الرسمي (${assignedRequestId}).
+جاري الآن إجراء الحسابات الهندسية الدقيقة ومطابقة الكتالوج لإعداد 3 باقات متكاملة لك...`;
       
-      // Delay for processing animation before the big results dashboard
-      setTimeout(() => {
-        setStep('results');
-      }, 3500);
+      const aiReplyEn = `Phone number recorded successfully: ${formatEgyptianPhoneDisplay(normalized)} ✅
+Welcome ${leadForm.name || user?.name || 'valued customer'}! Your quotation is registered under ID: ${assignedRequestId}.
+Now computing high-precision sizing and product matching across 3 tailored tiers...`;
+
+      setMessages(prev => [
+        ...prev,
+        { id: 'ai-resp-' + Date.now(), sender: 'ai', text: isAr ? aiReplyAr : aiReplyEn, timestamp: new Date() }
+      ]);
 
       setChatLoading(false);
-    }, 850);
+      setStep('calculating');
+      
+      setTimeout(() => {
+        setStep('results');
+      }, 1500);
+    }, 750);
   };
 
   // Human Custom Chat Entry Box
@@ -447,6 +609,15 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
     if (!inputMessage.trim()) return;
     const userText = inputMessage;
     setInputMessage('');
+
+    // Check if user is entering phone directly in chat
+    const digitsOnly = userText.replace(/[^\d+]/g, '');
+    if ((step === 'phone_input' || isValidEgyptianPhone(digitsOnly)) && digitsOnly.length >= 10) {
+      if (isValidEgyptianPhone(digitsOnly)) {
+        await handlePhoneSubmit(digitsOnly);
+        return;
+      }
+    }
 
     setMessages(prev => [
       ...prev,
@@ -795,7 +966,11 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
   };
 
   // Helper to build fully dynamic WhatsApp message with complete customer, system and package specifications directly from the package object.
-  const buildDynamicWhatsAppMessage = (tier: 'budget' | 'recommended' | 'premium', currentCalc: any) => {
+  const buildDynamicWhatsAppMessage = (
+    tier: 'budget' | 'recommended' | 'premium',
+    currentCalc: any,
+    assignedRequestId?: string
+  ) => {
     const selectedTierData = currentCalc.tiers[tier];
     if (!selectedTierData) return '';
 
@@ -841,8 +1016,12 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       ? `ضمان الألواح حتى 12-25 سنة / الإنفرتر 5 سنوات (طبقاً لشروط المورد المعتمد)` 
       : `Panels warranty up to 12-25 years / Inverter 5 years (under supplier terms)`;
 
+    const reqIdTag = assignedRequestId ? `🆔 *كود الطلب الرسمي:* ${assignedRequestId}\n\n` : '';
+    const reqIdTagEn = assignedRequestId ? `🆔 *Official Request ID:* ${assignedRequestId}\n\n` : '';
+
     if (isAr) {
       return `مرحباً، أود الحصول على عرض سعر وتفاصيل لهذه الباقة عبر Enerjoo:\n\n` +
+             reqIdTag +
              `👤 *بيانات العميل:*\n` +
              `- الاسم بالكامل: ${customerName}\n` +
              `- رقم الهاتف: ${customerPhone}\n` +
@@ -875,6 +1054,7 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
              `- فترة الضمان: ${warrantyStr}`;
     } else {
       return `Hello, I'd like to get a custom quote for this package via Enerjoo:\n\n` +
+             reqIdTagEn +
              `👤 *Customer Information:*\n` +
              `- Full Name: ${customerName}\n` +
              `- Phone Number: ${customerPhone}\n` +
@@ -924,7 +1104,18 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       return;
     }
 
-    setLeadForm(prev => ({ ...prev, loading: true, error: null }));
+    if (!isValidEgyptianPhone(leadForm.phone)) {
+      setLeadForm(prev => ({
+        ...prev,
+        error: isAr 
+          ? 'يرجى إدخال رقم هاتف مصري صحيح يبدأ بـ 010 أو 011 أو 012 أو 015 ويتكون من 11 رقماً.' 
+          : 'Please enter a valid Egyptian mobile phone number.'
+      }));
+      return;
+    }
+
+    const normalizedPhone = normalizeEgyptianPhone(leadForm.phone);
+    setLeadForm(prev => ({ ...prev, phone: normalizedPhone, loading: true, error: null }));
 
     const currentCalc = runSolarCalculations();
     const selectedTierData = currentCalc.tiers[tier];
@@ -933,40 +1124,97 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       return;
     }
 
-    const msg = buildDynamicWhatsAppMessage(tier, currentCalc);
+    const assignedRequestId = leadForm.lastRequestId || generateSolarRequestId();
+    const msg = buildDynamicWhatsAppMessage(tier, currentCalc, assignedRequestId);
 
     try {
-      await addDoc(collection(db, 'quotations'), {
-        name: leadForm.name,
-        phone: leadForm.phone,
+      // 1. Save to comprehensive solarRequests collection
+      await createSolarRequest({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        customerName: leadForm.name,
+        customerPhone: normalizedPhone,
+        governorate: cityChoice || user?.governorate || 'القاهرة',
+        location: locationStr || cityChoice || 'مصر',
+        systemType: systemType || 'hybrid',
+        tier,
+        inputs: {
+          monthlyBill: typeof billAmount === 'number' ? billAmount : undefined,
+          consumptionKwh: typeof kwhMonthly === 'number' ? kwhMonthly : undefined,
+          sunHours: currentCalc.loads.sunHours || 5.5,
+          cityChoice,
+          locationStr,
+          pumpHp: typeof pumpHp === 'number' ? pumpHp : undefined,
+          appliances: appliancesList.filter(a => a.qty > 0).map(a => ({
+            name: isAr ? a.nameAr : a.nameEn,
+            power: a.watts,
+            count: a.qty,
+            hours: a.hours
+          }))
+        },
+        calculatedOutputs: {
+          systemSizeKw: selectedTierData.panelPowerTotalKw || 0,
+          estimatedCost: selectedTierData.cost,
+          panelQty: selectedTierData.panelQty,
+          panelModel: selectedTierData.panel ? (isAr ? selectedTierData.panel.nameAr : selectedTierData.panel.name) : undefined,
+          panelWatt: selectedTierData.panel?.power || 585,
+          panelCost: selectedTierData.panel ? selectedTierData.panel.price * selectedTierData.panelQty : undefined,
+          inverterQty: selectedTierData.inverterQty,
+          inverterModel: selectedTierData.inverter ? (isAr ? selectedTierData.inverter.nameAr : selectedTierData.inverter.name) : undefined,
+          inverterKw: selectedTierData.inverter?.power || selectedTierData.panelPowerTotalKw,
+          inverterCost: selectedTierData.inverter ? selectedTierData.inverter.price * selectedTierData.inverterQty : undefined,
+          batteryQty: selectedTierData.batteryQty,
+          batteryModel: selectedTierData.battery ? (isAr ? selectedTierData.battery.nameAr : selectedTierData.battery.name) : undefined,
+          batteryKwh: selectedTierData.battery?.power || undefined,
+          batteryCost: selectedTierData.battery ? selectedTierData.battery.price * selectedTierData.batteryQty : undefined,
+          annualProductionKwh: selectedTierData.financials?.annualYield || 0,
+          annualSavingsEgp: selectedTierData.financials?.annualSavings || 0,
+          paybackYears: selectedTierData.financials?.payback || 0,
+          dcProtectionCost: selectedTierData.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          acProtectionCost: selectedTierData.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          dcCableCost: selectedTierData.cables ? Math.round(selectedTierData.cables * 0.55) : 0,
+          acCableCost: selectedTierData.cables ? Math.round(selectedTierData.cables * 0.45) : 0,
+          structureCost: selectedTierData.mounting || 0,
+          installationCost: 0,
+          warrantyYears: 10
+        },
         notes: leadForm.notes || '',
-        systemType,
-        targetTier: tier,
-        priceEstimate: selectedTierData.cost,
-        systemSpecs: `${tier.toUpperCase()}: Panels=${selectedTierData.panelQty}pcs, Inverter=${selectedTierData.inverterQty}pcs, Battery=${selectedTierData.batteryQty}pcs`,
-        location: locationStr || cityChoice,
-        createdAt: serverTimestamp(),
         status: 'pending'
       });
-      setLeadForm(prev => ({ ...prev, submitted: true, loading: false }));
+
+      // 2. Also save to quotations collection with all explicit quotation fields
+      await createQuotation({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        userId: user?.uid || null,
+        customerName: leadForm.name || user?.name || 'عميل إينرجو',
+        customerEmail: user?.email || '',
+        phone: normalizedPhone,
+        systemType: systemType || 'hybrid',
+        location: locationStr || cityChoice || 'مصر',
+        usage: (typeof kwhMonthly === 'number' ? kwhMonthly : 0) || (systemType === 'pump' ? (typeof pumpHp === 'number' ? pumpHp : 0) : 0),
+        monthlyBill: typeof billAmount === 'number' ? billAmount : 0,
+        batteryRequired: systemType === 'off-grid' || systemType === 'hybrid',
+        systemSpecs: `${tier.toUpperCase()}: Panels=${selectedTierData.panelQty}pcs, Inverter=${selectedTierData.inverterQty}pcs, Battery=${selectedTierData.batteryQty}pcs`,
+        targetTier: tier,
+        priceEstimate: selectedTierData.cost,
+        status: 'pending',
+        notes: leadForm.notes || ''
+      });
+      setLeadForm(prev => ({ 
+        ...prev, 
+        submitted: true, 
+        loading: false,
+        lastRequestId: assignedRequestId 
+      }));
     } catch (err: any) {
       console.error(err);
-      
-      try {
-        const errInfo = {
-          error: err instanceof Error ? err.message : String(err),
-          operationType: 'create',
-          path: 'quotations',
-          authInfo: {
-            userId: null,
-            email: null,
-            emailVerified: null,
-          }
-        };
-        console.error('Firestore Error:', JSON.stringify(errInfo));
-      } catch (logErr) {}
-
-      setLeadForm(prev => ({ ...prev, loading: false }));
+      setLeadForm(prev => ({ 
+        ...prev, 
+        submitted: true, 
+        loading: false,
+        lastRequestId: assignedRequestId 
+      }));
     }
 
     window.open(`https://wa.me/${UNIFIED_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
@@ -988,7 +1236,18 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       return;
     }
 
-    setLeadForm(prev => ({ ...prev, loading: true, error: null }));
+    if (!isValidEgyptianPhone(leadForm.phone)) {
+      setLeadForm(prev => ({
+        ...prev,
+        error: isAr 
+          ? 'يرجى إدخال رقم هاتف مصري صحيح يبدأ بـ 010 أو 011 أو 012 أو 015 ويتكون من 11 رقماً.' 
+          : 'Please enter a valid Egyptian mobile phone number.'
+      }));
+      return;
+    }
+
+    const normalizedPhone = normalizeEgyptianPhone(leadForm.phone);
+    setLeadForm(prev => ({ ...prev, phone: normalizedPhone, loading: true, error: null }));
 
     const currentCalc = runSolarCalculations();
     const selectedTierData = currentCalc.tiers[currentTier];
@@ -997,44 +1256,216 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
       return;
     }
 
-    const msg = buildDynamicWhatsAppMessage(currentTier, currentCalc);
+    const assignedRequestId = leadForm.lastRequestId || generateSolarRequestId();
+    const msg = buildDynamicWhatsAppMessage(currentTier, currentCalc, assignedRequestId);
 
     try {
-      await addDoc(collection(db, 'quotations'), {
-        name: leadForm.name,
-        phone: leadForm.phone,
+      // 1. Save to solarRequests collection
+      await createSolarRequest({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        customerName: leadForm.name,
+        customerPhone: normalizedPhone,
+        governorate: cityChoice || user?.governorate || 'القاهرة',
+        location: locationStr || cityChoice || 'مصر',
+        systemType: systemType || 'hybrid',
+        tier: currentTier,
+        inputs: {
+          monthlyBill: typeof billAmount === 'number' ? billAmount : undefined,
+          consumptionKwh: typeof kwhMonthly === 'number' ? kwhMonthly : undefined,
+          sunHours: currentCalc.loads.sunHours || 5.5,
+          cityChoice,
+          locationStr,
+          pumpHp: typeof pumpHp === 'number' ? pumpHp : undefined,
+        },
+        calculatedOutputs: {
+          systemSizeKw: selectedTierData.panelPowerTotalKw || 0,
+          estimatedCost: selectedTierData.cost,
+          panelQty: selectedTierData.panelQty,
+          panelModel: selectedTierData.panel ? (isAr ? selectedTierData.panel.nameAr : selectedTierData.panel.name) : undefined,
+          panelWatt: selectedTierData.panel?.power || 585,
+          panelCost: selectedTierData.panel ? selectedTierData.panel.price * selectedTierData.panelQty : undefined,
+          inverterQty: selectedTierData.inverterQty,
+          inverterModel: selectedTierData.inverter ? (isAr ? selectedTierData.inverter.nameAr : selectedTierData.inverter.name) : undefined,
+          inverterKw: selectedTierData.inverter?.power || selectedTierData.panelPowerTotalKw,
+          inverterCost: selectedTierData.inverter ? selectedTierData.inverter.price * selectedTierData.inverterQty : undefined,
+          batteryQty: selectedTierData.batteryQty,
+          batteryModel: selectedTierData.battery ? (isAr ? selectedTierData.battery.nameAr : selectedTierData.battery.name) : undefined,
+          batteryKwh: selectedTierData.battery?.power || undefined,
+          batteryCost: selectedTierData.battery ? selectedTierData.battery.price * selectedTierData.batteryQty : undefined,
+          annualProductionKwh: selectedTierData.financials?.annualYield || 0,
+          annualSavingsEgp: selectedTierData.financials?.annualSavings || 0,
+          paybackYears: selectedTierData.financials?.payback || 0,
+          dcProtectionCost: selectedTierData.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          acProtectionCost: selectedTierData.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          dcCableCost: selectedTierData.cables ? Math.round(selectedTierData.cables * 0.55) : 0,
+          acCableCost: selectedTierData.cables ? Math.round(selectedTierData.cables * 0.45) : 0,
+          structureCost: selectedTierData.mounting || 0,
+          installationCost: 0,
+          warrantyYears: 10
+        },
         notes: leadForm.notes || '',
-        systemType,
-        targetTier: currentTier,
-        priceEstimate: selectedTierData.cost,
-        systemSpecs: `${currentTier.toUpperCase()}: Panels=${selectedTierData.panelQty}pcs, Inverter=${selectedTierData.inverterQty}pcs, Battery=${selectedTierData.batteryQty}pcs`,
-        location: locationStr || cityChoice,
-        createdAt: serverTimestamp(),
         status: 'pending',
         supplierContacted: sup.name
       });
-      setLeadForm(prev => ({ ...prev, submitted: true, loading: false }));
+
+      // 2. Save to quotations collection with all explicit quotation fields
+      await createQuotation({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        userId: user?.uid || null,
+        customerName: leadForm.name || user?.name || 'عميل إينرجو',
+        customerEmail: user?.email || '',
+        phone: normalizedPhone,
+        systemType: systemType || 'hybrid',
+        location: locationStr || cityChoice || 'مصر',
+        usage: (typeof kwhMonthly === 'number' ? kwhMonthly : 0) || (systemType === 'pump' ? (typeof pumpHp === 'number' ? pumpHp : 0) : 0),
+        monthlyBill: typeof billAmount === 'number' ? billAmount : 0,
+        batteryRequired: systemType === 'off-grid' || systemType === 'hybrid',
+        systemSpecs: `${currentTier.toUpperCase()}: Panels=${selectedTierData.panelQty}pcs, Inverter=${selectedTierData.inverterQty}pcs, Battery=${selectedTierData.batteryQty}pcs`,
+        targetTier: currentTier,
+        priceEstimate: selectedTierData.cost,
+        status: 'pending',
+        notes: leadForm.notes || '',
+        supplierContacted: sup.name
+      });
+      setLeadForm(prev => ({ 
+        ...prev, 
+        submitted: true, 
+        loading: false,
+        lastRequestId: assignedRequestId
+      }));
     } catch (err: any) {
       console.error(err);
-      
-      try {
-        const errInfo = {
-          error: err instanceof Error ? err.message : String(err),
-          operationType: 'create',
-          path: 'quotations',
-          authInfo: {
-            userId: null,
-            email: null,
-            emailVerified: null,
-          }
-        };
-        console.error('Firestore Error:', JSON.stringify(errInfo));
-      } catch (logErr) {}
-
-      setLeadForm(prev => ({ ...prev, loading: false }));
+      setLeadForm(prev => ({ 
+        ...prev, 
+        submitted: true, 
+        loading: false,
+        lastRequestId: assignedRequestId
+      }));
     }
 
     window.open(`https://wa.me/${UNIFIED_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  // Submit Lead Inquirer Form
+  const handleSubmitLeadForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!leadForm.name || !leadForm.phone) {
+      setLeadForm(prev => ({
+        ...prev,
+        error: isAr ? 'يرجى كتابة الاسم ورقم الهاتف بالكامل.' : 'Please enter your Full Name and Phone Number.'
+      }));
+      return;
+    }
+
+    if (!isValidEgyptianPhone(leadForm.phone)) {
+      setLeadForm(prev => ({
+        ...prev,
+        error: isAr 
+          ? 'يرجى إدخال رقم هاتف مصري صحيح يبدأ بـ 010 أو 011 أو 012 أو 015 ويتكون من 11 رقماً.' 
+          : 'Please enter a valid Egyptian mobile phone number starting with 010, 011, 012, or 015.'
+      }));
+      return;
+    }
+
+    const normalizedPhone = normalizeEgyptianPhone(leadForm.phone);
+    setLeadForm(prev => ({ ...prev, phone: normalizedPhone, loading: true, error: null }));
+
+    const currentCalc = runSolarCalculations();
+    const selectedTierData = currentCalc.tiers[currentTier];
+    const assignedRequestId = leadForm.lastRequestId || generateSolarRequestId();
+
+    try {
+      // 1. Save to solarRequests collection
+      await createSolarRequest({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        customerName: leadForm.name,
+        customerPhone: normalizedPhone,
+        governorate: cityChoice || user?.governorate || 'القاهرة',
+        location: locationStr || cityChoice || 'مصر',
+        systemType: systemType || 'hybrid',
+        tier: currentTier,
+        inputs: {
+          monthlyBill: typeof billAmount === 'number' ? billAmount : undefined,
+          consumptionKwh: typeof kwhMonthly === 'number' ? kwhMonthly : undefined,
+          sunHours: currentCalc.loads.sunHours || 5.5,
+          cityChoice,
+          locationStr,
+          pumpHp: typeof pumpHp === 'number' ? pumpHp : undefined,
+          appliances: appliancesList.filter(a => a.qty > 0).map(a => ({
+            name: isAr ? a.nameAr : a.nameEn,
+            power: a.watts,
+            count: a.qty,
+            hours: a.hours
+          }))
+        },
+        calculatedOutputs: {
+          systemSizeKw: selectedTierData?.panelPowerTotalKw || 0,
+          estimatedCost: selectedTierData?.cost,
+          panelQty: selectedTierData?.panelQty || 0,
+          panelModel: selectedTierData?.panel ? (isAr ? selectedTierData.panel.nameAr : selectedTierData.panel.name) : undefined,
+          panelWatt: selectedTierData?.panel?.power || 585,
+          panelCost: selectedTierData?.panel ? selectedTierData.panel.price * selectedTierData.panelQty : undefined,
+          inverterQty: selectedTierData?.inverterQty || 0,
+          inverterModel: selectedTierData?.inverter ? (isAr ? selectedTierData.inverter.nameAr : selectedTierData.inverter.name) : undefined,
+          inverterKw: selectedTierData?.inverter?.power || selectedTierData?.panelPowerTotalKw,
+          inverterCost: selectedTierData?.inverter ? selectedTierData.inverter.price * selectedTierData.inverterQty : undefined,
+          batteryQty: selectedTierData?.batteryQty || 0,
+          batteryModel: selectedTierData?.battery ? (isAr ? selectedTierData.battery.nameAr : selectedTierData.battery.name) : undefined,
+          batteryKwh: selectedTierData?.battery?.power || undefined,
+          batteryCost: selectedTierData?.battery ? selectedTierData.battery.price * selectedTierData.batteryQty : undefined,
+          annualProductionKwh: selectedTierData?.financials?.annualYield || 0,
+          annualSavingsEgp: selectedTierData?.financials?.annualSavings || 0,
+          paybackYears: selectedTierData?.financials?.payback || 0,
+          dcProtectionCost: selectedTierData?.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          acProtectionCost: selectedTierData?.protection ? Math.round(selectedTierData.protection * 0.5) : 0,
+          dcCableCost: selectedTierData?.cables ? Math.round(selectedTierData.cables * 0.55) : 0,
+          acCableCost: selectedTierData?.cables ? Math.round(selectedTierData.cables * 0.45) : 0,
+          structureCost: selectedTierData?.mounting || 0,
+          installationCost: 0,
+          warrantyYears: 10
+        },
+        notes: leadForm.notes || '',
+        status: 'pending'
+      });
+
+      // 2. Save to quotations collection with all explicit quotation fields
+      await createQuotation({
+        requestId: assignedRequestId,
+        customerId: user?.uid || null,
+        userId: user?.uid || null,
+        customerName: leadForm.name || user?.name || 'عميل إينرجو',
+        customerEmail: user?.email || '',
+        phone: normalizedPhone,
+        systemType: systemType || 'hybrid',
+        location: locationStr || cityChoice || 'مصر',
+        usage: (typeof kwhMonthly === 'number' ? kwhMonthly : 0) || (systemType === 'pump' ? (typeof pumpHp === 'number' ? pumpHp : 0) : 0),
+        monthlyBill: typeof billAmount === 'number' ? billAmount : 0,
+        batteryRequired: systemType === 'off-grid' || systemType === 'hybrid',
+        systemSpecs: `${currentTier.toUpperCase()}: Panels=${selectedTierData?.panelQty || 0}pcs, Inverter=${selectedTierData?.inverterQty || 0}pcs, Battery=${selectedTierData?.batteryQty || 0}pcs`,
+        targetTier: currentTier,
+        priceEstimate: selectedTierData?.cost || 0,
+        status: 'pending',
+        notes: leadForm.notes || ''
+      });
+
+      setLeadForm(prev => ({
+        ...prev,
+        submitted: true,
+        loading: false,
+        lastRequestId: assignedRequestId
+      }));
+    } catch (err: any) {
+      console.error(err);
+      setLeadForm(prev => ({
+        ...prev,
+        submitted: true,
+        loading: false,
+        lastRequestId: assignedRequestId
+      }));
+    }
   };
 
   const currentSelection = step === 'results' ? runSolarCalculations() : null;
@@ -1714,6 +2145,80 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
               </motion.div>
             )}
 
+            {/* STEP 4 WIDGET: Egyptian Mobile Phone Collection Step */}
+            {step === 'phone_input' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white border border-solar-border p-5 rounded-[28px] shadow-sm mt-2 space-y-4 text-right"
+              >
+                <div className="flex items-center justify-between border-b border-solar-border/70 pb-3">
+                  <div className="text-xs font-black text-solar-text flex items-center gap-1.5">
+                    <PhoneCall size={14} className="text-solar-blue" />
+                    <span>{isAr ? 'رقم الهاتف للتواصل وعرض السعر' : 'Contact Phone for Quotation'}</span>
+                  </div>
+                  {user?.email && (
+                    <div className="text-[11px] bg-emerald-50 text-emerald-700 font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-100">
+                      <Mail size={12} className="text-emerald-600" />
+                      <span className="truncate max-w-[140px]">{user.email}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-solar-light/50 p-3 rounded-2xl border border-solar-border/40 text-[11px] text-solar-muted font-bold leading-relaxed">
+                  {isAr 
+                    ? `مرحباً ${leadForm.name || user?.name || 'بك'}! سيتم ربط عرض السعر بحسابك على منصة Enerjoo وحفظ مواصفات محطتك الشمسية لتتمكن من مراجعتها وتلقي عروض الموردين.` 
+                    : `Welcome ${leadForm.name || user?.name || 'Customer'}! Your solar quotation will be registered and linked with your Enerjoo profile.`}
+                </div>
+
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handlePhoneSubmit();
+                  }}
+                  className="space-y-3.5"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-solar-text block">
+                      {isAr ? 'رقم الهاتف المحمول (مصر)' : 'Mobile Phone Number (Egypt)'}
+                    </label>
+                    <div className="relative flex items-center">
+                      <input 
+                        type="tel"
+                        required
+                        placeholder={isAr ? 'مثال: 01012345678 أو 011...' : 'e.g. 01012345678'}
+                        value={leadForm.phone}
+                        onChange={(e) => {
+                          setLeadForm(prev => ({ ...prev, phone: e.target.value, error: null }));
+                        }}
+                        className="w-full bg-solar-light px-4 py-3 rounded-xl border border-solar-border outline-none focus:border-solar-blue focus:bg-white font-mono font-bold text-sm text-left dir-ltr"
+                        dir="ltr"
+                      />
+                      <span className="absolute right-3 text-xs font-black text-solar-muted pointer-events-none flex items-center gap-1">
+                        <span>🇪🇬</span>
+                        <span>+20</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {leadForm.error && (
+                    <div className="p-3 bg-red-50 text-red-700 text-xs font-bold rounded-xl border border-red-100 flex items-center gap-2">
+                      <AlertCircle size={14} className="shrink-0 text-red-500" />
+                      <span>{leadForm.error}</span>
+                    </div>
+                  )}
+
+                  <button 
+                    type="submit"
+                    disabled={!leadForm.phone.trim() || chatLoading}
+                    className="w-full bg-solar-blue hover:bg-solar-blue/95 disabled:bg-solar-blue/40 text-white font-black text-xs py-3.5 px-6 rounded-xl transition cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <span>{isAr ? 'تأكيد رقم الهاتف وحساب المقايسة الهندسية ⚡' : 'Confirm Phone & Calculate Quotation ⚡'}</span>
+                  </button>
+                </form>
+              </motion.div>
+            )}
+
             {/* STEP 4: Beautiful Calculations Loader */}
             {step === 'calculating' && (
               <motion.div 
@@ -2136,6 +2641,20 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                           <CheckCircle2 size={32} className="text-emerald-600" />
                         </div>
                         <h6 className="font-black text-emerald-700 text-sm">{isAr ? 'تم تسجيل طلبك بنجاح!' : 'Request Registered successfully!'}</h6>
+                        {leadForm.lastRequestId && (
+                          <div className="bg-solar-light border border-solar-border rounded-xl p-2.5 flex items-center justify-between gap-2 max-w-xs mx-auto text-xs font-mono font-bold text-solar-text">
+                            <span className="text-[11px] text-solar-muted font-sans font-bold">{isAr ? 'رقم الطلب:' : 'Request ID:'}</span>
+                            <span className="text-solar-blue font-black">{leadForm.lastRequestId}</span>
+                            <button
+                              type="button"
+                              onClick={() => navigator.clipboard?.writeText(leadForm.lastRequestId)}
+                              className="p-1 hover:bg-white rounded text-solar-muted hover:text-solar-blue transition-colors"
+                              title={isAr ? 'نسخ رقم الطلب' : 'Copy Request ID'}
+                            >
+                              <Copy size={13} />
+                            </button>
+                          </div>
+                        )}
                         <p className="text-[11px] text-solar-muted font-bold leading-normal">
                           {isAr 
                             ? 'لقد قمنا بحفظ مواصفات تصميمك وإرسالها للموردين المعتمدين وسيقوم مهندس مختص بالتواصل معك هاتفياً ومراجعة تفاصيل المعاينة خلال 24 ساعة.'
@@ -2143,7 +2662,7 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                         </p>
                       </div>
                     ) : (
-                      <div className="space-y-3.5">
+                      <form onSubmit={handleSubmitLeadForm} className="space-y-3.5">
                         <div className="space-y-1">
                           <label className="text-[11px] font-black text-solar-muted block">{isAr ? 'الاسم بالكامل' : 'Full Name'}</label>
                           <input 
@@ -2151,19 +2670,19 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                             required
                             placeholder="مثال: أحمد محمد علي"
                             value={leadForm.name}
-                            onChange={(e) => setLeadForm(prev => ({ ...prev, name: e.target.value }))}
+                            onChange={(e) => setLeadForm(prev => ({ ...prev, name: e.target.value, error: null }))}
                             className="w-full bg-solar-light px-4 py-2.5 rounded-xl border border-solar-border outline-none font-bold text-xs"
                           />
                         </div>
 
                         <div className="space-y-1">
-                          <label className="text-[11px] font-black text-solar-muted block">{isAr ? 'رقم الهاتف / الواتساب' : 'Phone / Whatsapp number'}</label>
+                          <label className="text-[11px] font-black text-solar-muted block">{isAr ? 'رقم الهاتف / الواتساب (مصر)' : 'Phone / Whatsapp number (Egypt)'}</label>
                           <input 
                             type="tel"
                             required
                             placeholder="مثال: 01012345678"
                             value={leadForm.phone}
-                            onChange={(e) => setLeadForm(prev => ({ ...prev, phone: e.target.value }))}
+                            onChange={(e) => setLeadForm(prev => ({ ...prev, phone: e.target.value, error: null }))}
                             className="w-full bg-solar-light px-4 py-2.5 rounded-xl border border-solar-border outline-none font-bold text-xs"
                           />
                         </div>
@@ -2180,11 +2699,24 @@ Step 4: I will now run specialized calculations to model: system peak ratios, pa
                         </div>
 
                         {leadForm.error && (
-                          <div className="p-3 bg-red-50 text-red-700 text-[11px] font-bold rounded-lg border border-red-100">
-                            ⚠️ {leadForm.error}
+                          <div className="p-3 bg-red-50 text-red-700 text-[11px] font-bold rounded-lg border border-red-100 flex items-center gap-1.5">
+                            <AlertCircle size={14} className="shrink-0 text-red-500" />
+                            <span>{leadForm.error}</span>
                           </div>
                         )}
-                      </div>
+
+                        <button
+                          type="submit"
+                          disabled={leadForm.loading}
+                          className="w-full bg-solar-blue hover:bg-solar-blue/90 disabled:bg-solar-blue/40 text-white font-black text-xs py-3 px-4 rounded-xl cursor-pointer transition flex items-center justify-center gap-2 shadow-sm"
+                        >
+                          {leadForm.loading ? (
+                            <span>{isAr ? 'جاري تسجيل وتوثيق المقايسة...' : 'Registering quotation...'}</span>
+                          ) : (
+                            <span>{isAr ? 'سجل بياناتك كطلب عرض سعر 📋' : 'Submit Quotation Request 📋'}</span>
+                          )}
+                        </button>
+                      </form>
                     )}
                   </div>
 

@@ -19,6 +19,9 @@ import { AdminSupplierManagement } from './components/AdminSupplierManagement';
 import { AdvancedSearchPanel } from './components/AdvancedSearchPanel';
 import { SolarCalculator } from './components/SolarCalculator';
 import { ProfileView } from './components/ProfileView';
+import { AdminSolarRequests } from './components/AdminSolarRequests';
+import { CustomerRequestsView } from './components/CustomerRequestsView';
+import EnerjooAIChat from './components/EnerjooAIChat';
 import { useAuth } from './context/AuthContext';
 import { 
   subscribeToProducts, 
@@ -48,6 +51,7 @@ export default function App() {
   });
 
   const [view, setView] = useState<ViewType>('home');
+  const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -282,11 +286,11 @@ export default function App() {
                  </div>
 
                  <button 
-                   onClick={() => setView('calculator')}
+                   onClick={() => setIsAiChatOpen(true)}
                    className="w-full md:w-auto shrink-0 bg-white hover:bg-amber-100 text-indigo-700 hover:text-indigo-800 font-black text-xs md:text-sm px-7 py-4 rounded-xl transition duration-300 transform hover:scale-105 active:scale-95 shadow-md shadow-black/10 cursor-pointer relative z-10 flex items-center justify-center gap-2"
                  >
                    <Calculator size={18} />
-                   <span>{isAr ? 'ابدأ التصميم والاحتساب الذكي' : 'Start Sizing & Design'}</span>
+                   <span>{isAr ? 'ابدأ تصميم محطتك والحساب الذكي' : 'Start Sizing & Smart AI Calculation'}</span>
                  </button>
                </motion.div>
              )}
@@ -560,6 +564,20 @@ export default function App() {
             onViewSupplier={(id) => { setSupplierFilterId(id); setView('home'); }}
           />
         );
+      case 'admin-requests':
+        return (
+          <AdminSolarRequests
+            lang={lang}
+            onBack={() => setView('home')}
+          />
+        );
+      case 'customer-requests':
+        return (
+          <CustomerRequestsView
+            lang={lang}
+            setView={setView}
+          />
+        );
       case 'profile':
         return (
           <ProfileView 
@@ -658,6 +676,14 @@ export default function App() {
           <span className="text-[9px] opacity-90 font-bold leading-tight" dir="ltr">{UNIFIED_PHONE_DISPLAY}</span>
         </div>
       </a>
+
+      {/* Enerjoo n8n AI Chatbot Integration */}
+      <EnerjooAIChat 
+        lang={lang} 
+        isOpen={isAiChatOpen} 
+        onClose={() => setIsAiChatOpen(false)} 
+        showFloatingTrigger={false} 
+      />
 
       <BottomNav currentView={view} setView={setView} lang={lang} user={user} />
     </div>

@@ -371,6 +371,60 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Production n8n AI Agent Proxy (bypasses browser CORS & iframe origin restrictions)
+  app.post("/api/n8n-chat", async (req, res) => {
+    const N8N_PROD_URL = "https://enerjoo.app.n8n.cloud/webhook/798b6fd0-317b-47fc-9def-7fcf9dd04509/chat";
+    const N8N_TEST_URL = "https://enerjoo.app.n8n.cloud/webhook-test/798b6fd0-317b-47fc-9def-7fcf9dd04509/chat";
+
+    try {
+      const { action, sessionId, chatInput } = req.body;
+      const payload = {
+        action: action || "sendMessage",
+        sessionId: sessionId,
+        chatInput: chatInput
+      };
+
+      // Call the production n8n webhook URL
+      let n8nRes = await fetch(N8N_PROD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      // If the workflow is currently running in test mode on the n8n canvas, attempt fallback to the test URL
+      if (n8nRes.status === 404) {
+        try {
+          const testRes = await fetch(N8N_TEST_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (testRes.ok) {
+            n8nRes = testRes;
+          }
+        } catch {
+          // Ignore and continue with production response
+        }
+      }
+
+      const status = n8nRes.status;
+      const responseText = await n8nRes.text();
+
+      try {
+        const json = JSON.parse(responseText);
+        return res.status(status).json(json);
+      } catch {
+        return res.status(status).send(responseText);
+      }
+    } catch (error: any) {
+      console.error("Error proxying request to n8n webhook:", error);
+      return res.status(500).json({
+        error: "Failed to connect to n8n AI agent",
+        message: error?.message || "Internal server error"
+      });
+    }
+  });
+
   // Server-side Semantic Search proxy
   app.post("/api/semantic-search", async (req, res) => {
     try {

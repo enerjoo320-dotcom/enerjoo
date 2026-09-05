@@ -244,31 +244,87 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </div>
             )}
 
-            {/* Row 3: Supplier Account */}
-            <button 
-              onClick={() => {
-                if (user?.type === 'supplier') {
-                  setView('supplier-dashboard');
-                } else if (user?.type === 'admin') {
-                  setView('admin-suppliers');
-                } else {
-                  setView('login');
-                }
-              }}
-              className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer"
-            >
-              <div>
-                {isAr ? <ChevronLeft size={16} className="text-solar-muted" /> : <ChevronRight size={16} className="text-solar-muted" />}
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-sm text-solar-text">
-                  {isAr ? 'حساب مورد' : 'Supplier Dashboard'}
-                </span>
-                <div className="p-2.5 bg-amber-50 text-amber-500 rounded-xl">
-                  <Store size={18} strokeWidth={2.5} />
+            {/* Row 3: Supplier Account / Admin Requests */}
+            {user?.type === 'admin' ? (
+              <>
+                <button 
+                  onClick={() => setView('admin-requests')}
+                  className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer"
+                >
+                  <div>
+                    {isAr ? <ChevronLeft size={16} className="text-solar-muted" /> : <ChevronRight size={16} className="text-solar-muted" />}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-sm text-solar-text">
+                      {isAr ? 'إدارة طلبات وحسابات الطاقة الشمسية' : 'Solar Requests Management'}
+                    </span>
+                    <div className="p-2.5 bg-blue-50 text-solar-blue rounded-xl">
+                      <Sparkles size={18} strokeWidth={2.5} />
+                    </div>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setView('admin-suppliers')}
+                  className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer"
+                >
+                  <div>
+                    {isAr ? <ChevronLeft size={16} className="text-solar-muted" /> : <ChevronRight size={16} className="text-solar-muted" />}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-sm text-solar-text">
+                      {isAr ? 'إدارة وتوثيق الموردين' : 'Supplier Verification'}
+                    </span>
+                    <div className="p-2.5 bg-amber-50 text-amber-500 rounded-xl">
+                      <Store size={18} strokeWidth={2.5} />
+                    </div>
+                  </div>
+                </button>
+              </>
+            ) : (
+              <button 
+                onClick={() => {
+                  if (user?.type === 'supplier') {
+                    setView('supplier-dashboard');
+                  } else {
+                    setView('login');
+                  }
+                }}
+                className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer"
+              >
+                <div>
+                  {isAr ? <ChevronLeft size={16} className="text-solar-muted" /> : <ChevronRight size={16} className="text-solar-muted" />}
                 </div>
-              </div>
-            </button>
+                <div className="flex items-center gap-3">
+                  <span className="font-bold text-sm text-solar-text">
+                    {isAr ? 'حساب مورد' : 'Supplier Dashboard'}
+                  </span>
+                  <div className="p-2.5 bg-amber-50 text-amber-500 rounded-xl">
+                    <Store size={18} strokeWidth={2.5} />
+                  </div>
+                </div>
+              </button>
+            )}
+
+            {/* Row 4: My Solar System Requests for Customers */}
+            {user && (
+              <button 
+                onClick={() => setView('customer-requests')}
+                className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer"
+              >
+                <div>
+                  {isAr ? <ChevronLeft size={16} className="text-solar-muted" /> : <ChevronRight size={16} className="text-solar-muted" />}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-bold text-sm text-solar-text">
+                    {isAr ? 'طلباتي الشمسية وعروض الأسعار' : 'My Solar Requests & Quotes'}
+                  </span>
+                  <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                    <Sparkles size={18} strokeWidth={2.5} />
+                  </div>
+                </div>
+              </button>
+            )}
           </div>
         </div>
 

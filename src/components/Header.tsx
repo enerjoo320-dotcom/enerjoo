@@ -41,13 +41,22 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
           )}
 
           {user?.type === 'admin' && (
-            <button 
-              onClick={() => setView('admin-suppliers')}
-              className="flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold text-sm bg-solar-light px-3 py-1.5 rounded-full"
-            >
-              <Users size={18} />
-              <span>{t.supplierList}</span>
-            </button>
+            <>
+              <button 
+                onClick={() => setView('admin-requests')}
+                className="flex items-center gap-1.5 text-solar-blue hover:bg-solar-blue/10 transition font-bold text-xs bg-solar-blue/5 border border-solar-blue/20 px-3 py-1.5 rounded-full"
+              >
+                <span>{isAr ? '⚡ طلبات الطاقة الشمسية' : '⚡ Solar Requests'}</span>
+              </button>
+
+              <button 
+                onClick={() => setView('admin-suppliers')}
+                className="hidden sm:flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold text-xs bg-solar-light px-3 py-1.5 rounded-full"
+              >
+                <Users size={16} />
+                <span>{t.supplierList}</span>
+              </button>
+            </>
           )}
 
           {user?.type === 'supplier' && (

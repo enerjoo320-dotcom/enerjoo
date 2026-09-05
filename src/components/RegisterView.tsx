@@ -26,6 +26,7 @@ export const RegisterView: React.FC<{
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [isNotAllowedError, setIsNotAllowedError] = useState(false);
@@ -38,21 +39,25 @@ export const RegisterView: React.FC<{
     e.preventDefault();
     if (!formData.name || !formData.email || !formData.password) {
       setError(isAr ? 'يرجى ملء كافة الحقول المطلوبة' : 'Please fill in all required fields');
+      setErrorCode(null);
       return;
     }
 
     if (formData.password.length < 6) {
       setError(isAr ? 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' : 'Password must be at least 6 characters');
+      setErrorCode(null);
       return;
     }
 
     if (!captchaVerified) {
       setError(isAr ? 'يرجى إكمال التحقق الأمني أولاً (أنا لست برنامج روبوت)' : "Please complete the security verification first (I'm not a robot)");
+      setErrorCode(null);
       return;
     }
 
     setIsLoading(true);
     setError('');
+    setErrorCode(null);
     setIsNotAllowedError(false);
     setIsPopupBlockedError(false);
     setIsUnauthorizedDomainError(false);
@@ -75,15 +80,16 @@ export const RegisterView: React.FC<{
       console.error("Registration Error:", err);
       let message = isAr ? 'فشل التسجيل' : 'Registration failed';
       
-      const errorCode = err.code || (err.message && err.message.includes('auth/email-already-in-use') ? 'auth/email-already-in-use' : '');
-      const isNotAllowed = err.code === 'auth/operation-not-allowed' || err.message?.includes('auth/operation-not-allowed');
-      const isNetwork = err.code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
+      const code = err.code || (err.message && err.message.includes('auth/email-already-in-use') ? 'auth/email-already-in-use' : '');
+      setErrorCode(code || null);
+      const isNotAllowed = code === 'auth/operation-not-allowed' || err.message?.includes('auth/operation-not-allowed');
+      const isNetwork = code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
       
-      if (errorCode === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use')) {
+      if (code === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use')) {
         message = isAr ? 'هذا البريد الإلكتروني مستخدم بالفعل' : 'This email is already in use';
-      } else if (err.code === 'auth/weak-password') {
+      } else if (code === 'auth/weak-password') {
         message = isAr ? 'كلمة المرور ضعيفة جداً' : 'The password is too weak';
-      } else if (err.code === 'auth/invalid-email') {
+      } else if (code === 'auth/invalid-email') {
         message = isAr ? 'البريد الإلكتروني غير صالح' : 'Invalid email address';
       } else if (isNetwork) {
         setIsNetworkError(true);
@@ -93,6 +99,13 @@ export const RegisterView: React.FC<{
         message = isAr 
           ? 'طريقة التسجيل بالبريد وكلمة المرور غير مفعّلة في لوحة تحكم Firebase حالياً.' 
           : 'Email & Password sign-in method is not enabled in your Firebase console.';
+      } else if (code === 'auth/unauthorized-domain') {
+        setIsUnauthorizedDomainError(true);
+        const currentHost = window.location.hostname || 'enerjoo.com';
+        setUnauthorizedDomain(currentHost);
+        message = isAr 
+          ? `النطاق الحالي (${currentHost}) غير مصرح به في Firebase Authentication.`
+          : `The current domain (${currentHost}) is not authorized in Firebase Authentication.`;
       }
       
       setError(message);
@@ -117,7 +130,9 @@ export const RegisterView: React.FC<{
         }, 1500);
       }
     } catch (err: any) {
-      const isPopupClosed = err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request';
+      const code = err?.code || '';
+      setErrorCode(code || null);
+      const isPopupClosed = code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
       if (isPopupClosed) {
         console.info("Google Sign Up popup was closed by the user.");
         return;
@@ -125,13 +140,13 @@ export const RegisterView: React.FC<{
 
       console.warn("Google Registration Notice:", err);
       let message = isAr ? 'فشل التسجيل باستخدام Google' : 'Google registration failed';
-      const isPopupBlocked = err?.code === 'auth/popup-blocked' || 
+      const isPopupBlocked = code === 'auth/popup-blocked' || 
                              err?.message?.includes('auth/popup-blocked');
-      const isUnauthorized = err?.code === 'auth/unauthorized-domain' || 
+      const isUnauthorized = code === 'auth/unauthorized-domain' || 
                              err?.message?.includes('auth/unauthorized-domain');
-      const isNotAllowed = err?.code === 'auth/operation-not-allowed' || 
+      const isNotAllowed = code === 'auth/operation-not-allowed' || 
                            err?.message?.includes('auth/operation-not-allowed');
-      const isNetworkErr = err?.code === 'auth/network-request-failed' || err?.message?.includes('auth/network-request-failed');
+      const isNetworkErr = code === 'auth/network-request-failed' || err?.message?.includes('auth/network-request-failed');
 
       if (isUnauthorized) {
         setIsUnauthorizedDomainError(true);
@@ -451,12 +466,22 @@ export const RegisterView: React.FC<{
         <SecurityCaptcha lang={lang} onVerify={setCaptchaVerified} />
 
         {error && (
-          <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-2xl text-xs font-bold border border-solar-danger/20 text-center space-y-2 leading-relaxed">
-            <div>{error}</div>
+          <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-2xl text-xs font-bold border border-solar-danger/20 text-center space-y-2.5 leading-relaxed">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <span>{error}</span>
+              {errorCode && (
+                <span className="font-mono text-[10px] bg-solar-danger/20 text-solar-danger px-2 py-0.5 rounded-md" dir="ltr">
+                  {errorCode}
+                </span>
+              )}
+            </div>
             
             {isNotAllowedError && (
               <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-1.5">
                 <span className="text-amber-500 block">🎛️ تفعيل المصادقة في لوحة Firebase:</span>
+                <p>
+                  المشروع المرتبط: <strong className="font-mono text-solar-blue" dir="ltr">gen-lang-client-0409057996</strong>
+                </p>
                 <p>اذهب إلى Firebase Console &gt; Authentication &gt; Sign-in method وقم بتمكين خيار Google أو Email/Password ثم احفظ التغييرات.</p>
               </div>
             )}

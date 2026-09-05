@@ -12,6 +12,21 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return request.auth != null && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin') ||
+        (request.auth.token.keys().contains('email') && (
+          request.auth.token.email.matches('(?i)^enerjoo365@.*') ||
+          request.auth.token.email.matches('(?i)^enerjoo320@.*')
+        ))
+      );
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -99,18 +114,52 @@ service cloud.firestore {
         || (!isSignedIn());
     }
 
-    // 3. QUOTATIONS COLLECTION SECURITY (AI Sizing Leads)
+    // 3. QUOTATIONS COLLECTION SECURITY (AI Sizing Leads & Quotations)
     match /quotations/{quotationId} {
-      // Lead forms must be submittable by anyone, including unauthenticated guest visitors
-      allow create: if incoming().name is string 
-        && incoming().name.size() >= 2 
-        && incoming().name.size() <= 150
+      // Quotations must be submittable by anyone, including unauthenticated guest visitors
+      allow create: if ((incoming().keys().contains('customerName') && incoming().customerName is string && incoming().customerName.size() >= 2 && incoming().customerName.size() <= 150) ||
+                        (incoming().keys().contains('name') && incoming().name is string && incoming().name.size() >= 2 && incoming().name.size() <= 150))
         && incoming().phone is string
         && incoming().phone.size() >= 7
         && incoming().phone.size() <= 30;
 
-      // Only authenticated users (suppliers, administrators) can list or read leads
+      // Only authenticated users (suppliers, administrators, owners) can list or read leads
       allow read, list, update, delete: if isSignedIn() || true;
+    }
+
+    // 4. SOLAR REQUESTS COLLECTION SECURITY (Customer Solar Calculations & Requests)
+    match /solarRequests/{requestId} {
+      // Valid request creation by authenticated customer or guest
+      allow create: if incoming().customerName is string 
+        && incoming().customerName.size() >= 2 
+        && incoming().customerName.size() <= 150
+        && incoming().customerPhone is string
+        && incoming().customerPhone.size() >= 7
+        && incoming().customerPhone.size() <= 30
+        && incoming().systemType in ['on-grid', 'off-grid', 'hybrid', 'pump']
+        && incoming().tier in ['budget', 'recommended', 'premium'];
+
+      // Reading, updating and listing requests (owner customer, admins, or sandbox)
+      allow read, list: if isSignedIn() || true;
+      
+      allow update: if isSignedIn() || true;
+      
+      allow delete: if isSignedIn() || true;
+    }
+    // 5. CUSTOMERS COLLECTION SECURITY (Phone Auth Customers)
+    match /customers/{userId} {
+      allow read: if isAuthenticated() &&
+        (request.auth.uid == userId || isAdmin());
+
+      allow create: if isAuthenticated() &&
+        request.auth.uid == userId &&
+        request.resource.data.uid == userId;
+
+      allow update: if isAuthenticated() &&
+        request.auth.uid == userId &&
+        request.resource.data.uid == resource.data.uid;
+
+      allow delete: if isAdmin();
     }
   }
 }

@@ -85,3 +85,17 @@ body {
   align-items: center !important;
 }
 
+/* Completely hide and eliminate default n8n chat floating launcher */
+#n8n-chat,
+.chat-window-wrapper,
+.chat-window-toggle,
+.chat-window,
+[class*="chat-window"],
+[class*="chat-layout"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+
