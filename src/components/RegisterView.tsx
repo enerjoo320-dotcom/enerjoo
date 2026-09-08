@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User as UserIcon, Briefcase, MapPin, ArrowLeft } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, Briefcase, MapPin, ArrowLeft, LogIn, KeyRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { translations } from '../translations';
 import { ViewType } from '../types';
@@ -11,7 +11,7 @@ export const RegisterView: React.FC<{
   lang: 'ar' | 'en'; 
   setView: (view: ViewType) => void;
 }> = ({ lang, setView }) => {
-  const { register, signInWithGoogle } = useAuth();
+  const { register, login, resetPassword, signInWithGoogle } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
   
@@ -27,6 +27,10 @@ export const RegisterView: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [isEmailInUse, setIsEmailInUse] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [directLoginLoading, setDirectLoginLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [isNotAllowedError, setIsNotAllowedError] = useState(false);
@@ -58,6 +62,8 @@ export const RegisterView: React.FC<{
     setIsLoading(true);
     setError('');
     setErrorCode(null);
+    setIsEmailInUse(false);
+    setResetSent(false);
     setIsNotAllowedError(false);
     setIsPopupBlockedError(false);
     setIsUnauthorizedDomainError(false);
@@ -77,18 +83,29 @@ export const RegisterView: React.FC<{
         setView('home');
       }, 5000);
     } catch (err: any) {
-      console.error("Registration Error:", err);
-      let message = isAr ? 'فشل التسجيل' : 'Registration failed';
-      
       const code = err.code || (err.message && err.message.includes('auth/email-already-in-use') ? 'auth/email-already-in-use' : '');
+      const isEmailAlreadyInUse = code === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use');
+      
+      if (isEmailAlreadyInUse) {
+        console.warn("Registration notice: email already in use:", formData.email);
+        setIsEmailInUse(true);
+      } else if (code === 'auth/weak-password' || code === 'auth/invalid-email' || code === 'auth/operation-not-allowed') {
+        console.warn("Registration validation notice:", code);
+      } else {
+        console.warn("Registration notice:", err?.message || err);
+      }
+
       setErrorCode(code || null);
       const isNotAllowed = code === 'auth/operation-not-allowed' || err.message?.includes('auth/operation-not-allowed');
       const isNetwork = code === 'auth/network-request-failed' || err.message?.includes('auth/network-request-failed');
       
-      if (code === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use')) {
-        message = isAr ? 'هذا البريد الإلكتروني مستخدم بالفعل' : 'This email is already in use';
+      let message = isAr ? 'فشل التسجيل' : 'Registration failed';
+      if (isEmailAlreadyInUse) {
+        message = isAr 
+          ? `البريد الإلكتروني (${formData.email}) مسجل مسبقاً في إنرجو!` 
+          : `The email (${formData.email}) is already registered with Enerjoo!`;
       } else if (code === 'auth/weak-password') {
-        message = isAr ? 'كلمة المرور ضعيفة جداً' : 'The password is too weak';
+        message = isAr ? 'كلمة المرور ضعيفة جداً (يجب ألا تقل عن 6 أحرف)' : 'Password is too weak (must be at least 6 characters)';
       } else if (code === 'auth/invalid-email') {
         message = isAr ? 'البريد الإلكتروني غير صالح' : 'Invalid email address';
       } else if (isNetwork) {
@@ -111,6 +128,42 @@ export const RegisterView: React.FC<{
       setError(message);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDirectLogin = async () => {
+    if (!formData.email) return;
+    localStorage.setItem('enerjoo_prefill_email', formData.email);
+
+    if (formData.password) {
+      setDirectLoginLoading(true);
+      setError('');
+      try {
+        await login(formData.email, formData.password);
+        setView('home');
+        return;
+      } catch (loginErr: any) {
+        console.warn("Direct login notice:", loginErr?.message || loginErr);
+        setView('login');
+      } finally {
+        setDirectLoginLoading(false);
+      }
+    } else {
+      setView('login');
+    }
+  };
+
+  const handleSendPasswordReset = async () => {
+    if (!formData.email) return;
+    setResetLoading(true);
+    try {
+      await resetPassword(formData.email);
+      setResetSent(true);
+    } catch (resetErr: any) {
+      console.warn("Password reset notice:", resetErr);
+      setError(isAr ? 'تعذر إرسال رابط التعيين حالياً، يمكنك تسجيل الدخول باستخدام Google.' : 'Could not send reset link. Try signing in with Google.');
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -269,110 +322,6 @@ export const RegisterView: React.FC<{
           </div>
         </div>
 
-        {error && (
-          <div className="p-4 bg-solar-danger/10 text-solar-danger rounded-xl text-sm font-bold border border-solar-danger/20 space-y-3">
-            <div>{error}</div>
-            
-            {isNotAllowedError && (
-              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-left leading-relaxed space-y-2">
-                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
-                  {isAr ? '🛠️ خطوات تفعيل خيار البريد الإلكتروني في Firebase:' : '🛠️ How to enable Email/Password in Firebase Console:'}
-                </p>
-                <ol className="list-decimal list-inside space-y-1 text-[11px] text-solar-muted">
-                  <li>
-                    {isAr 
-                      ? 'افتح لوحة تحكم Firebase: ' 
-                      : 'Open Firebase Console: '}
-                    <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-solar-blue underline font-bold">console.firebase.google.com</a>
-                  </li>
-                  <li>
-                    {isAr 
-                      ? 'اختر مشروعك الحالي.' 
-                      : 'Select your active project.'}
-                  </li>
-                  <li>
-                    {isAr 
-                      ? 'من القائمة الجانبية Build، اختر Authentication.' 
-                      : 'From the Build side-menu, select Authentication.'}
-                  </li>
-                  <li>
-                    {isAr 
-                      ? 'اذهب لتبويب Sign-in method واضغط على Add new provider.' 
-                      : 'Go to Sign-in method and click Add new provider.'}
-                  </li>
-                  <li>
-                    {isAr 
-                      ? 'اختر Email/Password وعيّنه كـ Enabled ثم احفظ الخيارات.' 
-                      : 'Select Email/Password, turn the switch to Enabled, and Save.'}
-                  </li>
-                </ol>
-                <div className="mt-2.5 p-2 bg-solar-blue/5 text-solar-blue rounded-lg border border-solar-blue/10 text-[10px] font-black text-center">
-                  {isAr 
-                    ? '💡 بديل سريع: يمكنك تسجيل الدخول فوراً باستخدام حساب Google بالأسفل دون الحاجة لتغيير أي إعدادات!' 
-                    : '💡 Fast Alternative: You can sign up instantly using Google Sign-In below without any console setup!'}
-                </div>
-              </div>
-            )}
-
-            {isUnauthorizedDomainError && (
-              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-right leading-relaxed space-y-2">
-                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
-                  {isAr ? '⚙️ إضافة النطاق إلى Firebase Authorized Domains:' : '⚙️ Add Domain to Firebase Authorized Domains:'}
-                </p>
-                <p className="text-[11px] text-solar-muted">
-                  {isAr ? 'النطاق الحالي الذي يعمل عليه التطبيق: ' : 'Current domain: '}
-                  <code className="bg-slate-100 px-1 py-0.5 rounded text-solar-blue font-mono font-bold">{unauthorizedDomain}</code>
-                </p>
-                <ol className="list-decimal list-inside space-y-1 text-[11px] text-solar-muted">
-                  <li>{isAr ? 'افتح لوحة تحكم Firebase ثم Authentication' : 'Open Firebase Console > Authentication'}</li>
-                  <li>{isAr ? 'اذهب لتبويب Settings ثم Authorized domains' : 'Go to Settings > Authorized domains'}</li>
-                  <li>{isAr ? 'اضغط Add domain وأضف: ' : 'Click Add domain and add: '}<span className="font-mono text-solar-blue font-bold">{unauthorizedDomain}</span></li>
-                </ol>
-              </div>
-            )}
-
-            {isPopupBlockedError && (
-              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-right leading-relaxed space-y-2">
-                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
-                  {isAr ? '🌐 حل مشكلة حظر النافذة المنبثقة للـ iframe:' : '🌐 How to fix iframe popup blocking:'}
-                </p>
-                <p className="text-[11px] text-solar-muted">
-                  {isAr 
-                    ? 'لأن هذا التطبيق يعمل كمعاينة داخل إطار (iframe)، فإن المتصفحات تحظر أزرار النوافذ المنبثقة من Google لغايات أمنية.' 
-                    : 'Because this app runs inside a preview iframe, modern browsers automatically block secondary Google sign-in popups.'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => window.open(window.location.href, '_blank')}
-                  className="w-full bg-solar-blue text-white py-2 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-1.5 shadow-sm mt-2"
-                >
-                  <span>{isAr ? 'فتح التطبيق في نافذة جديدة' : 'Open Application in New Tab'}</span>
-                </button>
-              </div>
-            )}
-
-            {isNetworkError && (
-              <div className="mt-3 p-3.5 bg-white rounded-xl border border-solar-danger/20 text-xs font-medium text-solar-text text-right leading-relaxed space-y-2">
-                <p className="font-extrabold text-amber-600 block border-b border-solar-border pb-1">
-                  {isAr ? '🌐 حل مشكلة الاتصال في المعاينة (Network Request Failed):' : '🌐 Resolving Network Connection Error:'}
-                </p>
-                <p className="text-[11px] text-solar-muted">
-                  {isAr 
-                    ? 'تحدث هذه المشكلة عندما يمنع المتصفح تبادل الاتصال بين نافذة تسجيل الدخول وإطار المعاينة (iframe). يمكنك فتح التطبيق في تبويب مستقل لتسجيل الدخول بـ Google بسهولة:' 
-                    : 'This happens when the browser restricts communication between the auth popup and the preview iframe. Open the app in a new tab to complete sign in:'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => window.open(window.location.href, '_blank')}
-                  className="w-full bg-solar-blue text-white py-2.5 px-3 rounded-xl font-black hover:bg-opacity-90 transition text-xs flex items-center justify-center gap-2 shadow-sm mt-2"
-                >
-                  <span>{isAr ? 'فتح التطبيق في نافذة مستقلة جديدة' : 'Open Application in New Tab'}</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
           <div className="space-y-2">
             <label className="text-[10px] font-black text-solar-muted uppercase ml-2 tracking-widest">{t.fullName}</label>
@@ -475,6 +424,85 @@ export const RegisterView: React.FC<{
                 </span>
               )}
             </div>
+
+            {isEmailInUse && (
+              <div className="mt-3 p-4 bg-white rounded-2xl border border-solar-blue/25 text-solar-text shadow-sm text-right space-y-3">
+                <div className="flex items-center gap-2 text-solar-blue font-black text-xs">
+                  <LogIn size={16} />
+                  <span>{isAr ? 'البريد مسجل بالفعل في إنرجو، يمكنك:' : 'This account is already registered, you can:'}</span>
+                </div>
+                
+                <p className="text-[11px] text-solar-muted leading-relaxed">
+                  {isAr 
+                    ? 'تسجيل الدخول مباشرة إذا كنت تتذكر كلمة المرور، أو إرسال رابط لإعادة تعيين كلمة المرور فوراً:' 
+                    : 'Sign in directly if you know your password, or request a password reset link:'}
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={directLoginLoading}
+                    onClick={handleDirectLogin}
+                    className="w-full bg-solar-blue text-white py-2.5 px-3 rounded-xl font-black text-xs hover:bg-opacity-95 active:scale-95 transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                  >
+                    {directLoginLoading ? (
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <LogIn size={14} />
+                        <span>{isAr ? 'تسجيل الدخول الآن' : 'Sign In Now'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={resetLoading || resetSent}
+                    onClick={handleSendPasswordReset}
+                    className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      resetSent 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300' 
+                        : 'bg-solar-bg text-solar-text border-solar-border hover:border-solar-blue/40'
+                    }`}
+                  >
+                    {resetLoading ? (
+                      <div className="w-4 h-4 border-2 border-solar-blue/40 border-t-solar-blue rounded-full animate-spin" />
+                    ) : resetSent ? (
+                      <span>{isAr ? '✓ تم إرسال رابط التعيين' : '✓ Reset Link Sent'}</span>
+                    ) : (
+                      <>
+                        <KeyRound size={14} />
+                        <span>{isAr ? 'استعادة كلمة المرور' : 'Reset Password'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {resetSent && (
+                  <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-[11px] font-bold border border-emerald-200 text-center">
+                    {isAr 
+                      ? '✓ تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني بنجاح! تفقد بريدك الوارد (بما في ذلك مجلد الرسائل غير المرغوبة Spam).' 
+                      : '✓ Password reset link sent to your email! Please check your inbox (including Spam).'}
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-solar-border/60">
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignUp}
+                    className="w-full bg-white hover:bg-slate-50 text-solar-text border border-slate-200 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.48 14.98 1 12 1 7.35 1 3.37 3.65 1.41 7.54l3.88 3C6.22 7.74 8.88 5.04 12 5.04z" />
+                      <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.45h6.45c-.28 1.47-1.11 2.72-2.36 3.56l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z" />
+                      <path fill="#FBBC05" d="M5.29 14.3C5.03 13.52 4.88 12.69 4.88 11.83c0-.86.15-1.69.41-2.47L1.41 6.36C.51 8.16 0 10.15 0 12.27c0 2.12.51 4.11 1.41 5.91l3.88-3.88z" />
+                      <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.1.74-2.5 1.18-4.3 1.18-3.12 0-5.78-2.7-6.71-5.5l-3.88 3C3.37 20.35 7.35 23 12 23z" />
+                    </svg>
+                    <span>{isAr ? 'الدخول بحساب Google إذا كان مسجلاً به' : 'Sign in with Google if registered with it'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
             
             {isNotAllowedError && (
               <div className="p-3 bg-white rounded-xl border border-solar-danger/20 text-[10px] font-bold text-solar-muted text-right space-y-1.5">

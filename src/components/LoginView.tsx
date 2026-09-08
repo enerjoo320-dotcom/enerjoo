@@ -13,18 +13,29 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
-  const { login, signInWithGoogle } = useAuth();
+  const { login, signInWithGoogle, resetPassword } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
   
-  const [activeTab, setActiveTab] = useState<'customer_google' | 'email'>('customer_google');
+  const [activeTab, setActiveTab] = useState<'customer_google' | 'email'>(() => {
+    return localStorage.getItem('enerjoo_prefill_email') ? 'email' : 'customer_google';
+  });
 
   // Email / Supplier state
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => {
+    const prefill = localStorage.getItem('enerjoo_prefill_email');
+    if (prefill) {
+      localStorage.removeItem('enerjoo_prefill_email');
+      return prefill;
+    }
+    return '';
+  });
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [isNotAllowedError, setIsNotAllowedError] = useState(false);
   const [isPopupBlockedError, setIsPopupBlockedError] = useState(false);
@@ -32,6 +43,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
   const [isUnauthorizedDomainError, setIsUnauthorizedDomainError] = useState(false);
   const [unauthorizedDomain, setUnauthorizedDomain] = useState('');
   const [isNetworkError, setIsNetworkError] = useState(false);
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setError(isAr ? 'يرجى كتابة بريدك الإلكتروني في الحقل أعلاه أولاً لنرسل لك رابط استعادة كلمة المرور.' : 'Please enter your email address above first to receive a password reset link.');
+      return;
+    }
+    setResetLoading(true);
+    setError('');
+    try {
+      await resetPassword(email.trim());
+      setResetMessage(isAr 
+        ? `تم إرسال رابط إعادة تعيين كلمة المرور إلى (${email.trim()}). تفقد بريدك الوارد ومجلد الرسائل غير المرغوبة (Spam).` 
+        : `Password reset link sent to (${email.trim()}). Please check your inbox and spam folder.`);
+    } catch (resetErr: any) {
+      console.warn("Password reset notice:", resetErr);
+      setError(isAr ? 'تعذر إرسال رابط الاستعادة حالياً. تأكد من صحة البريد الإلكتروني.' : 'Failed to send reset link. Please verify the email address.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,15 +82,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
       await login(email, password);
       setView('home');
     } catch (error: any) {
-      console.error("Login Error:", error);
       const code = error?.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/invalid-email') {
+        console.warn("Login attempt notice:", code);
+      } else {
+        console.warn("Login notice:", error?.message || error);
+      }
       setErrorCode(code || null);
       let message = isAr ? 'خطأ في البريد الإلكتروني أو كلمة المرور' : 'Invalid email or password';
       const isNotAllowed = code === 'auth/operation-not-allowed' || error.message?.includes('auth/operation-not-allowed');
       
-      if (code === 'auth/user-not-found') message = isAr ? 'المستخدم غير موجود' : 'User not found';
-      else if (code === 'auth/wrong-password') message = isAr ? 'كلمة مرور خاطئة' : 'Wrong password';
-      else if (code === 'auth/invalid-credential') message = isAr ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة' : 'Invalid email or password credentials.';
+      if (code === 'auth/user-not-found') message = isAr ? 'هذا الحساب غير مسجل لدينا، يرجى إنشاء حساب جديد.' : 'User not found. Please register an account.';
+      else if (code === 'auth/wrong-password') message = isAr ? 'كلمة المرور غير صحيحة.' : 'Wrong password.';
+      else if (code === 'auth/invalid-credential') message = isAr ? 'بيانات الدخول غير صحيحة. يمكنك استعادة كلمة المرور إذا نسيتها.' : 'Invalid credentials. You can reset your password if forgotten.';
       else if (code === 'auth/network-request-failed') {
         setIsNetworkError(true);
         message = isAr ? 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت أو فتح التطبيق في نافذة جديدة.' : 'Network error. Please check your internet connection or open the app in a new tab.';
@@ -306,9 +341,23 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
 
           {/* Password input field */}
           <div className="space-y-1.5 text-right">
-            <label className="text-[11px] font-extrabold text-solar-muted mr-1">
-              {isAr ? 'كلمة المرور' : 'Password'}
-            </label>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                disabled={resetLoading}
+                onClick={handleForgotPassword}
+                className="text-[11px] font-extrabold text-solar-blue hover:underline cursor-pointer flex items-center gap-1"
+              >
+                {resetLoading ? (
+                  <span className="animate-pulse">{isAr ? 'جارِ الإرسال...' : 'Sending...'}</span>
+                ) : (
+                  <span>{isAr ? 'نسيت كلمة المرور؟' : 'Forgot password?'}</span>
+                )}
+              </button>
+              <label className="text-[11px] font-extrabold text-solar-muted mr-1">
+                {isAr ? 'كلمة المرور' : 'Password'}
+              </label>
+            </div>
             <div className="relative">
               {isAr ? (
                 <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-solar-muted/60" size={18} />
@@ -327,6 +376,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
               />
             </div>
           </div>
+
+          {resetMessage && (
+            <div className="p-3.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-2xl text-xs font-bold text-center leading-relaxed">
+              {resetMessage}
+            </div>
+          )}
 
           {/* Integrated Verification reCAPTCHA Container */}
           <SecurityCaptcha lang={lang} onVerify={setCaptchaVerified} />

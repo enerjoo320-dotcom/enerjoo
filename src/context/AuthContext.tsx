@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -17,6 +18,7 @@ type AuthContextType = {
   loading: boolean;
   register: (email: string, password: string, additionalData?: any) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   signInWithGoogle: (role?: 'customer' | 'supplier') => Promise<void>;
   updateUserProfile: (data: Partial<User>) => Promise<void>;
   logout: () => Promise<void>;
@@ -392,6 +394,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const resetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+  };
+
   const logout = async () => {
     await signOut(auth);
     safeLocalStorage.removeItem("enerjoo_mock_auth_uid");
@@ -404,6 +410,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       loading, 
       register, 
       login, 
+      resetPassword,
       signInWithGoogle, 
       updateUserProfile, 
       logout 
