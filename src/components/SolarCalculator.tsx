@@ -37,7 +37,7 @@ import { translations } from '../translations';
 import { Product } from '../types';
 import { db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { UNIFIED_PHONE_DISPLAY, UNIFIED_WHATSAPP_NUMBER } from '../constants/contact';
+import { CUSTOMER_SERVICE_PHONE_DISPLAY, CUSTOMER_SERVICE_WHATSAPP_NUMBER, SUPPLIER_CONTACT_WHATSAPP_NUMBER } from '../constants/contact';
 import { useAuth } from '../context/AuthContext';
 import { createSolarRequest, createQuotation, generateSolarRequestId } from '../services/firestoreService';
 import { normalizeEgyptianPhone, isValidEgyptianPhone, formatEgyptianPhoneDisplay } from '../utils/phoneUtils';
@@ -1217,7 +1217,7 @@ Now computing high-precision sizing and product matching across 3 tailored tiers
       }));
     }
 
-    window.open(`https://wa.me/${UNIFIED_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/${CUSTOMER_SERVICE_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   // Dynamic WhatsApp contact for a specific supplier with automatic Firestore lead submission
@@ -1345,7 +1345,9 @@ Now computing high-precision sizing and product matching across 3 tailored tiers
       }));
     }
 
-    window.open(`https://wa.me/${UNIFIED_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
+    const targetSupplierWhatsApp = sup?.phone ? normalizeEgyptianPhone(sup.phone) : SUPPLIER_CONTACT_WHATSAPP_NUMBER;
+    const cleanWaNum = targetSupplierWhatsApp.startsWith('0') ? `2${targetSupplierWhatsApp}` : targetSupplierWhatsApp.startsWith('+2') ? targetSupplierWhatsApp.replace('+', '') : targetSupplierWhatsApp;
+    window.open(`https://wa.me/${cleanWaNum}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   // Submit Lead Inquirer Form

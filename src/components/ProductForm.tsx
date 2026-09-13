@@ -4,7 +4,7 @@ import { translations } from '../translations';
 import { uploadProductImage } from '../services/uploadService';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { UNIFIED_PHONE_DISPLAY } from '../constants/contact';
+import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 
 export const ProductForm: React.FC<{ 
   lang: 'ar' | 'en'; 
@@ -21,7 +21,7 @@ export const ProductForm: React.FC<{
     brand: initialData?.brand || '',
     category: (initialData?.category as string) || 'panels',
     price: initialData?.price?.toString() || '',
-    phone: UNIFIED_PHONE_DISPLAY,
+    phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
     description: initialData?.specs?.description || '',
     // Dynamic specs
     power: initialData?.power?.toString() || '',
@@ -169,7 +169,7 @@ export const ProductForm: React.FC<{
             name: user?.name || 'New Supplier',
             nameAr: user?.nameAr || 'مورد جديد',
             price: parseInt(formData.price) || 0,
-            phone: UNIFIED_PHONE_DISPLAY,
+            phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
             location: user?.location || 'Cairo, Egypt',
             verified: user?.verified || false,
             lastUpdate: new Date().toLocaleDateString()

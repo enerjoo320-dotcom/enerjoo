@@ -39,7 +39,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { translations } from './translations';
 import { auth } from './lib/firebase';
 import { safeLocalStorage } from './utils/safeStorage';
-import { UNIFIED_PHONE_DISPLAY, getUnifiedWhatsAppUrl } from './constants/contact';
+import { CUSTOMER_SERVICE_PHONE_DISPLAY, getCustomerServiceWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY, getSupplierWhatsAppUrl } from './constants/contact';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -358,8 +358,8 @@ export default function App() {
                                 <span>📍 {activeSup.location}</span>
                                 <span className="text-solar-border/70">|</span>
                                 <span className="cursor-pointer text-solar-blue hover:underline flex items-center gap-1 font-bold" onClick={() => {
-                                  window.open(getUnifiedWhatsAppUrl(isAr ? `مرحباً، أود الاستفسار عن منتجات ${activeSup.nameAr || activeSup.name}` : `Hi, I want to inquire about products from ${activeSup.name}`), '_blank');
-                                }}>📞 {UNIFIED_PHONE_DISPLAY}</span>
+                                  window.open(getSupplierWhatsAppUrl(isAr ? `مرحباً، أود الاستفسار عن منتجات ${activeSup.nameAr || activeSup.name}` : `Hi, I want to inquire about products from ${activeSup.name}`), '_blank');
+                                }}>📞 {SUPPLIER_CONTACT_PHONE_DISPLAY}</span>
                               </p>
                             </div>
                           </div>
@@ -662,17 +662,17 @@ export default function App() {
 
       {/* Floating Enerjoo WhatsApp Direct Contact Button */}
       <a
-        href={getUnifiedWhatsAppUrl(isAr ? 'مرحباً منصة Enerjoo، أود الاستفسار عن المنتجات وحلول الطاقة الشمسية.' : 'Hello Enerjoo, I would like to inquire about solar products and energy solutions.')}
+        href={getCustomerServiceWhatsAppUrl(isAr ? 'مرحباً منصة Enerjoo، أود الاستفسار عن خدمات وحلول الطاقة الشمسية.' : 'Hello Enerjoo, I would like to inquire about solar services and energy solutions.')}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label="Contact Enerjoo on WhatsApp"
+        aria-label="Contact Enerjoo Customer Service on WhatsApp"
         className="fixed bottom-20 md:bottom-6 left-4 z-40 bg-emerald-500 hover:bg-emerald-600 text-white p-3 md:px-4 md:py-3 rounded-full shadow-2xl hover:shadow-emerald-500/30 flex items-center gap-2.5 transition-all transform hover:scale-105 active:scale-95 group border-2 border-white/20"
-        title={`WhatsApp: ${UNIFIED_PHONE_DISPLAY}`}
+        title={`WhatsApp: ${CUSTOMER_SERVICE_PHONE_DISPLAY}`}
       >
         <span className="text-xl leading-none">💬</span>
         <div className="hidden sm:flex flex-col text-left rtl:text-right">
           <span className="text-[11px] font-black leading-tight">{isAr ? 'خدمة عملاء Enerjoo' : 'Enerjoo Support'}</span>
-          <span className="text-[9px] opacity-90 font-bold leading-tight" dir="ltr">{UNIFIED_PHONE_DISPLAY}</span>
+          <span className="text-[9px] opacity-90 font-bold leading-tight" dir="ltr">{CUSTOMER_SERVICE_PHONE_DISPLAY}</span>
         </div>
       </a>
 
