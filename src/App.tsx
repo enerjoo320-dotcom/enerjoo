@@ -262,10 +262,10 @@ export default function App() {
                <motion.div 
                  initial={{ opacity: 0, y: -20 }}
                  animate={{ opacity: 1, y: 0 }}
-                 className="bg-gradient-to-r from-solar-blue via-indigo-600 to-indigo-700 text-white rounded-[32px] p-6 md:p-8 shadow-xl shadow-indigo-600/10 flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative"
+                 className="bg-gradient-to-r from-solar-blue via-indigo-600 to-indigo-700 text-white rounded-2xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 shadow-xl shadow-indigo-600/10 flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 overflow-hidden relative"
                >
-                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
-                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-solar-blue/10 rounded-full blur-2xl -ml-16 -mb-16"></div>
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
+                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-solar-blue/10 rounded-full blur-2xl -ml-16 -mb-16 pointer-events-none"></div>
                  
                  <div className="space-y-2 relative z-10 text-right md:text-right w-full md:w-3/4">
                    <div className="inline-flex items-center gap-1.5 bg-white/10 text-amber-300 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">

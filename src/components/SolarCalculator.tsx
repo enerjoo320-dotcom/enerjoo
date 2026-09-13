@@ -1474,44 +1474,44 @@ Now computing high-precision sizing and product matching across 3 tailored tiers
   const currentTierData = currentSelection ? currentSelection.tiers[currentTier] : null;
 
   return (
-    <div className="max-w-4xl mx-auto py-6 px-4">
+    <div className="max-w-4xl mx-auto py-3 sm:py-6 px-3 sm:px-4 pb-28 sm:pb-16">
       {/* Sizing Header Banner */}
-      <div className="mb-6 flex justify-between items-center bg-white border border-solar-border p-4.5 rounded-3xl shadow-sm">
+      <div className="mb-4 sm:mb-6 flex justify-between items-center bg-white border border-solar-border p-3 sm:p-4.5 rounded-2xl sm:rounded-3xl shadow-2xs">
         <button 
           onClick={onBack}
-          className="flex items-center gap-2 text-solar-muted hover:text-solar-blue transition-all font-black text-xs md:text-sm cursor-pointer"
+          className="flex items-center gap-1.5 sm:gap-2 text-solar-muted hover:text-solar-blue transition-all font-black text-xs sm:text-sm cursor-pointer p-1"
         >
           <ArrowLeft size={16} className={isAr ? "rotate-0" : "rotate-180"} />
           <span>{isAr ? 'الرجوع للمتجر' : 'Go back to store'}</span>
         </button>
 
-        <div className="flex items-center gap-2 bg-solar-blue/10 text-solar-blue px-3.5 py-1.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-tight">
-          <Sparkles size={14} className="animate-pulse" />
-          <span>{isAr ? 'مستشار المبيعات الهندسي الذكي' : 'Expert Engineering AI'}</span>
+        <div className="flex items-center gap-1.5 sm:gap-2 bg-solar-blue/10 text-solar-blue px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-tight">
+          <Sparkles size={13} className="animate-pulse" />
+          <span>{isAr ? 'مستشار المبيعات الذكي' : 'Expert Engineering AI'}</span>
         </div>
       </div>
 
       {/* Main Conversational Layout */}
-      <div className="grid grid-cols-1 gap-6">
+      <div className="grid grid-cols-1 gap-4 sm:gap-6">
         
         {/* The Chat/State Module */}
-        <div className="bg-white border border-solar-border rounded-[36px] shadow-xl overflow-hidden flex flex-col h-[650px]">
+        <div className="bg-white border border-solar-border rounded-2xl sm:rounded-[36px] shadow-lg overflow-hidden flex flex-col h-[calc(100dvh-180px)] min-h-[500px] max-h-[720px] sm:h-[650px]">
           
           {/* Active AI Doctor Card Top Info */}
-          <div className="bg-gradient-to-r from-solar-blue to-indigo-700/80 p-5 text-white flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-white rounded-full"></span>
-                <div className="p-3 bg-white/10 rounded-2xl">
-                  <Calculator size={22} className="text-white" />
+          <div className="bg-gradient-to-r from-solar-blue to-indigo-700/80 p-3.5 sm:p-5 text-white flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="relative shrink-0">
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-white rounded-full"></span>
+                <div className="p-2 sm:p-3 bg-white/10 rounded-xl sm:rounded-2xl">
+                  <Calculator size={18} className="text-white sm:w-[22px] sm:h-[22px]" />
                 </div>
               </div>
-              <div>
-                <h2 className="font-display font-black text-sm md:text-base tracking-tight leading-tight">
+              <div className="min-w-0">
+                <h2 className="font-display font-black text-xs sm:text-base tracking-tight leading-tight truncate">
                   {isAr ? 'الاستشاري الهندسي الذكي' : 'Smart Solar Consultant'}
                 </h2>
-                <p className="text-[10px] text-white/75 font-bold">
-                  {isAr ? 'تصميم فوري ومطابقة حية وفقاً للكودات والكتالوج المصري' : 'Egyptian engineering codes & real-time product matching'}
+                <p className="text-[9px] sm:text-[10px] text-white/75 font-bold truncate">
+                  {isAr ? 'تصميم فوري ومطابقة حية وفقاً للكودات والكتالوج' : 'Egyptian engineering codes & real-time product matching'}
                 </p>
               </div>
             </div>

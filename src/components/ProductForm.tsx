@@ -245,39 +245,41 @@ export const ProductForm: React.FC<{
         </div>
 
         {fields.includes('price') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.price}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.price}</label>
             <input 
               type="number" 
+              inputMode="numeric"
               value={formData.price}
               onChange={e => setFormData(p => ({...p, price: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
           </div>
         )}
 
         {fields.includes('power') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.power}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.power}</label>
             <input 
               type="number" 
+              inputMode="numeric"
               value={formData.power}
               onChange={e => setFormData(p => ({...p, power: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
           </div>
         )}
 
         {fields.includes('powerKw') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.powerKw}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.powerKw}</label>
             <input 
               type="text" 
               value={formData.powerKw}
               onChange={e => setFormData(p => ({...p, powerKw: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="5kW"
               required
             />
@@ -285,13 +287,13 @@ export const ProductForm: React.FC<{
         )}
 
         {fields.includes('capacity') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.capacity}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.capacity}</label>
             <input 
               type="text" 
               value={formData.capacity}
               onChange={e => setFormData(p => ({...p, capacity: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="200Ah"
               required
             />
@@ -299,27 +301,29 @@ export const ProductForm: React.FC<{
         )}
 
         {fields.includes('efficiency') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.efficiency}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.efficiency}</label>
             <input 
               type="number" 
+              inputMode="decimal"
               step="0.01" 
               value={formData.efficiency}
               onChange={e => setFormData(p => ({...p, efficiency: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
           </div>
         )}
 
         {fields.includes('warranty') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.warrantyYears}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.warrantyYears}</label>
             <input 
               type="number" 
+              inputMode="numeric"
               value={formData.warranty}
               onChange={e => setFormData(p => ({...p, warranty: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
           </div>

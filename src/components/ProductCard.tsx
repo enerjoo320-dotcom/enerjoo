@@ -147,46 +147,54 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ y: -4 }}
         onClick={onClick}
-        className="relative z-10 bg-solar-card rounded-3xl p-4 border border-solar-border shadow-sm hover:shadow-xl hover:shadow-solar-blue/5 transition-all cursor-pointer select-none"
+        className="relative z-10 bg-solar-card rounded-[26px] sm:rounded-3xl p-3.5 sm:p-4 border border-solar-border shadow-xs hover:shadow-xl hover:shadow-solar-blue/5 transition-all cursor-pointer select-none"
       >
-        <div className="relative aspect-video rounded-2xl overflow-hidden mb-4">
-          <img src={product.image} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none" alt={product.name} />
+        <div className="relative aspect-[16/10] sm:aspect-video rounded-2xl overflow-hidden mb-3.5 bg-solar-bg">
+          <img 
+            src={product.image} 
+            referrerPolicy="no-referrer" 
+            loading="lazy"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none" 
+            alt={isAr ? product.nameAr || product.name : product.name} 
+          />
           <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
             <div className="flex flex-col gap-1 items-start">
               {isOwner && onEdit && (
                 <button 
                   onClick={(e) => onEdit(e, product)}
-                  className="bg-solar-blue text-white p-1.5 rounded-lg pointer-events-auto shadow-lg hover:bg-solar-blue/90 transition active:scale-95 flex items-center gap-1 pr-2 mb-1"
+                  className="bg-solar-blue text-white min-h-[32px] px-2.5 py-1 rounded-xl pointer-events-auto shadow-md hover:bg-solar-blue/90 transition active:scale-95 flex items-center gap-1.5 mb-1"
                 >
-                  <Edit size={12} />
-                  <span className="text-[9px] font-black uppercase">{isAr ? 'تعديل' : 'Edit'}</span>
+                  <Edit size={13} />
+                  <span className="text-[10px] font-black uppercase">{isAr ? 'تعديل' : 'Edit'}</span>
                 </button>
               )}
-              <span className="bg-solar-blue/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-1 rounded-lg pointer-events-auto shadow-sm tracking-wide uppercase">
+              <span className="bg-solar-blue/90 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg pointer-events-auto shadow-xs tracking-wide uppercase">
                 {product.brand}
               </span>
               {isVerified && (
-                <span className="bg-solar-success text-white text-[9px] font-black px-2 py-0.5 rounded-lg pointer-events-auto shadow-sm flex items-center gap-1">
-                  <ShieldCheck size={10} />
+                <span className="bg-solar-success text-white text-[9px] font-black px-2 py-0.5 rounded-lg pointer-events-auto shadow-xs flex items-center gap-1">
+                  <ShieldCheck size={11} />
                   {isAr ? 'معتمد' : 'Verified'}
                 </span>
               )}
             </div>
             {user?.type !== 'admin' && (
-              <div className="flex gap-2 items-center pointer-events-auto">
+              <div className="flex gap-1.5 items-center pointer-events-auto">
                 {onWishlist && (
                   <button 
                     onClick={onWishlist} 
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-lg ${isWishlisted ? 'bg-red-500 text-white' : 'bg-white/90 backdrop-blur-md text-solar-muted hover:text-red-500'}`}
+                    className={`w-10 h-10 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-md ${isWishlisted ? 'bg-red-500 text-white' : 'bg-white/95 backdrop-blur-md text-solar-muted hover:text-red-500'}`}
                     title={isWishlisted ? (isAr ? 'إزالة من المفضلة' : 'Remove from Wishlist') : (isAr ? 'إضافة للمفضلة' : 'Add to Wishlist')}
+                    aria-label={isAr ? 'المفضلة' : 'Wishlist'}
                   >
                     <Heart size={18} fill={isWishlisted ? 'currentColor' : 'none'} />
                   </button>
                 )}
                 <button 
                   onClick={onCompare} 
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-lg ${isCompared ? 'bg-solar-accent text-white' : 'bg-white/90 backdrop-blur-md text-solar-muted hover:text-solar-blue'}`}
+                  className={`w-10 h-10 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-md ${isCompared ? 'bg-solar-accent text-white' : 'bg-white/95 backdrop-blur-md text-solar-muted hover:text-solar-blue'}`}
                   title={isCompared ? (isAr ? 'تمت الإضافة للمقارنة' : 'Added to compare') : (isAr ? 'مقارنة' : 'Compare')}
+                  aria-label={isAr ? 'مقارنة' : 'Compare'}
                 >
                   <ArrowLeftRight size={18} />
                 </button>
@@ -194,46 +202,48 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             )}
           </div>
           {product.efficiency >= 22 && (
-            <div className="absolute bottom-2 right-2 bg-solar-success/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-1 rounded-lg shadow-sm">
+            <div className="absolute bottom-2 right-2 bg-solar-success/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-xs">
               {t.bestEfficiencyTag}
             </div>
           )}
         </div>
 
-        <h3 className="text-solar-text font-black text-base line-clamp-1 mb-1">{isAr ? product.nameAr : product.name}</h3>
-        <div className="text-[10px] text-solar-muted mb-4 font-bold flex items-center gap-1.5 flex-wrap">
-          <span className="bg-solar-light text-solar-blue px-2 py-0.5 rounded-full uppercase tracking-tighter">{product.category}</span>
-          <span className="opacity-40">•</span>
+        <h3 className="text-solar-text font-black text-base sm:text-lg line-clamp-1 mb-1.5">{isAr ? product.nameAr : product.name}</h3>
+        <div className="text-[11px] text-solar-muted mb-3.5 font-bold flex items-center gap-1.5 flex-wrap">
+          <span className="bg-solar-light text-solar-blue px-2 py-0.5 rounded-full uppercase tracking-tight text-[10px]">{product.category}</span>
+          <span className="opacity-30">•</span>
           <div className="flex items-center gap-1">
             <div className={`w-1.5 h-1.5 rounded-full ${product.status === 'out_of_stock' ? 'bg-red-500' : product.status === 'limited' ? 'bg-amber-500' : 'bg-solar-success'}`}></div>
-            <span className={product.status === 'out_of_stock' ? 'text-red-600' : product.status === 'limited' ? 'text-amber-600' : ''}>
+            <span className={product.status === 'out_of_stock' ? 'text-red-600 font-bold' : product.status === 'limited' ? 'text-amber-600 font-bold' : ''}>
               {t[product.status] || t.available}
             </span>
           </div>
-          <span className="opacity-40">•</span>
+          <span className="opacity-30">•</span>
           <div className="flex items-center gap-1">
-            <MapPin size={10} className="text-solar-blue" />
-            <span>{product.suppliers?.[0]?.location || 'Egypt'}</span>
+            <MapPin size={11} className="text-solar-blue" />
+            <span className="truncate max-w-[100px]">{product.suppliers?.[0]?.location || 'Egypt'}</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2 mb-3.5">
           {specs.map((spec, i) => (
-            <div key={i} className="bg-solar-bg p-2 rounded-xl flex flex-col items-center justify-center gap-1 border border-solar-border/50 group-hover:border-solar-blue/20 transition-colors">
-              <div className="text-solar-blue opacity-70">{spec.icon}</div>
-              <span className="text-[9px] text-solar-muted font-bold text-center leading-none">{spec.label}</span>
-              <span className="text-[10px] text-solar-text font-black">{spec.value}</span>
+            <div key={i} className="bg-solar-bg p-2 rounded-xl flex flex-col items-center justify-center gap-0.5 border border-solar-border/50 group-hover:border-solar-blue/20 transition-colors min-h-[52px]">
+              <div className="text-solar-blue opacity-70 mb-0.5">{spec.icon}</div>
+              <span className="text-[9px] text-solar-muted font-bold text-center leading-none truncate w-full">{spec.label}</span>
+              <span className="text-[10px] text-solar-text font-black truncate w-full text-center">{spec.value}</span>
             </div>
           ))}
         </div>
 
-        <div className="flex items-center justify-between border-t border-solar-border pt-3">
+        <div className="flex items-center justify-between border-t border-solar-border/60 pt-2.5">
           <div className="flex flex-col">
-            <span className="text-[10px] text-solar-muted font-bold leading-none mb-1">{t.from}</span>
-            <span className="text-solar-blue font-black text-lg">{product.price.toLocaleString()} <span className="text-[10px]">{t.egp}</span></span>
+            <span className="text-[10px] text-solar-muted font-bold leading-none mb-0.5">{t.from}</span>
+            <span className="text-solar-blue font-black text-lg sm:text-xl leading-tight">
+              {product.price.toLocaleString()} <span className="text-xs font-bold">{t.egp}</span>
+            </span>
           </div>
-          <div className="flex items-center gap-1 text-[10px] text-solar-muted font-bold opacity-60">
-            <Zap size={10} />
+          <div className="flex items-center gap-1 text-[10px] text-solar-muted font-bold opacity-70">
+            <Zap size={11} />
             {t.verified}
           </div>
         </div>

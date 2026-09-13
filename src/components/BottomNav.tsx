@@ -34,27 +34,30 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang
   ];
 
   return (
-    <nav className="fixed bottom-5 left-6 right-6 bg-white/95 backdrop-blur-3xl border border-solar-border/30 z-[100] md:hidden rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] overflow-hidden">
-      <div className="flex justify-around items-center h-18 px-4">
+    <nav 
+      aria-label="Bottom Navigation"
+      className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-2xl border-t border-solar-border/70 z-50 md:hidden pb-[calc(env(safe-area-inset-bottom,0px)+6px)] pt-1.5 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] select-none"
+    >
+      <div className="flex justify-around items-center px-1 max-w-lg mx-auto h-14">
         {navItems.filter(item => item.show).map(item => {
           const isActive = currentView === item.id;
           return (
             <button 
               key={item.id} 
               onClick={() => setView(item.id)} 
-              className={`flex flex-col items-center justify-center gap-1 w-full h-full transition-all duration-300 relative ${isActive ? 'text-solar-blue' : 'text-solar-muted hover:text-solar-blue/70'}`}
+              className={`flex flex-col items-center justify-center flex-1 h-full min-h-[48px] px-1 transition-all duration-200 relative active:scale-95 ${isActive ? 'text-solar-blue font-black' : 'text-solar-muted hover:text-solar-blue/80 font-bold'}`}
             >
               {isActive && (
                 <motion.div 
                   layoutId="activeTabIndicator"
-                  className="absolute -top-[1px] w-10 h-1 bg-solar-blue rounded-b-full shadow-[0_5px_15px_rgba(0,102,255,0.4)]"
+                  className="absolute -top-1.5 w-8 h-1 bg-solar-blue rounded-full shadow-sm shadow-solar-blue/40"
                   transition={{ type: "spring", stiffness: 400, damping: 35 }}
                 />
               )}
-              <div className={`p-2 rounded-2xl transition-all duration-500 ${isActive ? 'bg-solar-blue/10 scale-110' : 'scale-100 opacity-60'}`}>
+              <div className={`p-1 rounded-xl transition-all duration-200 ${isActive ? 'bg-solar-blue/10 scale-105' : 'opacity-70'}`}>
                 {item.icon}
               </div>
-              <span className={`text-[10px] font-black tracking-tight uppercase ${isActive ? 'opacity-100' : 'opacity-40'}`}>
+              <span className={`text-[10px] tracking-tight whitespace-nowrap mt-0.5 leading-none ${isActive ? 'opacity-100 font-black' : 'opacity-60'}`}>
                 {item.label}
               </span>
             </button>

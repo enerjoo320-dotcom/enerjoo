@@ -178,25 +178,28 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     <motion.div 
       initial={{ opacity: 0, x: isAr ? 20 : -20 }}
       animate={{ opacity: 1, x: 0 }}
-      className="pb-20 md:pb-10"
+      className="pb-28 md:pb-10 max-w-7xl mx-auto px-1 sm:px-0"
     >
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold">
-            <ArrowRight size={18} className={isAr ? '' : 'rotate-180'} />
-            {t.back}
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <button 
+            onClick={onBack} 
+            className="flex items-center gap-1.5 text-solar-text hover:text-solar-blue transition font-black text-xs sm:text-sm bg-white border border-solar-border px-3 py-2 rounded-xl shadow-2xs active:scale-95"
+          >
+            <ArrowRight size={16} className={isAr ? '' : 'rotate-180'} />
+            <span>{t.back}</span>
           </button>
           {isOwner && onEdit && (
             <button 
               onClick={() => onEdit(product)}
-              className="flex items-center gap-2 text-solar-blue hover:text-solar-blue/80 transition font-bold text-sm bg-solar-blue/10 px-3 py-1 rounded-full border border-solar-blue/20"
+              className="flex items-center gap-1.5 text-solar-blue hover:text-solar-blue/80 transition font-black text-xs bg-solar-blue/10 px-3 py-2 rounded-xl border border-solar-blue/20 active:scale-95"
             >
-              <Edit size={14} />
-              {isAr ? 'تعديل المنتج' : 'Edit Product'}
+              <Edit size={13} />
+              <span>{isAr ? 'تعديل' : 'Edit'}</span>
             </button>
           )}
         </div>
-        <span className="text-[10px] font-black text-solar-muted bg-solar-card px-3 py-1 rounded-full border border-solar-border shadow-sm tracking-widest uppercase">
+        <span className="text-[10px] font-black text-solar-muted bg-solar-card px-3 py-1.5 rounded-xl border border-solar-border shadow-2xs tracking-wider uppercase">
           {product.brand}
         </span>
       </div>
@@ -628,6 +631,40 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           </div>
         </div>
       )}
+
+      {/* Mobile-First Sticky Action Bar */}
+      <div 
+        aria-label="Mobile Product Actions"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-solar-border/70 px-4 py-2.5 pb-[calc(env(safe-area-inset-bottom,0px)+8px)] flex items-center justify-between gap-2.5 md:hidden shadow-[0_-4px_20px_rgba(0,0,0,0.08)]"
+      >
+        <div className="flex flex-col min-w-0">
+          <span className="text-[10px] font-bold text-solar-muted leading-tight">{t.price}</span>
+          <span className="text-lg font-black text-solar-blue truncate">
+            {product.price.toLocaleString()} <span className="text-[11px] font-bold">{t.egp}</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button 
+            onClick={() => onCompare(product)}
+            className={`w-10 h-10 border font-black transition active:scale-95 flex items-center justify-center rounded-xl ${isCompared(product.id) ? 'bg-solar-accent border-solar-accent text-white' : 'bg-solar-light border-solar-border text-solar-muted'}`}
+            title={isAr ? 'مقارنة' : 'Compare'}
+            aria-label="Compare"
+          >
+            <ArrowLeftRight size={17} />
+          </button>
+          <button 
+            onClick={() => {
+              const message = isAr 
+                ? `مرحباً، أنا مهتم بطلب / الاستفسار عن منتج: ${product.nameAr || product.name}` 
+                : `Hi, I am interested in ordering/inquiring about: ${product.name}`;
+              window.open(getSupplierWhatsAppUrl(message), '_blank');
+            }}
+            className="bg-solar-blue text-white px-4 py-2.5 rounded-xl font-black shadow-md shadow-solar-blue/20 transition active:scale-95 text-xs flex items-center gap-1.5"
+          >
+            <span>{t.contactSupplier}</span>
+          </button>
+        </div>
+      </div>
     </motion.div>
   );
 };

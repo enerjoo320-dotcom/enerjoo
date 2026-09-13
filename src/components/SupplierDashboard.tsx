@@ -117,7 +117,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
       animate={{ opacity: 1 }}
       className="pb-20"
     >
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 sm:mb-8 gap-4">
         <div className="flex items-center gap-3">
           {adminFilterId ? (
             (() => {
@@ -171,7 +171,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
           ) : null}
 
           <div className="text-left">
-            <h1 className="text-2xl sm:text-3xl font-black text-solar-text">{t.dashboard}</h1>
+            <h1 className="text-xl sm:text-3xl font-black text-solar-text">{t.dashboard}</h1>
             <div className="text-solar-muted text-xs sm:text-sm">
               {adminFilterId ? (
                 <span className="flex items-center gap-2">
@@ -190,25 +190,25 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
         </div>
 
         {user?.type === 'admin' && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
             {adminFilterId && (
               <button 
                 onClick={() => setView('admin-suppliers')}
-                className="bg-solar-light text-solar-text px-4 py-2 rounded-xl font-bold text-xs hover:bg-solar-border transition"
+                className="bg-solar-light text-solar-text px-4 py-2.5 rounded-xl font-bold text-xs hover:bg-solar-border transition text-center"
               >
                 {isAr ? 'العودة لجميع الموردين' : 'Back to All Suppliers'}
               </button>
             )}
             <form onSubmit={handleAdminSearch} className="relative flex-1 max-w-md">
-            <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-solar-muted" size={18} />
-            <input 
-              type="text"
-              placeholder={isAr ? 'ابحث عن مورد للمصادقة...' : 'Search supplier to verify...'}
-              className="w-full bg-white border border-solar-border rounded-2xl py-3 pr-12 pl-4 outline-none focus:border-solar-blue transition font-bold text-sm shadow-sm text-solar-text"
-              value={adminSearch}
-              onChange={(e) => setAdminSearch(e.target.value)}
-            />
-          </form>
+              <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-solar-muted" size={18} />
+              <input 
+                type="text"
+                placeholder={isAr ? 'ابحث عن مورد للمصادقة...' : 'Search supplier to verify...'}
+                className="w-full bg-white border border-solar-border rounded-xl sm:rounded-2xl py-2.5 sm:py-3 pr-12 pl-4 outline-none focus:border-solar-blue transition font-bold text-sm shadow-2xs text-solar-text"
+                value={adminSearch}
+                onChange={(e) => setAdminSearch(e.target.value)}
+              />
+            </form>
           </div>
         )}
 
@@ -221,63 +221,65 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
               }
               setView('add');
             }}
-            className={`px-6 py-3 rounded-2xl font-black flex items-center justify-center gap-2 transition active:scale-95 ${
+            className={`w-full sm:w-auto px-6 py-3 rounded-xl sm:rounded-2xl font-black flex items-center justify-center gap-2 transition active:scale-95 text-sm ${
               !user?.verified 
                 ? 'bg-solar-border text-solar-muted cursor-not-allowed opacity-70' 
-                : 'bg-solar-blue text-white shadow-xl shadow-solar-blue/20 hover:opacity-90'
+                : 'bg-solar-blue text-white shadow-md shadow-solar-blue/20 hover:opacity-90'
             }`}
           >
-            <Plus size={20} />
+            <Plus size={18} />
             {t.addNew}
           </button>
         )}
       </div>
 
-      <div className="space-y-8">
+      <div className="space-y-6">
         {categoriesList.map(category => {
           const catProducts = groupedProducts[category.id] || [];
           if (catProducts.length === 0) return null;
 
           return (
-            <div key={category.id} className="bg-solar-card rounded-[32px] p-8 border border-solar-border shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-black text-solar-text flex items-center gap-3">
-                  <div className="w-10 h-10 bg-solar-blue/10 rounded-xl flex items-center justify-center text-solar-blue">
-                    <Package size={20} />
+            <div key={category.id} className="bg-solar-card rounded-2xl sm:rounded-[32px] p-4 sm:p-8 border border-solar-border shadow-2xs">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <h3 className="font-black text-solar-text flex items-center gap-2.5">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 bg-solar-blue/10 rounded-xl flex items-center justify-center text-solar-blue shrink-0">
+                    <Package size={18} />
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-lg">{category.label}</span>
-                    <span className="text-[10px] text-solar-muted uppercase tracking-widest">{catProducts.length} {t.products}</span>
+                  <div className="flex flex-col text-left">
+                    <span className="text-base sm:text-lg">{category.label}</span>
+                    <span className="text-[10px] text-solar-muted uppercase tracking-wider">{catProducts.length} {t.products}</span>
                   </div>
                 </h3>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {catProducts.map((product) => (
-                  <div key={product.id} className="flex items-center justify-between p-4 bg-solar-bg rounded-2xl border border-solar-border/50 group hover:border-solar-blue/30 transition shadow-sm">
-                    <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-white rounded-xl overflow-hidden border border-solar-border shrink-0 shadow-sm">
+                  <div key={product.id} className="flex items-center justify-between p-3 sm:p-4 bg-solar-bg rounded-xl sm:rounded-2xl border border-solar-border/50 group hover:border-solar-blue/30 transition shadow-2xs gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-xl overflow-hidden border border-solar-border shrink-0 shadow-2xs">
                         <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
                       </div>
-                      <div className="text-left">
-                        <div className="font-black text-solar-text text-sm line-clamp-1">{isAr ? product.nameAr : product.name}</div>
-                        <div className="text-[10px] font-bold text-solar-blue bg-solar-blue/5 px-2 py-0.5 rounded-full inline-block mt-1">{product.brand}</div>
-                        <div className="text-[10px] font-bold text-solar-muted mt-1">{product.price.toLocaleString()} {t.egp}</div>
+                      <div className="text-left min-w-0">
+                        <div className="font-black text-solar-text text-xs sm:text-sm truncate">{isAr ? product.nameAr : product.name}</div>
+                        <div className="text-[10px] font-bold text-solar-blue bg-solar-blue/5 px-2 py-0.5 rounded-full inline-block mt-0.5">{product.brand}</div>
+                        <div className="text-[10px] font-bold text-solar-muted mt-0.5">{product.price.toLocaleString()} {t.egp}</div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button 
                         onClick={() => onEdit(product)}
-                        className="p-2.5 bg-white text-solar-muted hover:text-solar-blue hover:bg-solar-blue/5 rounded-xl border border-solar-border transition shadow-sm"
+                        className="w-10 h-10 flex items-center justify-center bg-white text-solar-muted hover:text-solar-blue hover:bg-solar-blue/5 rounded-xl border border-solar-border transition shadow-2xs active:scale-95"
                         title={isAr ? 'تعديل' : 'Edit'}
+                        aria-label="Edit"
                       >
-                        <Edit size={16} />
+                        <Edit size={15} />
                       </button>
                       <button 
                         onClick={() => onDelete(product.id)}
-                        className="p-2.5 bg-white text-solar-muted hover:text-solar-danger hover:bg-red-50 rounded-xl border border-solar-border transition shadow-sm"
+                        className="w-10 h-10 flex items-center justify-center bg-white text-solar-muted hover:text-solar-danger hover:bg-red-50 rounded-xl border border-solar-border transition shadow-2xs active:scale-95"
                         title={isAr ? 'حذف' : 'Delete'}
+                        aria-label="Delete"
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   </div>

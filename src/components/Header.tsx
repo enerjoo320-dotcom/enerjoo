@@ -16,19 +16,19 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
   const isAr = lang === 'ar';
 
   return (
-    <header className="sticky top-0 z-40 w-full glass border-b border-solar-border">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+    <header className="sticky top-0 z-40 w-full glass border-b border-solar-border/70 pt-safe select-none">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
         <div 
-          className="flex items-center gap-2 cursor-pointer" 
+          className="flex items-center gap-2 cursor-pointer active:scale-95 transition-transform" 
           onClick={() => setView('home')}
         >
-          <div className="w-10 h-10 bg-solar-blue rounded-xl flex items-center justify-center shadow-lg shadow-solar-blue/20">
-            <span className="text-white font-black text-xl">S</span>
+          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-solar-blue rounded-xl flex items-center justify-center shadow-md shadow-solar-blue/25 shrink-0">
+            <span className="text-white font-black text-lg sm:text-xl font-display">S</span>
           </div>
-          <span className="font-display font-black text-xl text-solar-text hidden sm:block">{t.appName}</span>
+          <span className="font-display font-black text-lg sm:text-xl text-solar-text tracking-tight">{t.appName}</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           {user?.type !== 'admin' && (
             <button 
               onClick={() => setView('wishlist')}
@@ -44,9 +44,9 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
             <>
               <button 
                 onClick={() => setView('admin-requests')}
-                className="flex items-center gap-1.5 text-solar-blue hover:bg-solar-blue/10 transition font-bold text-xs bg-solar-blue/5 border border-solar-blue/20 px-3 py-1.5 rounded-full"
+                className="flex items-center gap-1 text-solar-blue hover:bg-solar-blue/10 transition font-black text-[11px] sm:text-xs bg-solar-blue/5 border border-solar-blue/20 px-2.5 sm:px-3 py-1.5 rounded-full"
               >
-                <span>{isAr ? '⚡ طلبات الطاقة الشمسية' : '⚡ Solar Requests'}</span>
+                <span>{isAr ? '⚡ الطلبات' : '⚡ Requests'}</span>
               </button>
 
               <button 
@@ -70,38 +70,40 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
           )}
 
           {user ? (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-3">
               <div 
-                className="flex items-center gap-2 bg-solar-light px-3 py-1.5 rounded-full cursor-pointer hover:bg-solar-border transition"
+                className="flex items-center gap-2 bg-solar-light p-1 sm:px-3 sm:py-1.5 rounded-full cursor-pointer hover:bg-solar-border transition active:scale-95"
                 onClick={() => setView('profile')}
+                title={isAr ? 'الملف الشخصي' : 'Profile'}
               >
                 {user.profileImage || user.avatar ? (
                   <img 
                     src={user.profileImage || user.avatar} 
-                    className="w-7 h-7 rounded-full border border-solar-border object-cover" 
+                    className="w-7 h-7 sm:w-7 sm:h-7 rounded-full border border-solar-border object-cover" 
                     alt={user.name} 
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div className="w-7 h-7 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-xs text-solar-blue">
+                  <div className="w-7 h-7 rounded-full bg-solar-blue/10 border border-solar-blue/20 flex items-center justify-center font-black text-xs text-solar-blue">
                     {(isAr ? user.nameAr || user.name : user.name)?.charAt(0)?.toUpperCase() || 'U'}
                   </div>
                 )}
-                <span className="text-xs font-bold text-solar-text hidden md:block">{isAr ? user.nameAr : user.name}</span>
+                <span className="text-xs font-bold text-solar-text hidden md:block">{isAr ? user.nameAr || user.name : user.name}</span>
               </div>
               <button 
                 onClick={onLogout}
-                className="p-2 text-solar-muted hover:text-solar-danger transition"
+                className="p-1.5 sm:p-2 text-solar-muted hover:text-solar-danger transition rounded-lg"
+                title={isAr ? 'تسجيل الخروج' : 'Log out'}
               >
-                <LogOut size={20} />
+                <LogOut size={18} />
               </button>
             </div>
           ) : (
             <button 
               onClick={() => setView('login')}
-              className="flex items-center gap-2 bg-solar-blue text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-solar-blue/20 transition active:scale-95"
+              className="flex items-center gap-1.5 bg-solar-blue text-white px-3.5 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-black shadow-md shadow-solar-blue/20 transition active:scale-95"
             >
-              <LogIn size={18} />
+              <LogIn size={16} />
               <span>{t.login}</span>
             </button>
           )}
