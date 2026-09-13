@@ -139,7 +139,7 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
   if (!res.ok) {
     let errorDetail = `Status ${res.status} ${res.statusText}`;
     try {
-      const errJson = await res.json();
+      const errJson: any = await res.json();
       if (errJson && errJson.error) {
         errorDetail = errJson.error;
       }
@@ -310,6 +310,7 @@ function mapD1ProductToProduct(d1Item: any): Product {
     status,
     updatedAt,
     image,
+    image_url: image,
     supplierId,
     datasheetUrl,
     specs,
@@ -336,6 +337,7 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
   if (product.efficiency !== undefined) payload.efficiency_percent = Number(product.efficiency);
   if (product.warranty !== undefined) payload.warranty_years = Number(product.warranty);
   if (product.image) payload.image_url = product.image;
+  if ((product as any).image_url) payload.image_url = (product as any).image_url;
   if (product.supplierId !== undefined) {
     payload.supplier_id = String(product.supplierId);
     payload.supplier = String(product.supplierId);

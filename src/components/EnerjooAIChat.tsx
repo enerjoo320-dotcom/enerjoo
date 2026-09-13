@@ -216,7 +216,7 @@ export default function EnerjooAIChat({
         try {
           const contentType = response.headers.get('content-type') || '';
           if (contentType.includes('application/json')) {
-            const errData = await response.json();
+            const errData: any = await response.json();
             const hint = typeof errData?.hint === 'string' ? errData.hint : '';
             const rawMsg = typeof errData?.message === 'string' 
               ? errData.message 
@@ -258,7 +258,7 @@ export default function EnerjooAIChat({
       try {
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
-          const data = await response.json();
+          const data: any = await response.json();
           if (typeof data === 'string') {
             botReplyText = data;
           } else if (typeof data?.output === 'string') {

@@ -40,6 +40,7 @@ export interface Product {
   status: 'available' | 'limited' | 'out_of_stock';
   updatedAt: string;
   image: string;
+  image_url?: string;
   supplierId: string | number;
   datasheetUrl?: string;
   specs: Record<string, any>;

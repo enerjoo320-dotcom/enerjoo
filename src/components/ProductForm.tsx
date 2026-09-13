@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Upload, Image as ImageIcon, Loader2, AlertCircle } from 'lucide-react';
 import { translations } from '../translations';
-import { uploadProductImageToDrive } from '../services/uploadService';
+import { uploadProductImage } from '../services/uploadService';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { UNIFIED_PHONE_DISPLAY } from '../constants/contact';
@@ -122,13 +122,12 @@ export const ProductForm: React.FC<{
     setUploadError(null);
     
     try {
-      let imageUrl = initialData?.image || '';
+      let imageUrl = initialData?.image || (initialData as any)?.image_url || '';
       // Preserve existing datasheet if product previously had one, without adding PDF upload UI
       const datasheetUrl = initialData?.datasheetUrl || '';
 
       if (imageFile) {
-        const uploadResult = await uploadProductImageToDrive(imageFile, initialData?.id?.toString(), user?.uid);
-        imageUrl = uploadResult.imageUrl;
+        imageUrl = await uploadProductImage(imageFile);
       }
 
       const newProduct: any = {
@@ -141,6 +140,7 @@ export const ProductForm: React.FC<{
         efficiency: parseFloat(formData.efficiency) || 0,
         warranty: parseInt(formData.warranty) || 0,
         image: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
+        image_url: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
         datasheetUrl: datasheetUrl,
         area: parseFloat(formData.area) || 0,
         status: formData.status as any,
@@ -180,7 +180,7 @@ export const ProductForm: React.FC<{
       await onSave(newProduct);
     } catch (error: any) {
       console.error("Upload failed", error);
-      setUploadError(error.message || (lang === 'ar' ? 'حدث خطأ أثناء رفع صورة المنتج إلى Google Drive' : 'Failed to upload product image to Google Drive'));
+      setUploadError(error.message || (lang === 'ar' ? 'حدث خطأ أثناء رفع صورة المنتج إلى Cloudflare R2' : 'Failed to upload product image to Cloudflare R2'));
     } finally {
       setIsUploading(false);
     }
@@ -519,7 +519,7 @@ export const ProductForm: React.FC<{
 
       <div className="w-full">
         <label className="text-[10px] font-black text-solar-muted uppercase ml-2 mb-2 block">
-          {lang === 'ar' ? 'صورة المنتج (Google Drive Storage)' : 'Product Image (Google Drive Storage)'}
+          {lang === 'ar' ? 'صورة المنتج' : 'Product Image'}
         </label>
         <div 
           onClick={handleImageClick}

@@ -71,7 +71,7 @@ export async function calculateSolarSystem(params: {
     });
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
+      const errData: any = await response.json().catch(() => ({}));
       throw new Error(errData.error || `Solar Calculator API failed: ${response.statusText}`);
     }
 

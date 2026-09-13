@@ -667,7 +667,7 @@ Now computing high-precision sizing and product matching across 3 tailored tiers
         throw new Error('Chat reply API failed');
       }
 
-      const data = await response.json();
+      const data: any = await response.json();
       setMessages(prev => [
         ...prev,
         { id: 'ai-' + Date.now(), sender: 'ai', text: data.reply, timestamp: new Date() }
