@@ -22,6 +22,7 @@
     },
     "allowImportingTsExtensions": true,
     "types": ["vite/client"],
+    "useUnknownInCatchVariables": false,
     "noEmit": true
   }
 }

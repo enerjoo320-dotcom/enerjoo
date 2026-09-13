@@ -14,7 +14,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { Product, Supplier, ProductReview, SolarRequest, SolarRequestStatus, Customer, Quotation, QuotationStatus } from '../types';
+import { Product, Supplier, Category, ProductReview, SolarRequest, SolarRequestStatus, Customer, Quotation, QuotationStatus } from '../types';
 import { normalizeEgyptianPhone } from '../utils/phoneUtils';
 
 const PRODUCTS_COLLECTION = 'products';
@@ -58,15 +58,446 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-export const subscribeToProducts = (callback: (products: Product[]) => void) => {
-  const q = query(collection(db, PRODUCTS_COLLECTION));
-  return onSnapshot(q, (snapshot) => {
-    const products = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
-    callback(products);
-  }, (error) => {
-    console.error('Firestore Products Error:', error);
-    callback([]);
+// Cloudflare D1 Products API
+const CF_DIRECT_BASE_URL = 'https://enerjoo-api.enerjoo320.workers.dev';
+const getProductsApiBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    // In preview or sandbox environments, use the local proxy to prevent browser CORS blocks
+    if (window.location.hostname !== 'enerjoo.com') {
+      return '/api';
+    }
+  }
+  return CF_DIRECT_BASE_URL;
+};
+
+// In-memory product listeners to notify active components immediately upon product mutations
+type ProductsListener = (products: Product[]) => void;
+const activeProductListeners: Set<ProductsListener> = new Set();
+
+const notifyProductListeners = async () => {
+  if (activeProductListeners.size === 0) return;
+  try {
+    const products = await getProducts();
+    for (const listener of activeProductListeners) {
+      try {
+        listener(products);
+      } catch (err) {
+        console.error('Error in product listener callback:', err);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to notify product listeners:', err);
+  }
+};
+
+/**
+ * Internal helper for Cloudflare Worker D1 Products API requests.
+ */
+async function requestProductsApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const baseUrl = getProductsApiBaseUrl();
+  const url = `${baseUrl}${normalizedPath}`;
+  
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options?.headers || {})
+      }
+    });
+  } catch (err) {
+    // If direct worker fetch failed due to CORS or network error, attempt fallback through proxy
+    if (baseUrl !== '/api') {
+      try {
+        const fallbackUrl = `/api${normalizedPath}`;
+        res = await fetch(fallbackUrl, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options?.headers || {})
+          }
+        });
+      } catch (fallbackErr) {
+        const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
+        throw new Error(`Network error connecting to Products API: ${errorMsg}`);
+      }
+    } else {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
+      throw new Error(`Network error connecting to Products API: ${errorMsg}`);
+    }
+  }
+
+  // Handle 404 cleanly
+  if (res.status === 404) {
+    throw new Error('NOT_FOUND');
+  }
+
+  if (!res.ok) {
+    let errorDetail = `Status ${res.status} ${res.statusText}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && errJson.error) {
+        errorDetail = errJson.error;
+      }
+    } catch {
+      // Ignore JSON parse error on non-ok responses
+    }
+    throw new Error(`Products API error (${res.status}): ${errorDetail}`);
+  }
+
+  try {
+    const json = await res.json();
+    return json as T;
+  } catch (err) {
+    console.error(`Invalid JSON received from Products API at ${url}:`, err);
+    throw new Error('Invalid JSON response from Products API');
+  }
+}
+
+/**
+ * Map category from D1 format to frontend Category enum.
+ */
+function mapD1CategoryToCategory(catStr?: string | null): Category {
+  if (!catStr) return 'panels';
+  const c = catStr.toLowerCase();
+  if (c.includes('panel')) return 'panels';
+  if (c.includes('invert')) return 'inverters';
+  if (c.includes('batter')) return 'batteries';
+  if (c.includes('mount') || c.includes('structur')) return 'mounting';
+  if (c.includes('protect')) return 'protection';
+  if (c.includes('combin')) return 'combiner';
+  if (c.includes('cable')) return 'cables';
+  if (c.includes('mc4')) return 'mc4';
+  if (c.includes('seal')) return 'sealings';
+  if (c.includes('clamp')) return 'clamps';
+  return (c as Category) || 'panels';
+}
+
+/**
+ * Map frontend Category to D1 category string.
+ */
+function mapCategoryToD1Category(cat?: Category): string {
+  switch (cat) {
+    case 'panels': return 'Solar Panels';
+    case 'inverters': return 'Inverters';
+    case 'batteries': return 'Batteries';
+    case 'mounting': return 'Mounting Structures';
+    case 'protection': return 'Protection & Distribution';
+    case 'combiner': return 'Combiner Boxes';
+    case 'cables': return 'Solar Cables';
+    case 'mc4': return 'MC4 Connectors';
+    case 'sealings': return 'Sealings';
+    case 'clamps': return 'Clamps';
+    default: return cat || 'Solar Panels';
+  }
+}
+
+/**
+ * Map D1 product object to application Product interface.
+ */
+function mapD1ProductToProduct(d1Item: any): Product {
+  const id = d1Item.product_id || d1Item.id || '';
+  const name = d1Item.name || d1Item.model || `Product ${id}`;
+  const nameAr = d1Item.nameAr || d1Item.model || name;
+  const brand = d1Item.brand || '';
+  const category = mapD1CategoryToCategory(d1Item.product_category || d1Item.category);
+  const power = Number(d1Item.power_w ?? d1Item.power ?? 0);
+  const price = Number(d1Item.price_egp ?? d1Item.price ?? 0);
+  const efficiency = Number(d1Item.efficiency_percent ?? d1Item.efficiency ?? 0);
+  const warranty = Number(d1Item.warranty_years ?? d1Item.warranty ?? 0);
+  const area = Number(d1Item.area ?? 0);
+  const image = d1Item.image_url || d1Item.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop';
+  const supplierId = d1Item.supplier_id || d1Item.supplierId || d1Item.supplier || '';
+  const updatedAt = d1Item.updated_at || d1Item.updatedAt || new Date().toLocaleDateString();
+  const datasheetUrl = d1Item.datasheet_url || d1Item.datasheetUrl;
+
+  let status: 'available' | 'limited' | 'out_of_stock' = 'available';
+  if (d1Item.availability) {
+    const av = String(d1Item.availability).toLowerCase();
+    if (av.includes('out') || av === 'out_of_stock') {
+      status = 'out_of_stock';
+    } else if (av.includes('limit') || av === 'limited') {
+      status = 'limited';
+    } else {
+      status = 'available';
+    }
+  } else if (d1Item.status) {
+    status = d1Item.status;
+  }
+
+  // Parse specs if stored as string or object
+  let specs: Record<string, any> = {};
+  if (typeof d1Item.specs === 'string') {
+    try {
+      specs = JSON.parse(d1Item.specs);
+    } catch {
+      specs = {};
+    }
+  } else if (d1Item.specs && typeof d1Item.specs === 'object') {
+    specs = d1Item.specs;
+  } else {
+    // Collect specific D1 technical specs
+    specs = {
+      productType: d1Item.product_type,
+      technology: d1Item.technology,
+      cellType: d1Item.cell_type,
+      numberOfCells: d1Item.number_of_cells,
+      ratedPowerKw: d1Item.rated_power_kw,
+      surgePowerW: d1Item.surge_power_w,
+      waveform: d1Item.waveform,
+      acVoltageV: d1Item.ac_voltage_v,
+      frequencyHz: d1Item.frequency_hz,
+      peakEfficiency: d1Item.peak_efficiency_percent,
+      nominalVoltage: d1Item.nominal_voltage_v,
+      capacityAh: d1Item.capacity_ah,
+      nominalEnergyWh: d1Item.nominal_energy_wh,
+      maxContinuousDischargeCurrentA: d1Item.max_continuous_discharge_current_a,
+      cycleLife: d1Item.cycle_life,
+      maxPvOpenCircuitVoltageV: d1Item.max_pv_open_circuit_voltage_v,
+      maxPvArrayPowerW: d1Item.max_pv_array_power_w,
+      pvMpptVoltageRangeV: d1Item.pv_mppt_voltage_range_v,
+      vmpV: d1Item.vmp_v,
+      vocV: d1Item.voc_v,
+      impA: d1Item.imp_a,
+      iscA: d1Item.isc_a,
+      dimensionsMm: d1Item.dimensions_mm,
+      weightKg: d1Item.weight_kg,
+      notes: d1Item.notes,
+    };
+  }
+
+  // Parse suppliers list
+  let suppliers: Supplier[] = [];
+  if (Array.isArray(d1Item.suppliers)) {
+    suppliers = d1Item.suppliers;
+  } else if (typeof d1Item.suppliers === 'string') {
+    try {
+      suppliers = JSON.parse(d1Item.suppliers);
+    } catch {
+      suppliers = [];
+    }
+  }
+  if (suppliers.length === 0 && (d1Item.supplier || supplierId)) {
+    suppliers = [
+      {
+        id: supplierId,
+        name: d1Item.supplier_name || d1Item.supplier || 'Enerjoo Supplier',
+        nameAr: d1Item.supplier_name_ar || d1Item.supplier || 'مورد إينرجو',
+        price: price,
+        phone: d1Item.supplier_phone || '01000000000',
+        location: d1Item.supplier_location || 'Cairo, Egypt',
+        verified: true,
+        lastUpdate: updatedAt
+      }
+    ];
+  }
+
+  return {
+    id,
+    name,
+    nameAr,
+    brand,
+    category,
+    power,
+    area,
+    efficiency,
+    warranty,
+    price,
+    status,
+    updatedAt,
+    image,
+    supplierId,
+    datasheetUrl,
+    specs,
+    suppliers
+  };
+}
+
+/**
+ * Maps frontend Product data to Cloudflare D1 Product payload.
+ */
+function mapProductToD1Payload(product: Partial<Product> & { product_id?: string }): Record<string, any> {
+  const payload: Record<string, any> = {};
+
+  if (product.product_id) payload.product_id = product.product_id;
+  if (product.name) {
+    payload.name = product.name;
+    payload.model = product.name;
+  }
+  if (product.nameAr) payload.nameAr = product.nameAr;
+  if (product.brand) payload.brand = product.brand;
+  if (product.category) payload.product_category = mapCategoryToD1Category(product.category);
+  if (product.power !== undefined) payload.power_w = Number(product.power);
+  if (product.price !== undefined) payload.price_egp = Number(product.price);
+  if (product.efficiency !== undefined) payload.efficiency_percent = Number(product.efficiency);
+  if (product.warranty !== undefined) payload.warranty_years = Number(product.warranty);
+  if (product.image) payload.image_url = product.image;
+  if (product.supplierId !== undefined) {
+    payload.supplier_id = String(product.supplierId);
+    payload.supplier = String(product.supplierId);
+  }
+  if (product.datasheetUrl !== undefined) payload.datasheet_url = product.datasheetUrl;
+  if (product.status) {
+    payload.availability = product.status === 'available' ? 'Available' :
+                           product.status === 'limited' ? 'Limited' : 'Out of Stock';
+  }
+  if (product.specs) {
+    payload.specs = JSON.stringify(product.specs);
+  }
+  if (product.suppliers) {
+    payload.suppliers = JSON.stringify(product.suppliers);
+  }
+
+  return payload;
+}
+
+/**
+ * Fetch all products from Cloudflare D1 via Worker API.
+ */
+export const getProducts = async (): Promise<Product[]> => {
+  try {
+    const data = await requestProductsApi<{ success: boolean; products: any[] }>('/products');
+    if (data && Array.isArray(data.products)) {
+      return data.products.map(mapD1ProductToProduct);
+    }
+    return [];
+  } catch (error) {
+    console.error('Failed to get products from Cloudflare D1:', error);
+    return [];
+  }
+};
+
+/**
+ * Fetch a single product by ID from Cloudflare D1 via Worker API.
+ * Returns null if the product is not found (404) or an error occurs.
+ */
+export const getProductById = async (productId: string | number): Promise<Product | null> => {
+  try {
+    const data = await requestProductsApi<{ success: boolean; product: any }>(`/products/${productId}`);
+    if (data && data.product) {
+      return mapD1ProductToProduct(data.product);
+    }
+    return null;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'NOT_FOUND') {
+      return null;
+    }
+    console.error(`Failed to get product ${productId} from Cloudflare D1:`, error);
+    return null;
+  }
+};
+
+/**
+ * Subscribe to products: loads initial products from Cloudflare D1 Worker API,
+ * invokes callback(products), registers listener for local product mutations,
+ * and returns a safe unsubscribe function.
+ */
+export const subscribeToProducts = (callback: (products: Product[]) => void): (() => void) => {
+  let isSubscribed = true;
+
+  // Initial load from Cloudflare D1
+  getProducts().then(products => {
+    if (isSubscribed) {
+      callback(products);
+    }
+  }).catch(error => {
+    console.error('Cloudflare D1 Products Initial Load Error:', error);
+    if (isSubscribed) {
+      callback([]);
+    }
   });
+
+  // Track active listener to push updates whenever addProduct, updateProduct or deleteProduct is called
+  const listener: ProductsListener = (updatedProducts) => {
+    if (isSubscribed) {
+      callback(updatedProducts);
+    }
+  };
+  activeProductListeners.add(listener);
+
+  // Safe unsubscribe function
+  return () => {
+    isSubscribed = false;
+    activeProductListeners.delete(listener);
+  };
+};
+
+/**
+ * Add a new product to Cloudflare D1 via Worker API (POST /products).
+ * Uses product_id as the D1 identifier and returns product_id upon success.
+ */
+export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | number }): Promise<string> => {
+  try {
+    // Generate a unique product_id for Cloudflare D1 if not provided
+    const newProductId = (product.id ? String(product.id) : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`).toUpperCase();
+    const payload = {
+      ...mapProductToD1Payload(product),
+      product_id: newProductId
+    };
+
+    const res = await requestProductsApi<{ success: boolean; message?: string; product_id?: string }>('/products', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+
+    const createdId = res.product_id || newProductId;
+    // Notify active subscribers
+    notifyProductListeners();
+    return createdId;
+  } catch (error) {
+    console.error('Failed to add product to Cloudflare D1:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update an existing product in Cloudflare D1 via Worker API (PUT /products/:id).
+ */
+export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
+  try {
+    const pId = String(productId);
+    const payload = mapProductToD1Payload(data);
+    // Ensure id is not sent in body if not needed
+    delete payload.id;
+    delete payload.product_id;
+
+    await requestProductsApi<{ success: boolean; message?: string }>(`/products/${pId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+
+    // Notify active subscribers
+    notifyProductListeners();
+  } catch (error) {
+    console.error(`Failed to update product ${productId} in Cloudflare D1:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a product from Cloudflare D1 via Worker API (DELETE /products/:id).
+ */
+export const deleteProduct = async (productId: string | number): Promise<void> => {
+  try {
+    const pId = String(productId);
+    await requestProductsApi<{ success: boolean; message?: string }>(`/products/${pId}`, {
+      method: 'DELETE'
+    });
+
+    // Notify active subscribers
+    notifyProductListeners();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'NOT_FOUND') {
+      console.warn(`Product ${productId} was not found on Cloudflare D1 (already deleted).`);
+      return;
+    }
+    console.error(`Failed to delete product ${productId} from Cloudflare D1:`, error);
+    throw error;
+  }
 };
 
 export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) => {
@@ -104,55 +535,8 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
 };
 
 export const seedInitialData = async () => {
-  // Clear any existing products from Firestore as requested by user
-  try {
-    const productsSnapshot = await getDocs(collection(db, PRODUCTS_COLLECTION));
-    if (!productsSnapshot.empty) {
-      for (const productDoc of productsSnapshot.docs) {
-        try {
-          await deleteDoc(doc(db, PRODUCTS_COLLECTION, productDoc.id));
-        } catch (delErr) {
-          console.warn("Could not delete product doc:", productDoc.id, delErr);
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Error during product cleanup:", error);
-  }
-};
-
-export const addProduct = async (product: Omit<Product, 'id'>) => {
-  try {
-    const docRef = await addDoc(collection(db, PRODUCTS_COLLECTION), {
-      ...product,
-      updatedAt: serverTimestamp()
-    });
-    return docRef.id;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, PRODUCTS_COLLECTION);
-    return '';
-  }
-};
-
-export const updateProduct = async (productId: string, data: Partial<Product>) => {
-  try {
-    const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-    await updateDoc(docRef, {
-      ...data,
-      updatedAt: serverTimestamp()
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `${PRODUCTS_COLLECTION}/${productId}`);
-  }
-};
-
-export const deleteProduct = async (productId: string) => {
-  try {
-    const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-    await deleteDoc(docRef);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${PRODUCTS_COLLECTION}/${productId}`);
-  }
+  // Preserve all user and supplier saved products
+  return;
 };
 
 export const toggleSupplierVerification = async (uid: string, verified: boolean) => {

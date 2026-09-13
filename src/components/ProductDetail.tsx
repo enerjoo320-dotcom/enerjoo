@@ -204,7 +204,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       <div className="grid lg:grid-cols-2 gap-10 mb-16">
         <div className="space-y-6">
           <div className="relative group">
-            <img src={product.image} className="w-full aspect-[4/3] object-cover rounded-[40px] shadow-2xl shadow-solar-blue/10 border-4 border-white" alt={product.name} />
+            <img src={product.image} referrerPolicy="no-referrer" className="w-full aspect-[4/3] object-cover rounded-[40px] shadow-2xl shadow-solar-blue/10 border-4 border-white" alt={product.name} />
             {user?.type !== 'admin' && (
               <div className="absolute top-4 right-4 flex gap-2">
                 <button 

@@ -150,7 +150,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         className="relative z-10 bg-solar-card rounded-3xl p-4 border border-solar-border shadow-sm hover:shadow-xl hover:shadow-solar-blue/5 transition-all cursor-pointer select-none"
       >
         <div className="relative aspect-video rounded-2xl overflow-hidden mb-4">
-          <img src={product.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none" alt={product.name} />
+          <img src={product.image} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none" alt={product.name} />
           <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
             <div className="flex flex-col gap-1 items-start">
               {isOwner && onEdit && (

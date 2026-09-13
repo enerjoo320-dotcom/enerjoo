@@ -3,8 +3,15 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
+import multer from "multer";
+import { validateProductImage, uploadProductImageToGoogleDrive } from "./src/server/googleDrive";
 
 dotenv.config();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
 
 // Fallback Helper Functions for High-Demand/Network Failures
 function fallbackSemanticSearch(query: string, products: any[], isAr: boolean) {
@@ -371,6 +378,139 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Proxy endpoint for Cloudflare D1 API (bypasses browser CORS restrictions in preview/dev environments)
+  const CF_WORKER_API = "https://enerjoo-api.enerjoo320.workers.dev";
+  const cfProxyRoutes = [
+    "/api/products*",
+    "/api/customers*",
+    "/api/users*",
+    "/api/suppliers*",
+    "/api/solar-requests*",
+    "/api/quotations*",
+    "/api/quotation-items*",
+    "/api/reviews*"
+  ];
+
+  app.all(cfProxyRoutes, async (req, res) => {
+    const targetPath = req.originalUrl.replace(/^\/api/, "");
+    const targetUrl = `${CF_WORKER_API}${targetPath}`;
+    try {
+      const fetchOptions: RequestInit = {
+        method: req.method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      };
+      if (req.method !== "GET" && req.method !== "HEAD" && req.body && Object.keys(req.body).length > 0) {
+        fetchOptions.body = JSON.stringify(req.body);
+      }
+      const apiRes = await fetch(targetUrl, fetchOptions);
+      const data = await apiRes.text();
+      res
+        .status(apiRes.status)
+        .set("Content-Type", apiRes.headers.get("content-type") || "application/json")
+        .send(data);
+    } catch (err: any) {
+      console.error(`Error proxying to Cloudflare Worker API (${targetUrl}):`, err);
+      res.status(500).json({ success: false, error: err?.message || "Proxy error" });
+    }
+  });
+
+  // Google Drive Product Image Upload endpoint
+  app.post("/api/upload-product-image", (req, res, next) => {
+    upload.single("image")(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            success: false,
+            error: "حجم الصورة كبير جداً. الحد الأقصى المسموح به هو 10 ميجابايت (File size exceeds 10MB limit)."
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          error: `خطأ أثناء قراءة ملف الصورة: ${err.message}`
+        });
+      } else if (err) {
+        return res.status(400).json({
+          success: false,
+          error: `خطأ أثناء استلام الملف: ${err.message}`
+        });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      // Validate authorization from logged-in supplier or active session
+      const authHeader = (req.headers.authorization || req.headers.Authorization) as string | undefined;
+      const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1]?.trim() : "";
+      
+      if (!token || token.length < 3) {
+        return res.status(401).json({
+          success: false,
+          error: "غير مصرح: يجب تسجيل الدخول كمورد لرفع صور المنتجات (Unauthorized: Logged in supplier required)."
+        });
+      }
+
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({
+          success: false,
+          error: "لم يتم إرسال ملف صورة في الطلب (No image file uploaded)."
+        });
+      }
+
+      const validation = validateProductImage(file);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error
+        });
+      }
+
+      const productId = req.body?.productId || "";
+      const result = await uploadProductImageToGoogleDrive({
+        buffer: file.buffer,
+        mimetype: file.mimetype,
+        originalname: file.originalname,
+        productId: typeof productId === "string" ? productId : undefined
+      });
+
+      return res.status(200).json({
+        success: true,
+        fileId: result.fileId,
+        imageUrl: result.imageUrl
+      });
+    } catch (uploadErr: any) {
+      console.error("Upload to Google Drive error:", uploadErr.message || "Upload error");
+      return res.status(500).json({
+        success: false,
+        error: uploadErr.message || "حدث خطأ أثناء رفع الصورة إلى Google Drive."
+      });
+    }
+  });
+
+  // Proxy endpoint for Google Drive images (optional fallback for restricted environments)
+  app.get("/api/drive-image/:fileId", async (req, res) => {
+    try {
+      const { fileId } = req.params;
+      if (!fileId || fileId.length < 5) {
+        return res.status(400).send("Invalid file ID");
+      }
+      const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
+      const imageResp = await fetch(directUrl);
+      if (!imageResp.ok) {
+        return res.status(imageResp.status).send("Failed to fetch image");
+      }
+      const contentType = imageResp.headers.get("content-type") || "image/jpeg";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      const buffer = Buffer.from(await imageResp.arrayBuffer());
+      return res.send(buffer);
+    } catch (err: any) {
+      return res.status(500).send("Failed to proxy image");
+    }
+  });
+
   // Production n8n AI Agent Proxy (bypasses browser CORS & iframe origin restrictions)
   app.post("/api/n8n-chat", async (req, res) => {
     const N8N_PROD_URL = "https://enerjoo.app.n8n.cloud/webhook/798b6fd0-317b-47fc-9def-7fcf9dd04509/chat";
@@ -733,6 +873,17 @@ async function startServer() {
       } catch (innerErr: any) {
         res.status(500).json({ error: innerErr.message || "Failed to get response" });
       }
+    }
+  });
+
+  // Ensure all unhandled errors on API routes return JSON instead of HTML
+  app.use("/api", (err: any, req: any, res: any, next: any) => {
+    console.error("API error:", err);
+    if (!res.headersSent) {
+      res.status(err.status || 500).json({
+        success: false,
+        error: err.message || "حدث خطأ أثناء معالجة الطلب."
+      });
     }
   });
 

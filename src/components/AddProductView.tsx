@@ -8,7 +8,7 @@ import { Product } from '../types';
 interface AddProductViewProps {
   lang: 'ar' | 'en';
   onBack: () => void;
-  onAdd: (product: Omit<Product, 'id'>) => void;
+  onAdd: (product: Omit<Product, 'id'>) => void | Promise<void>;
   editingProduct?: Product | null;
 }
 
@@ -36,7 +36,7 @@ export const AddProductView: React.FC<AddProductViewProps> = ({ lang, onBack, on
         <h2 className="text-3xl font-black text-solar-text mb-3">{editingProduct ? (isAr ? 'تعديل المنتج' : 'Edit Product') : t.addNewProduct}</h2>
         <p className="text-solar-muted text-sm mb-10 max-w-sm mx-auto leading-relaxed">{t.addNewProductDesc}</p>
         
-        <ProductForm lang={lang} onSave={(p) => { onAdd(p); onBack(); }} onCancel={onBack} initialData={editingProduct} />
+        <ProductForm lang={lang} onSave={async (p) => { await onAdd(p); onBack(); }} onCancel={onBack} initialData={editingProduct} />
       </div>
     </motion.div>
   );

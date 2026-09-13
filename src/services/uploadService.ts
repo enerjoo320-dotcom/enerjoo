@@ -1,5 +1,9 @@
+import { auth } from '../lib/firebase';
+import { safeLocalStorage } from '../utils/safeStorage';
+
 /**
- * Service for uploading files to Cloudinary using Unsigned Uploads.
+ * Service for uploading files to Google Drive (Product Images)
+ * and Cloudinary (Supplier Avatars / Legacy).
  */
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
@@ -186,4 +190,140 @@ export async function uploadSupplierProfileImage(file: File): Promise<string> {
 
   return base64DataUrl;
 }
+
+export interface GoogleDriveUploadResult {
+  fileId: string;
+  imageUrl: string;
+}
+
+/**
+ * Uploads a Product Image to Google Drive via the secure backend endpoint /api/upload-product-image.
+ * - Centralized storage on Google Drive
+ * - Direct image URL for web display (lh3.googleusercontent.com/d/{fileId})
+ * - Sends authorization header using logged-in Firebase user token
+ */
+export async function uploadProductImageToDrive(
+  file: File,
+  productId?: string,
+  userUid?: string
+): Promise<GoogleDriveUploadResult> {
+  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  const isAllowed = allowed.includes(file.type.toLowerCase()) || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+
+  if (!isAllowed) {
+    throw new Error('نوع الملف غير مدعوم. يرجى اختيار صورة بصيغة JPG أو PNG أو WebP.');
+  }
+
+  // Optimize large images: compress any image over 1.5MB to max 1920x1920 to ensure fast, reliable upload
+  let fileToUpload: File | Blob = file;
+  const COMPRESS_THRESHOLD = 1.5 * 1024 * 1024; // 1.5 MB
+  if (file.size > COMPRESS_THRESHOLD) {
+    try {
+      const compressedBlob = await compressImage(file, 1920, 1920, 0.88);
+      fileToUpload = new File([compressedBlob], file.name, { type: compressedBlob.type || file.type });
+    } catch (compressErr) {
+      console.warn('Auto compression note:', compressErr);
+    }
+  }
+
+  const MAX_10MB = 10 * 1024 * 1024;
+  if (fileToUpload.size > MAX_10MB) {
+    throw new Error('حجم الصورة كبير جداً. الحد الأقصى المسموح به هو 10 ميجابايت.');
+  }
+
+  // Retrieve current user Firebase ID token with timeout safeguard, or fallback session token
+  let token: string | null = null;
+  try {
+    if (auth.currentUser) {
+      token = await Promise.race([
+        auth.currentUser.getIdToken(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500))
+      ]);
+    }
+  } catch (tokenErr) {
+    console.warn("Could not get Firebase ID token, using fallback session token:", tokenErr);
+  }
+
+  if (!token) {
+    const mockUid = safeLocalStorage.getItem("enerjoo_mock_auth_uid") || userUid;
+    if (mockUid) {
+      token = `session_${mockUid}`;
+    } else {
+      token = 'supplier_session_active';
+    }
+  }
+
+  // Execute upload with automatic single retry for transient container warmups or network hiccups
+  let response: Response | null = null;
+  let responseText = '';
+  let data: any = {};
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const formData = new FormData();
+      formData.append('image', fileToUpload, file.name);
+      if (productId) {
+        formData.append('productId', productId);
+      }
+
+      response = await fetch('/api/upload-product-image', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData,
+      });
+
+      responseText = await response.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = {};
+      }
+
+      // If success or expected client-side error (400, 401, 403, 413), break loop
+      if (response.ok || (response.status >= 400 && response.status < 500)) {
+        break;
+      }
+
+      // If server returned 502/503/504 (e.g. dev server warmup or restart), wait and retry once
+      if (attempt === 1 && (response.status >= 500 || !response.ok)) {
+        console.warn(`Upload attempt 1 returned status ${response.status}. Retrying in 1000ms...`);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch (netErr) {
+      if (attempt === 1) {
+        console.warn('Upload network error on attempt 1, retrying in 1000ms...', netErr);
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        throw new Error('تعذر الاتصال بالخادم لرفع الصورة. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.');
+      }
+    }
+  }
+
+  if (!response || !response.ok || !data.success) {
+    let errorMsg = data.error;
+    if (!errorMsg) {
+      if (response?.status === 413) {
+        errorMsg = 'حجم ملف الصورة كبير جداً (أقصى حد 10 ميجابايت).';
+      } else if (response?.status === 401) {
+        errorMsg = 'غير مصرح: يجب تسجيل الدخول كمورد لرفع صور المنتجات.';
+      } else if (response?.status === 502 || response?.status === 503 || response?.status === 504) {
+        errorMsg = 'الخادم قيد التشغيل حالياً، يرجى إعادة المحاولة خلال ثوانٍ.';
+      } else if (responseText && !responseText.startsWith('<')) {
+        errorMsg = responseText.slice(0, 150);
+      } else {
+        errorMsg = 'فشل رفع صورة المنتج إلى Google Drive. يرجى المحاولة مرة أخرى.';
+      }
+    }
+    throw new Error(errorMsg);
+  }
+
+  return {
+    fileId: data.fileId,
+    imageUrl: data.imageUrl,
+  };
+}
+
 

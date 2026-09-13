@@ -1,21 +1,20 @@
 import React, { useRef, useState } from 'react';
-import { Upload, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, AlertCircle } from 'lucide-react';
 import { translations } from '../translations';
-import { uploadFile } from '../services/uploadService';
+import { uploadProductImageToDrive } from '../services/uploadService';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { UNIFIED_PHONE_DISPLAY } from '../constants/contact';
 
 export const ProductForm: React.FC<{ 
   lang: 'ar' | 'en'; 
-  onSave: (product: Omit<Product, 'id'>) => void; 
+  onSave: (product: Omit<Product, 'id'>) => void | Promise<void>; 
   onCancel: () => void;
   initialData?: Product | null;
 }> = ({ lang, onSave, onCancel, initialData }) => {
   const t = translations[lang];
   const { user } = useAuth();
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const pdfInputRef = useRef<HTMLInputElement>(null);
   
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
@@ -75,26 +74,39 @@ export const ProductForm: React.FC<{
   const fields = getFieldsForCategory(formData.category);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(initialData?.image || null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleImageClick = () => {
     imageInputRef.current?.click();
   };
 
-  const handlePdfClick = () => {
-    pdfInputRef.current?.click();
-  };
-
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setImageFile(e.target.files[0]);
-    }
-  };
+      const selected = e.target.files[0];
+      const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      const ext = selected.name.split('.').pop()?.toLowerCase() || '';
+      const isAllowed = allowed.includes(selected.type.toLowerCase()) || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
 
-  const handlePdfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setPdfFile(e.target.files[0]);
+      if (!isAllowed) {
+        setUploadError(lang === 'ar' ? 'نوع الملف غير مدعوم. يرجى اختيار صورة JPG أو PNG أو WebP.' : 'Invalid file type. Only JPG, JPEG, PNG, and WebP are allowed.');
+        return;
+      }
+
+      if (selected.size > 10 * 1024 * 1024) {
+        setUploadError(lang === 'ar' ? 'حجم الصورة يتجاوز الحد الأقصى 10 ميجابايت.' : 'Image exceeds maximum allowed size of 10MB.');
+        return;
+      }
+
+      setUploadError(null);
+      setImageFile(selected);
+      try {
+        const previewUrl = URL.createObjectURL(selected);
+        setImagePreview(previewUrl);
+      } catch {
+        // fallback
+      }
     }
   };
 
@@ -107,17 +119,16 @@ export const ProductForm: React.FC<{
     }
 
     setIsUploading(true);
+    setUploadError(null);
     
     try {
       let imageUrl = initialData?.image || '';
-      let datasheetUrl = initialData?.datasheetUrl || '';
+      // Preserve existing datasheet if product previously had one, without adding PDF upload UI
+      const datasheetUrl = initialData?.datasheetUrl || '';
 
       if (imageFile) {
-        imageUrl = await uploadFile(imageFile);
-      }
-      
-      if (pdfFile) {
-        datasheetUrl = await uploadFile(pdfFile);
+        const uploadResult = await uploadProductImageToDrive(imageFile, initialData?.id?.toString(), user?.uid);
+        imageUrl = uploadResult.imageUrl;
       }
 
       const newProduct: any = {
@@ -134,7 +145,7 @@ export const ProductForm: React.FC<{
         area: parseFloat(formData.area) || 0,
         status: formData.status as any,
         updatedAt: new Date().toLocaleDateString(),
-        supplierId: user?.uid || '',
+        supplierId: initialData?.supplierId || user?.uid || '',
         specs: {
           description: formData.description,
           type: formData.type,
@@ -154,7 +165,7 @@ export const ProductForm: React.FC<{
         },
         suppliers: [
           {
-            id: user?.uid || '',
+            id: user?.uid || initialData?.supplierId || '',
             name: user?.name || 'New Supplier',
             nameAr: user?.nameAr || 'مورد جديد',
             price: parseInt(formData.price) || 0,
@@ -166,9 +177,10 @@ export const ProductForm: React.FC<{
         ]
       };
       
-      onSave(newProduct);
-    } catch (error) {
+      await onSave(newProduct);
+    } catch (error: any) {
       console.error("Upload failed", error);
+      setUploadError(error.message || (lang === 'ar' ? 'حدث خطأ أثناء رفع صورة المنتج إلى Google Drive' : 'Failed to upload product image to Google Drive'));
     } finally {
       setIsUploading(false);
     }
@@ -505,41 +517,64 @@ export const ProductForm: React.FC<{
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="w-full">
+        <label className="text-[10px] font-black text-solar-muted uppercase ml-2 mb-2 block">
+          {lang === 'ar' ? 'صورة المنتج (Google Drive Storage)' : 'Product Image (Google Drive Storage)'}
+        </label>
         <div 
           onClick={handleImageClick}
-          className="border-2 border-dashed border-solar-border rounded-2xl p-6 flex flex-col items-center justify-center gap-3 hover:border-solar-blue transition cursor-pointer bg-solar-bg/30"
+          className="border-2 border-dashed border-solar-border rounded-2xl p-5 flex flex-col items-center justify-center gap-3 hover:border-solar-blue transition cursor-pointer bg-solar-bg/30 relative overflow-hidden group"
         >
           <input 
             type="file" 
             ref={imageInputRef} 
             onChange={handleImageChange} 
-            accept="image/*" 
+            accept="image/jpeg,image/jpg,image/png,image/webp" 
             className="hidden" 
           />
-          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-solar-border">
-            <ImageIcon size={24} className="text-solar-blue" />
-          </div>
-          <span className="text-xs font-bold text-solar-muted text-center max-w-[150px] truncate">{imageFile ? imageFile.name : t.dragImage}</span>
-        </div>
-
-        <div 
-          onClick={handlePdfClick}
-          className="border-2 border-dashed border-solar-border rounded-2xl p-6 flex flex-col items-center justify-center gap-3 hover:border-solar-blue transition cursor-pointer bg-solar-bg/30"
-        >
-          <input 
-            type="file" 
-            ref={pdfInputRef} 
-            onChange={handlePdfChange} 
-            accept=".pdf" 
-            className="hidden" 
-          />
-          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-solar-border">
-            <FileText size={24} className="text-solar-danger" />
-          </div>
-          <span className="text-xs font-bold text-solar-muted text-center max-w-[150px] truncate">{pdfFile ? pdfFile.name : t.downloadPDF}</span>
+          {imagePreview ? (
+            <div className="flex items-center gap-3 w-full max-w-sm">
+              <img 
+                src={imagePreview} 
+                alt="Product preview" 
+                className="w-16 h-16 object-cover rounded-xl border border-solar-border shadow-sm shrink-0" 
+              />
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-xs font-bold text-solar-text truncate">
+                  {imageFile ? imageFile.name : (lang === 'ar' ? 'صورة المنتج الحالية' : 'Current Product Image')}
+                </p>
+                <p className="text-[10px] text-solar-blue font-semibold mt-0.5">
+                  {lang === 'ar' ? 'اضغط لتغيير الصورة' : 'Click to change image'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-solar-border group-hover:scale-105 transition-transform">
+                <ImageIcon size={24} className="text-solar-blue" />
+              </div>
+              <span className="text-xs font-bold text-solar-muted text-center max-w-[250px] truncate">
+                {t.dragImage}
+              </span>
+            </>
+          )}
+          <span className="text-[10px] text-solar-muted/70">
+            {lang === 'ar' ? 'الصور المدعومة: JPG, PNG, WebP (بحد أقصى 10MB)' : 'Supported: JPG, PNG, WebP (Max 10MB)'}
+          </span>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-xl text-red-600 dark:text-red-400 text-xs flex items-start gap-2.5">
+          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-bold">{uploadError}</p>
+            <p className="text-[10px] opacity-80 mt-1">
+              {lang === 'ar' ? 'يمكنك إعادة المحاولة أو الضغط على حفظ مرة أخرى.' : 'You can try again or click submit once more.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-4 pt-4">
         <button 

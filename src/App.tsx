@@ -87,17 +87,14 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    // Attempt seeding and setup real-time listeners
-    if (user) {
-      seedInitialData();
-    }
+    // Setup real-time listeners for products and suppliers
     const unsubProducts = subscribeToProducts(setProducts);
     const unsubSuppliers = subscribeToSuppliers(setSuppliers);
     return () => {
       unsubProducts();
       unsubSuppliers();
     };
-  }, [user]);
+  }, []);
 
   // Handle Semantic Search Debounce
   useEffect(() => {
@@ -210,9 +207,11 @@ export default function App() {
       } else {
         await addProduct(productData);
       }
-      setView('supplier-dashboard');
+      setView(user?.type === 'supplier' ? 'supplier-dashboard' : 'home');
     } catch (err) {
       console.error("Action error:", err);
+      alert(isAr ? 'حدث خطأ أثناء حفظ المنتج في قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to save product in database. Please try again.');
+      throw err;
     }
   };
 
