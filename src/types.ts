@@ -26,6 +26,8 @@ export interface Supplier {
   profileImage?: string;
 }
 
+export type DimensionUnit = 'mm' | 'cm' | 'm';
+
 export interface Product {
   id: string | number;
   name: string;
@@ -34,6 +36,10 @@ export interface Product {
   category: Category;
   power: number;
   area: number;
+  length?: number;
+  width?: number;
+  thickness?: number;
+  dimensionUnit?: DimensionUnit;
   efficiency: number;
   warranty: number;
   price: number;

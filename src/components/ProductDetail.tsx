@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare } from 'lucide-react';
-import { Product, ProductReview } from '../types';
+import { Product, ProductReview, Supplier } from '../types';
 import { translations } from '../translations';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductCard } from './ProductCard';
 import { useAuth } from '../context/AuthContext';
-import { subscribeToProductReviews, addProductReview, deleteProductReview } from '../services/firestoreService';
+import { subscribeToProductReviews, addProductReview, deleteProductReview, getSupplierProfile } from '../services/firestoreService';
 import { auth } from '../lib/firebase';
 import { getSupplierWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
+import { formatDateOnly } from '../utils/dateUtils';
+import { getSupplierDisplayName, getSupplierAvatarInitial, isRawUidOrId } from '../utils/supplierUtils';
 
 interface ProductDetailProps {
   product: Product;
   allProducts: Product[];
+  suppliers?: Supplier[];
   lang: 'ar' | 'en';
   onBack: () => void;
   onCompare: (product: Product) => void;
@@ -26,6 +29,7 @@ interface ProductDetailProps {
 export const ProductDetail: React.FC<ProductDetailProps> = ({ 
   product, 
   allProducts, 
+  suppliers,
   lang, 
   onBack, 
   onCompare, 
@@ -54,6 +58,21 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [fetchedProfiles, setFetchedProfiles] = useState<Record<string, Supplier>>({});
+
+  // Asynchronously resolve supplier profile if missing or holding raw UID
+  useEffect(() => {
+    product.suppliers?.forEach(s => {
+      const supId = s.id || product.supplierId;
+      if (supId && (isRawUidOrId(s.name) || isRawUidOrId(s.nameAr) || !s.name || !s.nameAr)) {
+        getSupplierProfile(supId).then(profile => {
+          if (profile) {
+            setFetchedProfiles(prev => ({ ...prev, [supId]: profile }));
+          }
+        });
+      }
+    });
+  }, [product.suppliers, product.supplierId]);
 
   useEffect(() => {
     const unsub = subscribeToProductReviews(product.id.toString(), setReviews);
@@ -113,13 +132,26 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     ];
 
     switch (product.category) {
-      case 'panels':
+      case 'panels': {
+        const hasDims = (product.length && product.width) || (product.specs?.length && product.specs?.width && !isNaN(Number(product.specs.length)) && !isNaN(Number(product.specs.width)));
+        const pLen = product.length || product.specs?.length;
+        const pWidth = product.width || product.specs?.width;
+        const pThick = product.thickness || product.specs?.thickness;
+        const pUnit = product.dimensionUnit || product.specs?.dimensionUnit || 'mm';
+
         return [
           { label: t.power, value: `${product.power} ${t.watt}`, icon: <Power className="text-solar-blue" /> },
           { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap className="text-solar-warning" /> },
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> },
-          { label: t.area, value: `${product.area} m²`, icon: <Ruler className="text-solar-accent" /> }
+          { 
+            label: hasDims ? (isAr ? 'الأبعاد والمساحة' : 'Dimensions & Area') : t.area, 
+            value: hasDims 
+              ? `${pLen}×${pWidth}${pThick ? `×${pThick}` : ''} ${pUnit} (${product.area} m²)` 
+              : `${product.area} m²`, 
+            icon: <Ruler className="text-solar-accent" /> 
+          }
         ];
+      }
       case 'inverters':
         return [
           { label: t.powerKw, value: product.specs.powerKw || 'N/A', icon: <Power className="text-solar-blue" /> },
@@ -158,6 +190,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       powerKw: t.powerKw,
       crossSection: t.crossSection,
       length: t.length,
+      width: t.width,
+      thickness: t.thickness,
+      dimensionUnit: t.dimensionUnit,
+      area: t.area,
       material: t.material,
       maxWind: t.maxWind,
       ipRating: t.ipRating,
@@ -345,54 +381,65 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           <div className="bg-white/50 backdrop-blur-sm rounded-2xl sm:rounded-[32px] md:rounded-[40px] p-4 sm:p-6 md:p-8 border-2 border-white shadow-sm w-full max-w-full box-border min-w-0">
             <h4 className="text-xs sm:text-sm font-black text-solar-muted uppercase tracking-widest mb-4 sm:mb-6">{t.supplier}</h4>
             <div className="space-y-3 sm:space-y-4 w-full max-w-full box-border min-w-0">
-              {product.suppliers.map((s, i) => (
-                <div 
-                  key={i} 
-                  onClick={() => onFilterSupplier(s.id)}
-                  className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[32px] border border-solar-border hover:border-solar-blue transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-solar-blue/10 w-full max-w-full box-border min-w-0 overflow-hidden"
-                >
-                  <div className="flex justify-between items-center mb-3 sm:mb-4 gap-2 min-w-0">
-                    <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-solar-blue overflow-hidden shrink-0 shadow-sm">
-                        {s.profileImage || s.avatar ? (
-                          <img 
-                            src={s.profileImage || s.avatar} 
-                            alt={s.name} 
-                            className="w-full h-full rounded-full object-cover" 
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <span className="text-xs sm:text-sm font-black text-solar-blue">
-                            {(isAr ? s.nameAr || s.name : s.name)?.charAt(0)?.toUpperCase() || 'S'}
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-black text-solar-text group-hover:text-solar-blue transition truncate text-sm sm:text-base">{isAr ? s.nameAr : s.name}</div>
-                        <div className="text-[10px] font-bold text-solar-muted flex items-center gap-1 truncate">
-                          <MapPin size={10} className="shrink-0" />
-                          <span className="truncate">{s.location}</span>
+              {product.suppliers.map((s, i) => {
+                const supId = s.id || product.supplierId;
+                const matchedSup = suppliers?.find(sup => sup.id === supId) || (supId ? fetchedProfiles[supId] : null);
+                const effectiveSupplier = matchedSup ? { ...s, ...matchedSup } : s;
+                const displayName = getSupplierDisplayName(effectiveSupplier, isAr);
+                const avatarInitial = getSupplierAvatarInitial(effectiveSupplier, isAr);
+                const displayLocation = effectiveSupplier.location || s.location || (isAr ? 'القاهرة، مصر' : 'Cairo, Egypt');
+
+                return (
+                  <div 
+                    key={i} 
+                    onClick={() => onFilterSupplier(supId)}
+                    className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[32px] border border-solar-border hover:border-solar-blue transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-solar-blue/10 w-full max-w-full box-border min-w-0 overflow-hidden"
+                  >
+                    <div className="flex justify-between items-center mb-3 sm:mb-4 gap-2 min-w-0">
+                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+                        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-solar-blue overflow-hidden shrink-0 shadow-sm">
+                          {effectiveSupplier.profileImage || effectiveSupplier.avatar || s.profileImage || s.avatar ? (
+                            <img 
+                              src={effectiveSupplier.profileImage || effectiveSupplier.avatar || s.profileImage || s.avatar} 
+                              alt={displayName} 
+                              className="w-full h-full rounded-full object-cover" 
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-xs sm:text-sm font-black text-solar-blue">
+                              {avatarInitial}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-black text-solar-text group-hover:text-solar-blue transition truncate text-sm sm:text-base">
+                            {displayName}
+                          </div>
+                          <div className="text-[10px] font-bold text-solar-muted flex items-center gap-1 truncate">
+                            <MapPin size={10} className="shrink-0" />
+                            <span className="truncate">{displayLocation}</span>
+                          </div>
                         </div>
                       </div>
+                      {(effectiveSupplier.verified ?? s.verified) && (
+                        <div className="flex items-center gap-1 text-solar-success bg-solar-success/10 px-2 py-1 rounded-lg text-[10px] font-black uppercase shrink-0">
+                          <CheckCircle2 size={12} />
+                          <span>{t.verified}</span>
+                        </div>
+                      )}
                     </div>
-                    {s.verified && (
-                      <div className="flex items-center gap-1 text-solar-success bg-solar-success/10 px-2 py-1 rounded-lg text-[10px] font-black uppercase shrink-0">
-                        <CheckCircle2 size={12} />
-                        <span>{t.verified}</span>
+                    <div className="flex items-center justify-between pt-3 sm:pt-4 border-t border-solar-border/50 gap-2">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[10px] font-black text-solar-muted uppercase tracking-widest leading-none mb-1">{t.price}</span>
+                        <span className="text-xl sm:text-2xl font-black text-solar-blue truncate">{s.price.toLocaleString()} <span className="text-xs">{t.egp}</span></span>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between pt-3 sm:pt-4 border-t border-solar-border/50 gap-2">
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[10px] font-black text-solar-muted uppercase tracking-widest leading-none mb-1">{t.price}</span>
-                      <span className="text-xl sm:text-2xl font-black text-solar-blue truncate">{s.price.toLocaleString()} <span className="text-xs">{t.egp}</span></span>
-                    </div>
-                    <div className="text-[10px] font-bold text-solar-muted text-right shrink-0">
-                      {t.lastUpdate}: {s.lastUpdate}
+                      <div className="text-[10px] font-bold text-solar-muted text-right shrink-0">
+                        {t.lastUpdate}: {formatDateOnly(s.lastUpdate)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-10 w-full max-w-full box-border min-w-0">

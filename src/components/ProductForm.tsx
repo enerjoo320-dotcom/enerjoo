@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2, Ruler, Maximize2, Calculator } from 'lucide-react';
 import { translations } from '../translations';
 import { uploadProductImage } from '../services/uploadService';
 import { autoCompressImage, formatFileSize, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
+import { isRawUidOrId } from '../utils/supplierUtils';
 
 export const ProductForm: React.FC<{ 
   lang: 'ar' | 'en'; 
@@ -14,6 +15,7 @@ export const ProductForm: React.FC<{
   initialData?: Product | null;
 }> = ({ lang, onSave, onCancel, initialData }) => {
   const t = translations[lang];
+  const isAr = lang === 'ar';
   const { user } = useAuth();
   const imageInputRef = useRef<HTMLInputElement>(null);
   
@@ -33,7 +35,6 @@ export const ProductForm: React.FC<{
     voltage: initialData?.specs?.voltage || '',
     current: initialData?.specs?.current || '',
     weight: initialData?.specs?.weight || '',
-    area: initialData?.area?.toString() || '',
     capacity: initialData?.specs?.capacity || '',
     crossSection: initialData?.specs?.crossSection || '',
     length: initialData?.specs?.length || '',
@@ -44,13 +45,20 @@ export const ProductForm: React.FC<{
     quantity: initialData?.specs?.quantity || '',
     color: initialData?.specs?.color || '',
     status: initialData?.status || 'available',
+
+    // Product Dimensions & Area
+    dimLength: initialData?.length !== undefined && initialData?.length !== null ? initialData.length.toString() : (initialData?.specs?.length && initialData?.category !== 'cables' ? initialData.specs.length.toString() : ''),
+    dimWidth: initialData?.width !== undefined && initialData?.width !== null ? initialData.width.toString() : (initialData?.specs?.width ? initialData.specs.width.toString() : ''),
+    dimThickness: initialData?.thickness !== undefined && initialData?.thickness !== null ? initialData.thickness.toString() : (initialData?.specs?.thickness ? initialData.specs.thickness.toString() : ''),
+    dimensionUnit: ((initialData?.dimensionUnit || initialData?.specs?.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm'),
+    area: initialData?.area !== undefined && initialData?.area !== null ? initialData.area.toString() : '',
   });
 
   const getFieldsForCategory = (cat: string) => {
     const common = ['price', 'warranty'];
     switch (cat) {
       case 'panels':
-        return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'area', 'weight'];
+        return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'weight'];
       case 'inverters':
         return [...common, 'powerKw', 'efficiency', 'type', 'voltage', 'current', 'weight'];
       case 'batteries':
@@ -73,6 +81,36 @@ export const ProductForm: React.FC<{
   };
 
   const fields = getFieldsForCategory(formData.category);
+
+  // Real-time calculation of area based on length, width, and unit
+  const lengthNum = parseFloat(formData.dimLength);
+  const widthNum = parseFloat(formData.dimWidth);
+  const hasDimensions = !isNaN(lengthNum) && !isNaN(widthNum) && lengthNum > 0 && widthNum > 0;
+
+  let calculatedAreaInM2 = 0;
+  let conversionText = '';
+
+  if (hasDimensions) {
+    let factor = 1;
+    if (formData.dimensionUnit === 'mm') factor = 0.001;
+    else if (formData.dimensionUnit === 'cm') factor = 0.01;
+
+    const lengthInM = lengthNum * factor;
+    const widthInM = widthNum * factor;
+    const rawArea = lengthInM * widthInM;
+    calculatedAreaInM2 = Math.round(rawArea * 1000) / 1000;
+
+    // e.g., 2384 mm × 1303 mm => 2.384 × 1.303 = 3.106 m²
+    if (formData.dimensionUnit === 'mm' || formData.dimensionUnit === 'cm') {
+      conversionText = `${lengthInM} × ${widthInM} = ${calculatedAreaInM2} m²`;
+    } else {
+      conversionText = `${lengthNum} × ${widthNum} = ${calculatedAreaInM2} m²`;
+    }
+  }
+
+  // Fallback to preserved area for existing products if dimensions are not specified
+  const currentSavedAreaNum = parseFloat(formData.area) || 0;
+  const effectiveArea = hasDimensions ? calculatedAreaInM2 : currentSavedAreaNum;
 
   // Main product image state
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -249,6 +287,15 @@ export const ProductForm: React.FC<{
         }
       }
 
+      const lengthVal = formData.dimLength && !isNaN(parseFloat(formData.dimLength)) ? parseFloat(formData.dimLength) : undefined;
+      const widthVal = formData.dimWidth && !isNaN(parseFloat(formData.dimWidth)) ? parseFloat(formData.dimWidth) : undefined;
+      const thicknessVal = formData.dimThickness && !isNaN(parseFloat(formData.dimThickness)) ? parseFloat(formData.dimThickness) : undefined;
+      const dimensionUnitVal = formData.dimensionUnit;
+
+      const finalArea = calculatedAreaInM2 > 0 
+        ? calculatedAreaInM2 
+        : (formData.area ? parseFloat(formData.area) || 0 : 0);
+
       const newProduct: any = {
         name: formData.name,
         nameAr: formData.name,
@@ -262,9 +309,13 @@ export const ProductForm: React.FC<{
         image_url: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
         additionalImages: finalAdditionalUrls,
         datasheetUrl: datasheetUrl,
-        area: parseFloat(formData.area) || 0,
+        length: lengthVal,
+        width: widthVal,
+        thickness: thicknessVal,
+        dimensionUnit: dimensionUnitVal,
+        area: finalArea,
         status: formData.status as any,
-        updatedAt: new Date().toLocaleDateString(),
+        updatedAt: new Date().toISOString().split('T')[0],
         supplierId: initialData?.supplierId || user?.uid || '',
         specs: {
           description: formData.description,
@@ -275,7 +326,12 @@ export const ProductForm: React.FC<{
           capacity: formData.capacity,
           powerKw: formData.powerKw,
           crossSection: formData.crossSection,
-          length: formData.length,
+          cableLength: formData.category === 'cables' ? formData.length : undefined,
+          length: lengthVal !== undefined ? lengthVal : (formData.category === 'cables' ? formData.length : undefined),
+          width: widthVal,
+          thickness: thicknessVal,
+          dimensionUnit: dimensionUnitVal,
+          area: finalArea,
           material: formData.material,
           maxWind: formData.maxWind,
           ipRating: formData.ipRating,
@@ -286,13 +342,21 @@ export const ProductForm: React.FC<{
         suppliers: [
           {
             id: user?.uid || initialData?.supplierId || '',
-            name: user?.name || 'New Supplier',
-            nameAr: user?.nameAr || 'مورد جديد',
+            name: (!isRawUidOrId(user?.company) && user?.company) ||
+                  (!isRawUidOrId(user?.name) && user?.name) ||
+                  (initialData?.suppliers?.[0]?.name && !isRawUidOrId(initialData.suppliers[0].name) ? initialData.suppliers[0].name : '') ||
+                  'Enerjoo Certified Supplier',
+            nameAr: (!isRawUidOrId(user?.companyAr) && user?.companyAr) ||
+                    (!isRawUidOrId(user?.company) && user?.company) ||
+                    (!isRawUidOrId(user?.nameAr) && user?.nameAr) ||
+                    (!isRawUidOrId(user?.name) && user?.name) ||
+                    (initialData?.suppliers?.[0]?.nameAr && !isRawUidOrId(initialData.suppliers[0].nameAr) ? initialData.suppliers[0].nameAr : '') ||
+                    'مورد معتمد',
             price: parseInt(formData.price) || 0,
             phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
             location: user?.location || 'Cairo, Egypt',
             verified: user?.verified || false,
-            lastUpdate: new Date().toLocaleDateString()
+            lastUpdate: new Date().toISOString().split('T')[0]
           }
         ]
       };
@@ -616,20 +680,166 @@ export const ProductForm: React.FC<{
             />
           </div>
         )}
-        {fields.includes('area') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.area}</label>
+        {/* Note: standalone manual area is removed in favor of the dedicated dimensions & auto-calculated area section below */}
+      </div>
+
+      {/* Product Dimensions & Auto-Calculated Area Section */}
+      <div className="bg-solar-card border border-solar-border rounded-2xl sm:rounded-3xl p-4 sm:p-6 space-y-4 shadow-2xs text-left">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-solar-border/60 pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-solar-blue/10 text-solar-blue flex items-center justify-center shrink-0">
+              <Ruler size={18} />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-solar-text flex items-center gap-2">
+                <span>{isAr ? 'أبعاد ومساحة المنتج' : 'Product Dimensions & Area'}</span>
+                <span className="text-[10px] font-bold text-solar-muted bg-solar-bg px-2 py-0.5 rounded-md border border-solar-border">
+                  {isAr ? 'اختياري' : 'Optional'}
+                </span>
+              </h3>
+              <p className="text-[11px] text-solar-muted font-bold">
+                {isAr 
+                  ? 'أدخل الطول والعرض ليتم حساب مساحة المنتج بالمتر المربع (m²) تلقائياً' 
+                  : 'Enter length and width to auto-calculate area in square meters (m²)'}
+              </p>
+            </div>
+          </div>
+
+          {/* Unit Selector: mm / cm / m */}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="text-[11px] font-black text-solar-muted uppercase">{isAr ? 'وحدة القياس:' : 'Unit:'}</span>
+            <div className="flex bg-solar-bg border border-solar-border rounded-xl p-1 shadow-2xs">
+              {(['mm', 'cm', 'm'] as const).map((unit) => (
+                <button
+                  key={unit}
+                  type="button"
+                  onClick={() => setFormData(p => ({ ...p, dimensionUnit: unit }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                    formData.dimensionUnit === unit 
+                      ? 'bg-solar-blue text-white shadow-xs' 
+                      : 'text-solar-muted hover:text-solar-text'
+                  }`}
+                >
+                  {unit}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 3 Dimensions inputs: Length, Width, Thickness (optional) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          {/* Length */}
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center justify-between">
+              <span>{isAr ? 'الطول (Length)' : 'Length'}</span>
+              <span className="text-solar-blue font-black text-[10px]">{formData.dimensionUnit}</span>
+            </label>
             <input 
               type="number" 
-              step="0.01"
-              value={formData.area}
-              onChange={e => setFormData(p => ({...p, area: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="2.1"
-              required
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={formData.dimLength}
+              onChange={e => setFormData(p => ({ ...p, dimLength: e.target.value }))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-2.5 min-h-[44px] text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={formData.dimensionUnit === 'mm' ? '2384' : formData.dimensionUnit === 'cm' ? '238.4' : '2.384'}
             />
           </div>
-        )}
+
+          {/* Width */}
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center justify-between">
+              <span>{isAr ? 'العرض (Width)' : 'Width'}</span>
+              <span className="text-solar-blue font-black text-[10px]">{formData.dimensionUnit}</span>
+            </label>
+            <input 
+              type="number" 
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={formData.dimWidth}
+              onChange={e => setFormData(p => ({ ...p, dimWidth: e.target.value }))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-2.5 min-h-[44px] text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={formData.dimensionUnit === 'mm' ? '1303' : formData.dimensionUnit === 'cm' ? '130.3' : '1.303'}
+            />
+          </div>
+
+          {/* Thickness (Optional) */}
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center justify-between">
+              <span>{isAr ? 'السمك (Thickness)' : 'Thickness'}</span>
+              <span className="text-solar-muted font-bold text-[10px]">({isAr ? 'اختياري' : 'Optional'})</span>
+            </label>
+            <input 
+              type="number" 
+              inputMode="decimal"
+              step="any"
+              min="0"
+              value={formData.dimThickness}
+              onChange={e => setFormData(p => ({ ...p, dimThickness: e.target.value }))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-2.5 min-h-[44px] text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={formData.dimensionUnit === 'mm' ? '35' : formData.dimensionUnit === 'cm' ? '3.5' : '0.035'}
+            />
+          </div>
+        </div>
+
+        {/* Read-Only Auto-Calculated Area */}
+        <div className="p-3.5 sm:p-4 rounded-xl bg-solar-bg border border-solar-border/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-black text-solar-muted uppercase">
+                {isAr ? 'المساحة المحسوبة (Read-only):' : 'Calculated Area (Read-only):'}
+              </span>
+              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-solar-card border border-solar-border text-solar-muted">
+                m²
+              </span>
+            </div>
+            
+            <div className="text-base sm:text-lg font-black text-solar-blue flex items-center gap-2">
+              <Calculator size={18} className="text-solar-blue shrink-0" />
+              <span>
+                {hasDimensions ? (
+                  <>
+                    {isAr ? 'المساحة المحسوبة:' : 'Calculated Area:'} <span className="underline decoration-solar-blue/40 underline-offset-4">{calculatedAreaInM2} m²</span>
+                  </>
+                ) : effectiveArea > 0 ? (
+                  <>
+                    {isAr ? 'المساحة المسجلة:' : 'Current Saved Area:'} <span>{effectiveArea} m²</span>
+                  </>
+                ) : (
+                  <span className="text-solar-muted text-xs font-bold">
+                    {isAr ? 'أدخل الطول والعرض بالأعلى لحساب المساحة تلقائياً' : 'Enter length and width above to calculate area'}
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {hasDimensions && conversionText && (
+              <p className="text-[11px] font-bold text-solar-muted pt-1">
+                {isAr ? `التحويل بالمتر: ${conversionText}` : `Metric calculation: ${conversionText}`}
+              </p>
+            )}
+            {!hasDimensions && currentSavedAreaNum > 0 && (
+              <p className="text-[11px] font-bold text-solar-muted pt-1">
+                {isAr ? `هذا المنتج مسجل بمساحة ${currentSavedAreaNum} م² (يمكنك إدخال الطول والعرض لتحديثها تلقائياً)` : `This product has a saved area of ${currentSavedAreaNum} m² (enter length & width to update)`}
+              </p>
+            )}
+          </div>
+
+          <div className="shrink-0 self-start sm:self-center">
+            {/* Read-only input display */}
+            <input 
+              type="text" 
+              readOnly 
+              value={effectiveArea > 0 ? `${effectiveArea} m²` : ''} 
+              placeholder="0.000 m²"
+              className="bg-solar-card border border-solar-border/80 text-solar-blue font-black text-sm px-3 py-2 rounded-xl text-center w-28 cursor-not-allowed select-all"
+              tabIndex={-1}
+              aria-label={isAr ? 'المساحة المحسوبة' : 'Calculated Area'}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="space-y-2 text-left">

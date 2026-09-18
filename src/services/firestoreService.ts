@@ -16,12 +16,17 @@ import {
 import { db, auth } from '../lib/firebase';
 import { Product, Supplier, Category, ProductReview, SolarRequest, SolarRequestStatus, Customer, Quotation, QuotationStatus } from '../types';
 import { normalizeEgyptianPhone } from '../utils/phoneUtils';
+import { formatDateOnly } from '../utils/dateUtils';
+import { isRawUidOrId } from '../utils/supplierUtils';
 
 const PRODUCTS_COLLECTION = 'products';
 const USERS_COLLECTION = 'users';
 const SOLAR_REQUESTS_COLLECTION = 'solarRequests';
 const CUSTOMERS_COLLECTION = 'customers';
 const QUOTATIONS_COLLECTION = 'quotations';
+
+// In-memory cache of verified supplier profiles to enrich products
+const supplierProfileCache = new Map<string, Supplier>();
 
 enum OperationType {
   CREATE = 'create',
@@ -209,25 +214,6 @@ function mapD1ProductToProduct(d1Item: any): Product {
   const price = Number(d1Item.price_egp ?? d1Item.price ?? 0);
   const efficiency = Number(d1Item.efficiency_percent ?? d1Item.efficiency ?? 0);
   const warranty = Number(d1Item.warranty_years ?? d1Item.warranty ?? 0);
-  const area = Number(d1Item.area ?? 0);
-  const image = d1Item.image_url || d1Item.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop';
-  const supplierId = d1Item.supplier_id || d1Item.supplierId || d1Item.supplier || '';
-  const updatedAt = d1Item.updated_at || d1Item.updatedAt || new Date().toLocaleDateString();
-  const datasheetUrl = d1Item.datasheet_url || d1Item.datasheetUrl;
-
-  let status: 'available' | 'limited' | 'out_of_stock' = 'available';
-  if (d1Item.availability) {
-    const av = String(d1Item.availability).toLowerCase();
-    if (av.includes('out') || av === 'out_of_stock') {
-      status = 'out_of_stock';
-    } else if (av.includes('limit') || av === 'limited') {
-      status = 'limited';
-    } else {
-      status = 'available';
-    }
-  } else if (d1Item.status) {
-    status = d1Item.status;
-  }
 
   // Parse specs if stored as string or object
   let specs: Record<string, any> = {};
@@ -270,27 +256,113 @@ function mapD1ProductToProduct(d1Item: any): Product {
     };
   }
 
+  const area = Number(d1Item.area ?? specs.area ?? 0);
+  const length = d1Item.length !== undefined && d1Item.length !== null && d1Item.length !== ''
+    ? Number(d1Item.length)
+    : (specs.length !== undefined && specs.length !== null && specs.length !== '' && !isNaN(Number(specs.length)) ? Number(specs.length) : undefined);
+  const width = d1Item.width !== undefined && d1Item.width !== null && d1Item.width !== ''
+    ? Number(d1Item.width)
+    : (specs.width !== undefined && specs.width !== null && specs.width !== '' && !isNaN(Number(specs.width)) ? Number(specs.width) : undefined);
+  const thickness = d1Item.thickness !== undefined && d1Item.thickness !== null && d1Item.thickness !== ''
+    ? Number(d1Item.thickness)
+    : (specs.thickness !== undefined && specs.thickness !== null && specs.thickness !== '' && !isNaN(Number(specs.thickness)) ? Number(specs.thickness) : undefined);
+  const dimensionUnit = d1Item.dimensionUnit || specs.dimensionUnit || (specs.dimensionsMm ? 'mm' : undefined);
+  const image = d1Item.image_url || d1Item.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop';
+  const supplierId = d1Item.supplier_id || d1Item.supplierId || d1Item.supplier || '';
+  const rawUpdatedAt = d1Item.updated_at || d1Item.updatedAt || new Date().toISOString().split('T')[0];
+  const updatedAt = formatDateOnly(rawUpdatedAt);
+  const datasheetUrl = d1Item.datasheet_url || d1Item.datasheetUrl;
+
+  let status: 'available' | 'limited' | 'out_of_stock' = 'available';
+  if (d1Item.availability) {
+    const av = String(d1Item.availability).toLowerCase();
+    if (av.includes('out') || av === 'out_of_stock') {
+      status = 'out_of_stock';
+    } else if (av.includes('limit') || av === 'limited') {
+      status = 'limited';
+    } else {
+      status = 'available';
+    }
+  } else if (d1Item.status) {
+    status = d1Item.status;
+  }
+
   // Parse suppliers list
   let suppliers: Supplier[] = [];
+  const cachedSup = supplierId ? supplierProfileCache.get(supplierId) : null;
+
   if (Array.isArray(d1Item.suppliers)) {
-    suppliers = d1Item.suppliers;
+    suppliers = d1Item.suppliers.map((s: any) => {
+      const sId = s.id || supplierId;
+      const sCached = sId ? supplierProfileCache.get(sId) : null;
+      const validName = (!isRawUidOrId(s.company) && s.company) ||
+                        (!isRawUidOrId(s.name) && s.name) ||
+                        sCached?.name ||
+                        (d1Item.supplier_name && !isRawUidOrId(d1Item.supplier_name) ? d1Item.supplier_name : '') ||
+                        'Enerjoo Certified Supplier';
+      const validNameAr = (!isRawUidOrId(s.companyAr) && s.companyAr) ||
+                          (!isRawUidOrId(s.company) && s.company) ||
+                          (!isRawUidOrId(s.nameAr) && s.nameAr) ||
+                          (!isRawUidOrId(s.name) && s.name) ||
+                          sCached?.nameAr ||
+                          sCached?.name ||
+                          (d1Item.supplier_name_ar && !isRawUidOrId(d1Item.supplier_name_ar) ? d1Item.supplier_name_ar : '') ||
+                          'مورد معتمد';
+      return {
+        ...s,
+        id: sId,
+        name: validName,
+        nameAr: validNameAr,
+        lastUpdate: formatDateOnly(s.lastUpdate || updatedAt),
+      };
+    });
   } else if (typeof d1Item.suppliers === 'string') {
     try {
-      suppliers = JSON.parse(d1Item.suppliers);
+      const parsed = JSON.parse(d1Item.suppliers);
+      if (Array.isArray(parsed)) {
+        suppliers = parsed.map((s: any) => {
+          const sId = s.id || supplierId;
+          const sCached = sId ? supplierProfileCache.get(sId) : null;
+          const validName = (!isRawUidOrId(s.company) && s.company) ||
+                            (!isRawUidOrId(s.name) && s.name) ||
+                            sCached?.name ||
+                            (d1Item.supplier_name && !isRawUidOrId(d1Item.supplier_name) ? d1Item.supplier_name : '') ||
+                            'Enerjoo Certified Supplier';
+          const validNameAr = (!isRawUidOrId(s.companyAr) && s.companyAr) ||
+                              (!isRawUidOrId(s.company) && s.company) ||
+                              (!isRawUidOrId(s.nameAr) && s.nameAr) ||
+                              (!isRawUidOrId(s.name) && s.name) ||
+                              sCached?.nameAr ||
+                              sCached?.name ||
+                              (d1Item.supplier_name_ar && !isRawUidOrId(d1Item.supplier_name_ar) ? d1Item.supplier_name_ar : '') ||
+                              'مورد معتمد';
+          return {
+            ...s,
+            id: sId,
+            name: validName,
+            nameAr: validNameAr,
+            lastUpdate: formatDateOnly(s.lastUpdate || updatedAt),
+          };
+        });
+      }
     } catch {
       suppliers = [];
     }
   }
+
   if (suppliers.length === 0 && (d1Item.supplier || supplierId)) {
+    const rawSupName = d1Item.supplier_name && !isRawUidOrId(d1Item.supplier_name) ? d1Item.supplier_name : '';
+    const rawSupNameAr = d1Item.supplier_name_ar && !isRawUidOrId(d1Item.supplier_name_ar) ? d1Item.supplier_name_ar : '';
+
     suppliers = [
       {
         id: supplierId,
-        name: d1Item.supplier_name || d1Item.supplier || 'Enerjoo Supplier',
-        nameAr: d1Item.supplier_name_ar || d1Item.supplier || 'مورد إينرجو',
+        name: rawSupName || cachedSup?.name || 'Enerjoo Certified Supplier',
+        nameAr: rawSupNameAr || cachedSup?.nameAr || cachedSup?.name || 'مورد معتمد',
         price: price,
-        phone: d1Item.supplier_phone || '01000000000',
-        location: d1Item.supplier_location || 'Cairo, Egypt',
-        verified: true,
+        phone: d1Item.supplier_phone || cachedSup?.phone || '01000000000',
+        location: d1Item.supplier_location || cachedSup?.location || 'Cairo, Egypt',
+        verified: cachedSup?.verified ?? true,
         lastUpdate: updatedAt
       }
     ];
@@ -304,6 +376,10 @@ function mapD1ProductToProduct(d1Item: any): Product {
     category,
     power,
     area,
+    length,
+    width,
+    thickness,
+    dimensionUnit,
     efficiency,
     warranty,
     price,
@@ -336,11 +412,31 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
   if (product.price !== undefined) payload.price_egp = Number(product.price);
   if (product.efficiency !== undefined) payload.efficiency_percent = Number(product.efficiency);
   if (product.warranty !== undefined) payload.warranty_years = Number(product.warranty);
+  if (product.area !== undefined) payload.area = Number(product.area);
+  if (product.length !== undefined) payload.length = Number(product.length);
+  if (product.width !== undefined) payload.width = Number(product.width);
+  if (product.thickness !== undefined) payload.thickness = Number(product.thickness);
+  if (product.dimensionUnit !== undefined) payload.dimensionUnit = product.dimensionUnit;
   if (product.image) payload.image_url = product.image;
   if ((product as any).image_url) payload.image_url = (product as any).image_url;
   if (product.supplierId !== undefined) {
     payload.supplier_id = String(product.supplierId);
     payload.supplier = String(product.supplierId);
+  }
+  const primarySupplier = product.suppliers?.[0];
+  if (primarySupplier) {
+    if (primarySupplier.name && !isRawUidOrId(primarySupplier.name)) {
+      payload.supplier_name = primarySupplier.name;
+    }
+    if (primarySupplier.nameAr && !isRawUidOrId(primarySupplier.nameAr)) {
+      payload.supplier_name_ar = primarySupplier.nameAr;
+    }
+    if (primarySupplier.location) {
+      payload.supplier_location = primarySupplier.location;
+    }
+    if (primarySupplier.phone) {
+      payload.supplier_phone = primarySupplier.phone;
+    }
   }
   if (product.datasheetUrl !== undefined) payload.datasheet_url = product.datasheetUrl;
   if (product.status) {
@@ -512,11 +608,19 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
       .map(doc => {
         const data = doc.data();
         const imgUrl = data.profileImage || data.avatar || '';
-        return {
+        const cleanName = (!isRawUidOrId(data.company) && data.company) ||
+                          (!isRawUidOrId(data.name) && data.name) ||
+                          'Enerjoo Certified Supplier';
+        const cleanNameAr = (!isRawUidOrId(data.companyAr) && data.companyAr) ||
+                            (!isRawUidOrId(data.company) && data.company) ||
+                            (!isRawUidOrId(data.nameAr) && data.nameAr) ||
+                            (!isRawUidOrId(data.name) && data.name) ||
+                            'مورد معتمد';
+        const sup: Supplier = {
           id: doc.id,
-          name: data.name || '',
-          nameAr: data.nameAr || '',
-          location: data.location || '',
+          name: cleanName,
+          nameAr: cleanNameAr,
+          location: data.location || data.governorate || 'Cairo, Egypt',
           phone: data.phone || '',
           verified: data.verified || false,
           rejected: data.rejected || false,
@@ -525,15 +629,65 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
           profileImage: imgUrl,
           rating: data.rating || 0,
           totalSales: data.totalSales || 0,
-          lastUpdate: data.updatedAt || '',
+          lastUpdate: formatDateOnly(data.updatedAt),
           price: data.price || 0,
         };
+        supplierProfileCache.set(doc.id, sup);
+        return sup;
       });
     callback(suppliers);
   }, (error) => {
     console.error('Firestore Suppliers Error:', error);
     callback([]);
   });
+};
+
+/**
+ * Fetches a supplier/user profile by UID, prioritizing the memory cache
+ * and falling back to Firestore users collection.
+ */
+export const getSupplierProfile = async (uid: string): Promise<Supplier | null> => {
+  if (!uid) return null;
+  if (supplierProfileCache.has(uid)) {
+    return supplierProfileCache.get(uid)!;
+  }
+  try {
+    const docRef = doc(db, USERS_COLLECTION, uid);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const imgUrl = data.profileImage || data.avatar || '';
+      const cleanName = (!isRawUidOrId(data.company) && data.company) ||
+                        (!isRawUidOrId(data.name) && data.name) ||
+                        'Enerjoo Certified Supplier';
+      const cleanNameAr = (!isRawUidOrId(data.companyAr) && data.companyAr) ||
+                          (!isRawUidOrId(data.company) && data.company) ||
+                          (!isRawUidOrId(data.nameAr) && data.nameAr) ||
+                          (!isRawUidOrId(data.name) && data.name) ||
+                          'مورد معتمد';
+      const sup: Supplier = {
+        id: snap.id,
+        name: cleanName,
+        nameAr: cleanNameAr,
+        location: data.location || data.governorate || 'Cairo, Egypt',
+        phone: data.phone || '',
+        verified: data.verified ?? true,
+        rejected: data.rejected || false,
+        email: data.email || '',
+        avatar: imgUrl,
+        profileImage: imgUrl,
+        rating: data.rating || 0,
+        totalSales: data.totalSales || 0,
+        lastUpdate: formatDateOnly(data.updatedAt),
+        price: data.price || 0,
+      };
+      supplierProfileCache.set(uid, sup);
+      return sup;
+    }
+  } catch (err) {
+    console.warn(`Could not fetch profile for user ${uid}:`, err);
+  }
+  return null;
 };
 
 export const seedInitialData = async () => {

@@ -34,6 +34,7 @@ import {
 } from './services/firestoreService';
 import { performSemanticSearch, SemanticSearchResult } from './services/geminiService';
 import { calculateRelevanceScore, hybridSort } from './utils/searchUtils';
+import { getSupplierDisplayName, getSupplierAvatarInitial } from './utils/supplierUtils';
 import { Product, Supplier, ViewType, Filters, AdvancedFilters } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations } from './translations';
@@ -460,6 +461,7 @@ export default function App() {
             <ProductDetail 
               product={selectedProduct} 
               allProducts={products}
+              suppliers={suppliers}
               lang={lang} 
               onBack={() => navigateBack('home')} 
               onCompare={toggleCompare}
@@ -559,40 +561,46 @@ export default function App() {
                   return (
                     <div className="space-y-12">
                       {/* Supplier Profile Badge Card */}
-                      {activeSup && (
-                        <div className="bg-white rounded-[40px] p-6 md:p-8 border border-solar-border shadow-md flex flex-col md:flex-row items-center justify-between gap-6">
-                          <div className="flex items-center gap-4">
-                            <div className="w-16 h-16 bg-solar-blue text-white rounded-3xl flex items-center justify-center text-2xl font-black shadow-md shadow-solar-blue/20">
-                              {isAr ? (activeSup.nameAr || activeSup.name)?.[0] : activeSup.name?.[0]}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h2 className="text-2xl font-black text-solar-text">{isAr ? activeSup.nameAr || activeSup.name : activeSup.name}</h2>
-                                {activeSup.verified && (
-                                  <span className="bg-solar-success/15 text-solar-success text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
-                                    <ShieldCheck size={12} />
-                                    {isAr ? 'مورد معتمد' : 'VERIFIED'}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-solar-muted font-bold mt-1.5 flex flex-wrap items-center gap-1.5">
-                                <span>📍 {activeSup.location}</span>
-                                <span className="text-solar-border/70">|</span>
-                                <span className="cursor-pointer text-solar-blue hover:underline flex items-center gap-1 font-bold" onClick={() => {
-                                  window.open(getSupplierWhatsAppUrl(isAr ? `مرحباً، أود الاستفسار عن منتجات ${activeSup.nameAr || activeSup.name}` : `Hi, I want to inquire about products from ${activeSup.name}`), '_blank');
-                                }}>📞 {SUPPLIER_CONTACT_PHONE_DISPLAY}</span>
-                              </p>
-                            </div>
-                          </div>
+                      {activeSup && (() => {
+                        const activeSupName = getSupplierDisplayName(activeSup, isAr);
+                        const activeSupInitial = getSupplierAvatarInitial(activeSup, isAr);
+                        const activeSupLocation = activeSup.location || (isAr ? 'القاهرة، مصر' : 'Cairo, Egypt');
 
-                          <button 
-                            onClick={() => setSupplierFilterId(null)}
-                            className="w-full md:w-auto bg-solar-light text-solar-muted hover:text-solar-blue border border-solar-border/40 px-6 py-3 rounded-2xl font-black text-sm transition"
-                          >
-                            {isAr ? 'عرض كل الموردين' : 'View All Suppliers'}
-                          </button>
-                        </div>
-                      )}
+                        return (
+                          <div className="bg-white rounded-[40px] p-6 md:p-8 border border-solar-border shadow-md flex flex-col md:flex-row items-center justify-between gap-6">
+                            <div className="flex items-center gap-4">
+                              <div className="w-16 h-16 bg-solar-blue text-white rounded-3xl flex items-center justify-center text-2xl font-black shadow-md shadow-solar-blue/20">
+                                {activeSupInitial}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h2 className="text-2xl font-black text-solar-text">{activeSupName}</h2>
+                                  {activeSup.verified && (
+                                    <span className="bg-solar-success/15 text-solar-success text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1">
+                                      <ShieldCheck size={12} />
+                                      {isAr ? 'مورد معتمد' : 'VERIFIED'}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-solar-muted font-bold mt-1.5 flex flex-wrap items-center gap-1.5">
+                                  <span>📍 {activeSupLocation}</span>
+                                  <span className="text-solar-border/70">|</span>
+                                  <span className="cursor-pointer text-solar-blue hover:underline flex items-center gap-1 font-bold" onClick={() => {
+                                    window.open(getSupplierWhatsAppUrl(isAr ? `مرحباً، أود الاستفسار عن منتجات ${activeSupName}` : `Hi, I want to inquire about products from ${activeSupName}`), '_blank');
+                                  }}>📞 {SUPPLIER_CONTACT_PHONE_DISPLAY}</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <button 
+                              onClick={() => setSupplierFilterId(null)}
+                              className="w-full md:w-auto bg-solar-light text-solar-muted hover:text-solar-blue border border-solar-border/40 px-6 py-3 rounded-2xl font-black text-sm transition"
+                            >
+                              {isAr ? 'عرض كل الموردين' : 'View All Suppliers'}
+                            </button>
+                          </div>
+                        );
+                      })()}
 
                       {/* Group sections */}
                       <div className="space-y-12">

@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, MapPin, X } from 'lucide-react';
 import { Product } from '../types';
 import { translations } from '../translations';
 import { motion } from 'motion/react';
+import { getSupplierDisplayName } from '../utils/supplierUtils';
 
 interface CompareViewProps {
   products: Product[];
@@ -126,7 +127,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
                     <div className="space-y-2">
                       {p.suppliers.map((s, i) => (
                         <div key={i} className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-solar-border shadow-sm hover:border-solar-blue/30 transition-all group/sup">
-                          <div className="font-black text-solar-blue text-[11px] md:text-sm mb-1 leading-none group-hover/sup:translate-x-1 transition-transform">{isAr ? s.nameAr : s.name}</div>
+                          <div className="font-black text-solar-blue text-[11px] md:text-sm mb-1 leading-none group-hover/sup:translate-x-1 transition-transform">{getSupplierDisplayName(s, isAr)}</div>
                           <div className="text-[9px] md:text-[11px] text-solar-muted flex items-center gap-1.5 font-bold uppercase tracking-wider">
                             <MapPin size={10} className="text-solar-blue/40" />
                             {s.location}
