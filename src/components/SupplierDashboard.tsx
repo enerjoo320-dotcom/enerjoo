@@ -35,6 +35,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
   const isAr = lang === 'ar';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -42,13 +43,17 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
 
     try {
       setIsUploading(true);
-      const secureUrl = await uploadSupplierProfileImage(file);
+      if (file.size > 5 * 1024 * 1024) {
+        setUploadStatus(isAr ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Optimizing and compressing image before upload...');
+      }
+      const secureUrl = await uploadSupplierProfileImage(file, (status) => setUploadStatus(status), lang);
       await updateSupplierProfileImage(user.uid, secureUrl);
       await updateUserProfile({ profileImage: secureUrl, avatar: secureUrl });
     } catch (err) {
       console.error('Error updating supplier profile image in dashboard:', err);
     } finally {
       setIsUploading(false);
+      setUploadStatus(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -186,6 +191,12 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
                 </>
               )}
             </div>
+            {uploadStatus && (
+              <div className="flex items-center gap-1.5 mt-1 text-xs text-solar-blue font-bold animate-pulse">
+                <Loader2 size={13} className="animate-spin" />
+                <span>{uploadStatus}</span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -71,6 +71,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const { updateUserProfile } = useAuth();
 
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -134,7 +135,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
     try {
       setIsUploading(true);
-      const secureUrl = await uploadSupplierProfileImage(file);
+      if (file.size > 5 * 1024 * 1024) {
+        setUploadStatus(isAr ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Optimizing and compressing image before upload...');
+      }
+      const secureUrl = await uploadSupplierProfileImage(file, (status) => setUploadStatus(status), lang);
       await updateSupplierProfileImage(user.uid, secureUrl);
       await updateUserProfile({ profileImage: secureUrl, avatar: secureUrl });
       
@@ -147,6 +151,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setPreviewImage(null);
     } finally {
       setIsUploading(false);
+      setUploadStatus(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -237,6 +242,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <p className="text-[11px] text-solar-danger font-bold mt-2 bg-solar-danger/10 px-3 py-1 rounded-full">
               {uploadError}
             </p>
+          )}
+          {uploadStatus && (
+            <div className="text-[11px] text-solar-blue font-bold mt-2 bg-solar-blue/10 px-3 py-1.5 rounded-full flex items-center justify-center gap-1.5 animate-pulse">
+              <Loader2 size={12} className="animate-spin shrink-0" />
+              <span>{uploadStatus}</span>
+            </div>
           )}
           {uploadSuccess && (
             <p className="text-[11px] text-solar-success font-bold mt-2 bg-solar-success/10 px-3 py-1 rounded-full flex items-center gap-1">

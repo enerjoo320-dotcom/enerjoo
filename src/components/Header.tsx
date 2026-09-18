@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Globe, Heart, LogIn, LogOut, PlusCircle, Users } from 'lucide-react';
+import React from 'react';
+import { Heart, LogIn, LogOut, PlusCircle, Users } from 'lucide-react';
 import { translations } from '../translations';
 import { User, ViewType } from '../types';
 

@@ -359,6 +359,14 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Process safety guards to prevent unexpected container exits
+  process.on("uncaughtException", (err) => {
+    console.error("Uncaught exception in server:", err);
+  });
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error("Unhandled rejection at:", promise, "reason:", reason);
+  });
+
   // Comprehensive CORS configuration to prevent iframe cross-origin errors in the sandboxed dev environment
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -373,8 +381,8 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API Health Check
-  app.get("/api/health", (req, res) => {
+  // API Health Check (accessible on /api/health, /health, and /_health)
+  app.get(["/health", "/api/health", "/_health"], (req, res) => {
     res.json({ status: "ok" });
   });
 
@@ -887,13 +895,32 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
+  // Vite middleware for development or static serving for production
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    let viteReady = false;
+    let viteMiddleware: any = null;
+    const vitePromise = createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
+    }).then((vite) => {
+      viteMiddleware = vite.middlewares;
+      viteReady = true;
+      console.log("Vite development server middleware ready.");
+      return vite;
+    }).catch((err) => {
+      console.error("Failed to initialize Vite development server:", err);
     });
-    app.use(vite.middlewares);
+
+    // Handle all page requests: wait for Vite if still warming up
+    app.use(async (req, res, next) => {
+      if (!viteReady) {
+        await vitePromise;
+      }
+      if (viteMiddleware) {
+        return viteMiddleware(req, res, next);
+      }
+      next();
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -902,8 +929,9 @@ async function startServer() {
     });
   }
 
+  // Start listening immediately so port 3000 is open in <10ms for Nginx reverse proxy
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server listening on port ${PORT} (0.0.0.0:${PORT})`);
   });
 }
 

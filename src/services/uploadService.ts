@@ -3,8 +3,10 @@
  * and Cloudinary (Supplier Avatars / Legacy).
  */
 
+import { ensureCompressedImage, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
+
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_IMAGE_SIZE_BYTES = MAX_FINAL_IMAGE_SIZE_BYTES; // 5 MB
 
 /**
  * Compresses an image file using browser Canvas API.
@@ -130,7 +132,11 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * Supported formats: JPG, JPEG, PNG, WEBP. Max original size: 5 MB.
  * Automatically falls back to compressed Base64 Data URL if Cloudinary is unavailable.
  */
-export async function uploadSupplierProfileImage(file: File): Promise<string> {
+export async function uploadSupplierProfileImage(
+  file: File,
+  onStatusChange?: (status: string) => void,
+  lang: 'ar' | 'en' = 'ar'
+): Promise<string> {
   // 1. Format check
   const fileExt = file.name.split('.').pop()?.toLowerCase();
   const isValidFormat = ALLOWED_IMAGE_TYPES.includes(file.type.toLowerCase()) || 
@@ -140,18 +146,16 @@ export async function uploadSupplierProfileImage(file: File): Promise<string> {
     throw new Error('Unsupported format. Please upload JPG, JPEG, PNG, or WEBP.');
   }
 
-  // 2. Size check (5MB max)
-  if (file.size > MAX_IMAGE_SIZE_BYTES) {
-    throw new Error('Image exceeds the maximum allowed size of 5 MB.');
-  }
+  // 2. Auto-compress if image exceeds 5 MB (do NOT reject large images)
+  const readyFile = await ensureCompressedImage(file, onStatusChange, lang);
 
   // 3. Compress image to optimal avatar dimensions (400x400 max)
   let compressedBlob: Blob;
   try {
-    compressedBlob = await compressImage(file, 400, 400, 0.85);
+    compressedBlob = await compressImage(readyFile, 400, 400, 0.85);
   } catch (compressionErr) {
     console.warn('Image compression fallback to original:', compressionErr);
-    compressedBlob = file;
+    compressedBlob = readyFile;
   }
 
   // Generate Base64 Data URL as reliable self-contained fallback
@@ -213,7 +217,11 @@ const CLOUDFLARE_WORKER_API = 'https://enerjoo-api.enerjoo320.workers.dev';
  * 4. Receives JSON response from Worker
  * 5. Extracts and returns image_url
  */
-export async function uploadProductImage(file: File): Promise<string> {
+export async function uploadProductImage(
+  file: File,
+  onStatusChange?: (status: string) => void,
+  lang: 'ar' | 'en' = 'ar'
+): Promise<string> {
   if (!file) {
     throw new Error('يرجى اختيار ملف الصورة.');
   }
@@ -226,14 +234,13 @@ export async function uploadProductImage(file: File): Promise<string> {
     throw new Error('نوع الملف غير مدعوم. يرجى اختيار صورة بصيغة JPG أو PNG أو WebP.');
   }
 
-  const MAX_10MB = 10 * 1024 * 1024;
-  if (file.size > MAX_10MB) {
-    throw new Error('حجم الصورة كبير جداً. الحد الأقصى المسموح به هو 10 ميجابايت.');
-  }
+  // Automatically compress & resize if image > 5 MB (do NOT reject large images)
+  // Guarantees final size <= 5 MB while preserving maximum quality and aspect ratio
+  const readyFile = await ensureCompressedImage(file, onStatusChange, lang);
 
-  // Send multipart/form-data with file field named "file"
+  // Send multipart/form-data with ONLY the final compressed version
   const formData = new FormData();
-  formData.append('file', file, file.name);
+  formData.append('file', readyFile, readyFile.name);
 
   let response: Response;
   try {
@@ -275,9 +282,11 @@ export async function uploadProductImage(file: File): Promise<string> {
 export async function uploadProductImageToDrive(
   file: File,
   _productId?: string,
-  _userUid?: string
+  _userUid?: string,
+  onStatusChange?: (status: string) => void,
+  lang: 'ar' | 'en' = 'ar'
 ): Promise<GoogleDriveUploadResult> {
-  const imageUrl = await uploadProductImage(file);
+  const imageUrl = await uploadProductImage(file, onStatusChange, lang);
   return {
     fileId: imageUrl,
     imageUrl,

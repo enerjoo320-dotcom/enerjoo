@@ -19,17 +19,36 @@
 }
 
 @layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
   html {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    box-sizing: border-box;
   }
   body {
     @apply bg-solar-bg text-solar-text font-sans antialiased;
-    overflow-x: hidden;
     width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
     min-height: 100vh;
     min-height: 100dvh;
+  }
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+  img, picture, video, canvas, svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
   }
   button, a, input, select, textarea {
     touch-action: manipulation;

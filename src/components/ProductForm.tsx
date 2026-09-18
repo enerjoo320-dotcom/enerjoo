@@ -1,7 +1,8 @@
 import React, { useRef, useState } from 'react';
-import { Upload, Image as ImageIcon, Loader2, AlertCircle } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2 } from 'lucide-react';
 import { translations } from '../translations';
 import { uploadProductImage } from '../services/uploadService';
+import { autoCompressImage, formatFileSize, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
@@ -73,8 +74,26 @@ export const ProductForm: React.FC<{
 
   const fields = getFieldsForCategory(formData.category);
 
+  // Main product image state
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(initialData?.image || null);
+  const [isCompressingMain, setIsCompressingMain] = useState(false);
+  const [compressionStatus, setCompressionStatus] = useState<string | null>(null);
+  const [imageSizeInfo, setImageSizeInfo] = useState<string | null>(null);
+
+  // Additional product images state
+  const [additionalFiles, setAdditionalFiles] = useState<Array<{
+    id: string;
+    file: File;
+    preview: string;
+    sizeInfo?: string;
+  }>>([]);
+  const [existingAdditionalUrls, setExistingAdditionalUrls] = useState<string[]>(
+    initialData?.additionalImages || []
+  );
+  const [isCompressingAdditional, setIsCompressingAdditional] = useState(false);
+  const additionalInputRef = useRef<HTMLInputElement>(null);
+
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -82,7 +101,7 @@ export const ProductForm: React.FC<{
     imageInputRef.current?.click();
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0];
       const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
@@ -94,20 +113,110 @@ export const ProductForm: React.FC<{
         return;
       }
 
-      if (selected.size > 10 * 1024 * 1024) {
-        setUploadError(lang === 'ar' ? 'حجم الصورة يتجاوز الحد الأقصى 10 ميجابايت.' : 'Image exceeds maximum allowed size of 10MB.');
-        return;
-      }
-
       setUploadError(null);
-      setImageFile(selected);
-      try {
-        const previewUrl = URL.createObjectURL(selected);
-        setImagePreview(previewUrl);
-      } catch {
-        // fallback
+
+      // Requirement: Do NOT reject images larger than 5 MB.
+      // If <= 5 MB: Upload normally without unnecessary compression.
+      // If > 5 MB: Automatically compress before uploading.
+      if (selected.size > MAX_FINAL_IMAGE_SIZE_BYTES) {
+        setIsCompressingMain(true);
+        const defaultMsg = lang === 'ar' ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Optimizing and compressing image before upload...';
+        setCompressionStatus(defaultMsg);
+
+        try {
+          // Immediate visual preview while compression completes
+          const tempUrl = URL.createObjectURL(selected);
+          setImagePreview(tempUrl);
+
+          const result = await autoCompressImage(selected, {
+            lang,
+            onStatusChange: (status) => setCompressionStatus(status),
+          });
+
+          setImageFile(result.file);
+          const compressedUrl = URL.createObjectURL(result.file);
+          setImagePreview(compressedUrl);
+          setImageSizeInfo(
+            `${formatFileSize(result.originalSize)} ← ${formatFileSize(result.compressedSize)} (${lang === 'ar' ? 'تم الضغط بنجاح' : 'Optimized'})`
+          );
+        } catch (compErr) {
+          console.error('Compression error:', compErr);
+          setImageFile(selected);
+        } finally {
+          setIsCompressingMain(false);
+          setCompressionStatus(null);
+        }
+      } else {
+        setImageFile(selected);
+        try {
+          const previewUrl = URL.createObjectURL(selected);
+          setImagePreview(previewUrl);
+          setImageSizeInfo(formatFileSize(selected.size));
+        } catch {
+          // fallback
+        }
       }
     }
+  };
+
+  const handleAdditionalImagesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files: File[] = Array.from(e.target.files);
+      setIsCompressingAdditional(true);
+      const defaultMsg = lang === 'ar' ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Optimizing and compressing image before upload...';
+      setCompressionStatus(defaultMsg);
+
+      try {
+        const newItems: Array<{ id: string; file: File; preview: string; sizeInfo?: string }> = [];
+
+        for (const rawFile of files) {
+          const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+          const ext = rawFile.name.split('.').pop()?.toLowerCase() || '';
+          const isAllowed = allowed.includes(rawFile.type.toLowerCase()) || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+          if (!isAllowed) continue;
+
+          const id = Math.random().toString(36).substring(2, 9);
+
+          if (rawFile.size > MAX_FINAL_IMAGE_SIZE_BYTES) {
+            const result = await autoCompressImage(rawFile, {
+              lang,
+              onStatusChange: (status) => setCompressionStatus(status),
+            });
+            newItems.push({
+              id,
+              file: result.file,
+              preview: URL.createObjectURL(result.file),
+              sizeInfo: `${formatFileSize(result.originalSize)} ← ${formatFileSize(result.compressedSize)}`,
+            });
+          } else {
+            newItems.push({
+              id,
+              file: rawFile,
+              preview: URL.createObjectURL(rawFile),
+              sizeInfo: formatFileSize(rawFile.size),
+            });
+          }
+        }
+
+        setAdditionalFiles((prev) => [...prev, ...newItems]);
+      } catch (err) {
+        console.error('Error handling additional images:', err);
+      } finally {
+        setIsCompressingAdditional(false);
+        setCompressionStatus(null);
+        if (additionalInputRef.current) {
+          additionalInputRef.current.value = '';
+        }
+      }
+    }
+  };
+
+  const handleRemoveAdditional = (id: string) => {
+    setAdditionalFiles((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleRemoveExistingAdditional = (index: number) => {
+    setExistingAdditionalUrls((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,8 +235,18 @@ export const ProductForm: React.FC<{
       // Preserve existing datasheet if product previously had one, without adding PDF upload UI
       const datasheetUrl = initialData?.datasheetUrl || '';
 
+      // Upload main product image if selected (auto-compressed if > 5MB)
       if (imageFile) {
-        imageUrl = await uploadProductImage(imageFile);
+        imageUrl = await uploadProductImage(imageFile, (status) => setCompressionStatus(status), lang);
+      }
+
+      // Upload any additional product images
+      const finalAdditionalUrls = [...existingAdditionalUrls];
+      for (const item of additionalFiles) {
+        const uploadedUrl = await uploadProductImage(item.file, (status) => setCompressionStatus(status), lang);
+        if (uploadedUrl) {
+          finalAdditionalUrls.push(uploadedUrl);
+        }
       }
 
       const newProduct: any = {
@@ -141,6 +260,7 @@ export const ProductForm: React.FC<{
         warranty: parseInt(formData.warranty) || 0,
         image: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
         image_url: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
+        additionalImages: finalAdditionalUrls,
         datasheetUrl: datasheetUrl,
         area: parseFloat(formData.area) || 0,
         status: formData.status as any,
@@ -521,50 +641,159 @@ export const ProductForm: React.FC<{
         />
       </div>
 
-      <div className="w-full">
-        <label className="text-[10px] font-black text-solar-muted uppercase ml-2 mb-2 block">
-          {lang === 'ar' ? 'صورة المنتج' : 'Product Image'}
-        </label>
-        <div 
-          onClick={handleImageClick}
-          className="border-2 border-dashed border-solar-border rounded-2xl p-5 flex flex-col items-center justify-center gap-3 hover:border-solar-blue transition cursor-pointer bg-solar-bg/30 relative overflow-hidden group"
-        >
+      <div className="w-full space-y-4">
+        {/* Main Product Image */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">
+              {lang === 'ar' ? 'صورة المنتج الرئيسية' : 'Main Product Image'}
+            </label>
+            <span className="text-[10px] font-bold text-solar-blue">
+              {lang === 'ar' ? 'الحد الأقصى للملف النهائي 5 ميجابايت' : 'Max final size: 5 MB'}
+            </span>
+          </div>
+
+          <div 
+            onClick={handleImageClick}
+            className="border-2 border-dashed border-solar-border rounded-2xl p-5 flex flex-col items-center justify-center gap-3 hover:border-solar-blue transition cursor-pointer bg-solar-bg/30 relative overflow-hidden group"
+          >
+            <input 
+              type="file" 
+              ref={imageInputRef} 
+              onChange={handleImageChange} 
+              accept="image/jpeg,image/jpg,image/png,image/webp" 
+              className="hidden" 
+            />
+
+            {isCompressingMain ? (
+              <div className="flex flex-col items-center justify-center gap-2.5 py-4 text-center">
+                <div className="w-10 h-10 rounded-xl bg-solar-blue/10 flex items-center justify-center text-solar-blue">
+                  <Loader2 size={22} className="animate-spin" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-black text-solar-blue animate-pulse">
+                    {compressionStatus || (lang === 'ar' ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Optimizing and compressing image before upload...')}
+                  </p>
+                  <p className="text-[10px] text-solar-muted font-bold">
+                    {lang === 'ar' ? 'يتم تقليل الحجم لأقل من 5 ميجابايت مع الحفاظ على أعلى جودة' : 'Reducing size to <= 5 MB while preserving highest quality'}
+                  </p>
+                </div>
+              </div>
+            ) : imagePreview ? (
+              <div className="flex items-center gap-3 w-full max-w-md">
+                <img 
+                  src={imagePreview} 
+                  alt="Product preview" 
+                  className="w-16 h-16 object-cover rounded-xl border border-solar-border shadow-sm shrink-0" 
+                />
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="text-xs font-bold text-solar-text truncate">
+                    {imageFile ? imageFile.name : (lang === 'ar' ? 'صورة المنتج الحالية' : 'Current Product Image')}
+                  </p>
+                  {imageSizeInfo && (
+                    <div className="flex items-center gap-1.5 mt-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 size={13} className="shrink-0" />
+                      <span>{imageSizeInfo}</span>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-solar-blue font-semibold mt-1 hover:underline">
+                    {lang === 'ar' ? 'اضغط لتغيير أو استبدال الصورة' : 'Click to replace image'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-solar-border group-hover:scale-105 transition-transform">
+                  <ImageIcon size={24} className="text-solar-blue" />
+                </div>
+                <span className="text-xs font-bold text-solar-muted text-center max-w-[250px] truncate">
+                  {t.dragImage}
+                </span>
+              </>
+            )}
+
+            <div className="text-center">
+              <span className="text-[10px] text-solar-muted/80 block">
+                {lang === 'ar' 
+                  ? 'الصور المدعومة: JPG, PNG, WebP (الصور أكبر من 5MB تُضغط تلقائياً)' 
+                  : 'Supported: JPG, PNG, WebP (Images > 5MB are auto-compressed)'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Product Images (Gallery) */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">
+              {lang === 'ar' ? 'صور إضافية للمنتج (اختياري)' : 'Additional Product Images (Optional)'}
+            </label>
+            <button
+              type="button"
+              onClick={() => additionalInputRef.current?.click()}
+              className="text-[11px] font-bold text-solar-blue hover:text-solar-blue/80 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-solar-blue/5 transition"
+            >
+              <Plus size={14} />
+              <span>{lang === 'ar' ? 'إضافة صورة إضافية' : 'Add Image'}</span>
+            </button>
+          </div>
+
           <input 
             type="file" 
-            ref={imageInputRef} 
-            onChange={handleImageChange} 
+            ref={additionalInputRef} 
+            onChange={handleAdditionalImagesChange} 
             accept="image/jpeg,image/jpg,image/png,image/webp" 
+            multiple
             className="hidden" 
           />
-          {imagePreview ? (
-            <div className="flex items-center gap-3 w-full max-w-sm">
-              <img 
-                src={imagePreview} 
-                alt="Product preview" 
-                className="w-16 h-16 object-cover rounded-xl border border-solar-border shadow-sm shrink-0" 
-              />
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-xs font-bold text-solar-text truncate">
-                  {imageFile ? imageFile.name : (lang === 'ar' ? 'صورة المنتج الحالية' : 'Current Product Image')}
-                </p>
-                <p className="text-[10px] text-solar-blue font-semibold mt-0.5">
-                  {lang === 'ar' ? 'اضغط لتغيير الصورة' : 'Click to change image'}
-                </p>
-              </div>
+
+          {isCompressingAdditional && (
+            <div className="p-3 mb-2 bg-solar-blue/5 border border-solar-blue/20 rounded-xl flex items-center gap-2 text-xs font-bold text-solar-blue">
+              <Loader2 size={16} className="animate-spin shrink-0" />
+              <span>{compressionStatus || (lang === 'ar' ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Optimizing and compressing image before upload...')}</span>
             </div>
-          ) : (
-            <>
-              <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm border border-solar-border group-hover:scale-105 transition-transform">
-                <ImageIcon size={24} className="text-solar-blue" />
-              </div>
-              <span className="text-xs font-bold text-solar-muted text-center max-w-[250px] truncate">
-                {t.dragImage}
-              </span>
-            </>
           )}
-          <span className="text-[10px] text-solar-muted/70">
-            {lang === 'ar' ? 'الصور المدعومة: JPG, PNG, WebP (بحد أقصى 10MB)' : 'Supported: JPG, PNG, WebP (Max 10MB)'}
-          </span>
+
+          {/* Thumbnails of additional images */}
+          {(existingAdditionalUrls.length > 0 || additionalFiles.length > 0) && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              {existingAdditionalUrls.map((url, idx) => (
+                <div key={`existing-${idx}`} className="relative group rounded-xl overflow-hidden border border-solar-border bg-solar-bg/50 aspect-video">
+                  <img src={url} alt={`Additional ${idx + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveExistingAdditional(idx)}
+                    className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-black/60 text-white hover:bg-red-600 transition"
+                    title={lang === 'ar' ? 'حذف الصورة' : 'Remove image'}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                  <span className="absolute bottom-1 left-1.5 text-[9px] font-bold text-white/90 bg-black/50 px-1.5 py-0.5 rounded">
+                    {lang === 'ar' ? 'مرفوعة' : 'Saved'}
+                  </span>
+                </div>
+              ))}
+
+              {additionalFiles.map((item) => (
+                <div key={item.id} className="relative group rounded-xl overflow-hidden border border-solar-border bg-solar-bg/50 aspect-video">
+                  <img src={item.preview} alt="New additional" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAdditional(item.id)}
+                    className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-black/60 text-white hover:bg-red-600 transition"
+                    title={lang === 'ar' ? 'حذف الصورة' : 'Remove image'}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                  {item.sizeInfo && (
+                    <span className="absolute bottom-1 left-1.5 text-[9px] font-bold text-emerald-300 bg-black/60 px-1.5 py-0.5 rounded truncate max-w-[90%]">
+                      {item.sizeInfo}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -583,16 +812,20 @@ export const ProductForm: React.FC<{
       <div className="flex gap-4 pt-4">
         <button 
           type="submit" 
-          disabled={isUploading}
+          disabled={isUploading || isCompressingMain || isCompressingAdditional}
           className="flex-1 bg-solar-blue text-white py-4 rounded-2xl font-black shadow-lg shadow-solar-blue/20 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
-          {isUploading && <Loader2 size={20} className="animate-spin" />}
-          {isUploading ? t.uploading : t.submit}
+          {(isUploading || isCompressingMain || isCompressingAdditional) && <Loader2 size={20} className="animate-spin" />}
+          {isCompressingMain || isCompressingAdditional 
+            ? (lang === 'ar' ? 'جاري تحسين وضغط الصورة قبل الرفع...' : 'Compressing image...')
+            : isUploading 
+            ? t.uploading 
+            : t.submit}
         </button>
         <button 
           type="button" 
           onClick={onCancel} 
-          disabled={isUploading}
+          disabled={isUploading || isCompressingMain || isCompressingAdditional}
           className="flex-1 bg-solar-bg border border-solar-border text-solar-muted py-4 rounded-2xl font-black transition active:scale-95 disabled:opacity-50"
         >
           {t.cancel}

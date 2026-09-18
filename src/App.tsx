@@ -40,6 +40,7 @@ import { translations } from './translations';
 import { auth } from './lib/firebase';
 import { safeLocalStorage } from './utils/safeStorage';
 import { CUSTOMER_SERVICE_PHONE_DISPLAY, getCustomerServiceWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY, getSupplierWhatsAppUrl } from './constants/contact';
+import { AppNavState, parseUrlToNavState, navStateToUrl } from './utils/navigation';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -50,13 +51,24 @@ export default function App() {
     return (saved === 'ar' || saved === 'en') ? saved : 'ar';
   });
 
-  const [view, setView] = useState<ViewType>('home');
+  // Parse initial browser URL to support direct links, deep linking, and initial history state
+  const initialNav = useMemo(() => {
+    return parseUrlToNavState(window.location.pathname, window.location.search);
+  }, []);
+
+  const [view, setView] = useState<ViewType>(initialNav.view);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [pendingProductId, setPendingProductId] = useState<string | number | null>(initialNav.productId || null);
+  const [homeSection, setHomeSection] = useState<'home' | 'products'>(initialNav.section || 'home');
   const [compareList, setCompareList] = useState<Product[]>([]);
   const [wishlist, setWishlist] = useState<Product[]>([]);
+
+  // Navigation and browser history synchronization refs
+  const isHandlingPopState = useRef(false);
+  const historyStepRef = useRef(initialNav.step || 0);
   
   // Search States
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,7 +77,10 @@ export default function App() {
   const [isAiSearching, setIsAiSearching] = useState(false);
   
   // Filter States
-  const [activeFilters, setActiveFilters] = useState<Filters>({ category: 'all', sort: 'power' });
+  const [activeFilters, setActiveFilters] = useState<Filters>({
+    category: initialNav.category || 'all',
+    sort: 'power'
+  });
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
     minPower: '', maxPower: '', minPrice: '', maxPrice: '', minEfficiency: '', brand: 'all'
   });
@@ -74,7 +89,217 @@ export default function App() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [adminSearch, setAdminSearch] = useState('');
   const [adminFilterId, setAdminFilterId] = useState<string | number | null>(null);
-  const [supplierFilterId, setSupplierFilterId] = useState<string | number | null>(null);
+  const [supplierFilterId, setSupplierFilterId] = useState<string | number | null>(initialNav.supplierFilterId || null);
+
+  // Initialize initial browser history state if not present (step: 0)
+  useEffect(() => {
+    if (!window.history.state || typeof window.history.state.step !== 'number') {
+      const canonicalState: AppNavState = {
+        view: initialNav.view,
+        section: initialNav.section,
+        productId: initialNav.productId,
+        category: initialNav.category || 'all',
+        supplierFilterId: initialNav.supplierFilterId,
+        step: 0
+      };
+      window.history.replaceState(canonicalState, '', window.location.pathname + window.location.search);
+    }
+  }, [initialNav]);
+
+  // Synchronize pending product once products are fetched from Firestore
+  useEffect(() => {
+    if (pendingProductId && products.length > 0) {
+      const found = products.find(p => p.id.toString() === pendingProductId.toString());
+      if (found) {
+        setSelectedProduct(found);
+      }
+    }
+  }, [pendingProductId, products]);
+
+  // Navigation handlers with clean History API pushState
+  const navigateToView = (newView: ViewType) => {
+    if (view === newView && !selectedProduct) {
+      if (newView === 'home') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      return;
+    }
+
+    setSelectedProduct(null);
+    setPendingProductId(null);
+    setView(newView);
+
+    if (!isHandlingPopState.current) {
+      const currentStep = window.history.state?.step ?? historyStepRef.current;
+      const nextStep = currentStep + 1;
+      historyStepRef.current = nextStep;
+
+      const nextState: AppNavState = {
+        view: newView,
+        section: newView === 'home' ? 'home' : undefined,
+        productId: null,
+        category: newView === 'home' ? activeFilters.category : undefined,
+        supplierFilterId: newView === 'home' ? supplierFilterId : null,
+        step: nextStep
+      };
+      window.history.pushState(nextState, '', navStateToUrl(nextState));
+    }
+  };
+
+  const navigateToProduct = (product: Product, fromCustomView?: ViewType) => {
+    setSelectedProduct(product);
+    setPendingProductId(String(product.id));
+
+    if (!isHandlingPopState.current) {
+      const currentStep = window.history.state?.step ?? historyStepRef.current;
+      const effectiveView = fromCustomView || view;
+
+      // When navigating from Home root (step 0, section: 'home'), push Products state first.
+      // This ensures that pressing the native Back button follows the exact expected flow:
+      // Product Details -> Products -> Home -> Exit!
+      if (effectiveView === 'home' && (!window.history.state?.section || window.history.state?.section === 'home') && !window.history.state?.productId) {
+        const productsStep = currentStep + 1;
+        const productsState: AppNavState = {
+          view: 'home',
+          section: 'products',
+          category: activeFilters.category,
+          supplierFilterId,
+          productId: null,
+          step: productsStep
+        };
+        window.history.pushState(productsState, '', navStateToUrl(productsState));
+
+        const detailStep = productsStep + 1;
+        historyStepRef.current = detailStep;
+        const detailState: AppNavState = {
+          view: 'home',
+          section: 'products',
+          productId: product.id,
+          category: activeFilters.category,
+          supplierFilterId,
+          step: detailStep
+        };
+        window.history.pushState(detailState, '', navStateToUrl(detailState));
+      } else {
+        const nextStep = currentStep + 1;
+        historyStepRef.current = nextStep;
+        const detailState: AppNavState = {
+          view: effectiveView,
+          fromView: effectiveView !== 'home' ? effectiveView : undefined,
+          section: 'products',
+          productId: product.id,
+          category: activeFilters.category,
+          supplierFilterId,
+          step: nextStep
+        };
+        window.history.pushState(detailState, '', navStateToUrl(detailState));
+      }
+    }
+  };
+
+  const navigateBack = (fallbackView: ViewType = 'home') => {
+    const currentStep = window.history.state?.step;
+    if (typeof currentStep === 'number' && currentStep > 0) {
+      window.history.back();
+    } else {
+      setSelectedProduct(null);
+      setPendingProductId(null);
+      navigateToView(fallbackView);
+    }
+  };
+
+  const handleFilterChange = (newFilters: Filters) => {
+    const categoryChanged = newFilters.category !== activeFilters.category;
+    setActiveFilters(newFilters);
+
+    if (categoryChanged && !isHandlingPopState.current && view === 'home') {
+      const currentStep = window.history.state?.step ?? historyStepRef.current;
+      const nextStep = currentStep + 1;
+      historyStepRef.current = nextStep;
+      const nextState: AppNavState = {
+        view: 'home',
+        section: 'products',
+        category: newFilters.category,
+        supplierFilterId,
+        productId: null,
+        step: nextStep
+      };
+      window.history.pushState(nextState, '', navStateToUrl(nextState));
+    }
+  };
+
+  const handleFilterSupplier = (id: string | number | null) => {
+    setSupplierFilterId(id);
+    setSelectedProduct(null);
+    setPendingProductId(null);
+    setSearchTerm('');
+
+    if (!isHandlingPopState.current) {
+      const currentStep = window.history.state?.step ?? historyStepRef.current;
+      const nextStep = currentStep + 1;
+      historyStepRef.current = nextStep;
+      const nextState: AppNavState = {
+        view: 'home',
+        section: 'products',
+        supplierFilterId: id,
+        category: activeFilters.category,
+        productId: null,
+        step: nextStep
+      };
+      window.history.pushState(nextState, '', navStateToUrl(nextState));
+    }
+  };
+
+  // Popstate event listener: handles hardware Android back button and browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      isHandlingPopState.current = true;
+      try {
+        const state: AppNavState = event.state || parseUrlToNavState(window.location.pathname, window.location.search);
+
+        if (typeof state.step === 'number') {
+          historyStepRef.current = state.step;
+        }
+
+        const targetView = state.fromView || state.view || 'home';
+        setView(targetView);
+
+        if (state.productId) {
+          const pId = String(state.productId);
+          setPendingProductId(pId);
+          const found = products.find(p => p.id.toString() === pId);
+          if (found) {
+            setSelectedProduct(found);
+          }
+        } else {
+          setSelectedProduct(null);
+          setPendingProductId(null);
+        }
+
+        setHomeSection(state.section || (state.category && state.category !== 'all' ? 'products' : 'home'));
+        if (state.category) {
+          setActiveFilters(prev => ({ ...prev, category: state.category! }));
+        }
+        if (state.supplierFilterId !== undefined) {
+          setSupplierFilterId(state.supplierFilterId);
+        }
+
+        // When returning to top of Home, scroll smoothly to top
+        if (state.view === 'home' && state.section === 'home' && !state.productId) {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } finally {
+        setTimeout(() => {
+          isHandlingPopState.current = false;
+        }, 50);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [products]);
 
   const isAr = lang === 'ar';
   const t = translations[lang];
@@ -190,7 +415,7 @@ export default function App() {
 
   const toggleWishlist = (product: Product) => {
     if (!user) {
-      setView('login');
+      navigateToView('login');
       return;
     }
     setWishlist(prev => {
@@ -207,7 +432,7 @@ export default function App() {
       } else {
         await addProduct(productData);
       }
-      setView(user?.type === 'supplier' ? 'supplier-dashboard' : 'home');
+      navigateToView(user?.type === 'supplier' ? 'supplier-dashboard' : 'home');
     } catch (err) {
       console.error("Action error:", err);
       alert(isAr ? 'حدث خطأ أثناء حفظ المنتج في قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to save product in database. Please try again.');
@@ -236,21 +461,17 @@ export default function App() {
               product={selectedProduct} 
               allProducts={products}
               lang={lang} 
-              onBack={() => setSelectedProduct(null)} 
+              onBack={() => navigateBack('home')} 
               onCompare={toggleCompare}
               onWishlist={toggleWishlist}
               isCompared={(id) => !!compareList.find(p => p.id === id)}
               isInWishlist={(id) => !!wishlist.find(p => p.id === id)}
-              onProductClick={(p) => setSelectedProduct(p)}
-              onFilterSupplier={(id) => {
-                setSupplierFilterId(id);
-                setSelectedProduct(null);
-                setSearchTerm('');
-              }}
+              onProductClick={(p) => navigateToProduct(p)}
+              onFilterSupplier={handleFilterSupplier}
               onEdit={(p) => {
                 setEditingProduct(p);
                 setSelectedProduct(null);
-                setView('add');
+                navigateToView('add');
               }}
             />
           );
@@ -297,13 +518,13 @@ export default function App() {
             <FilterBar 
               lang={lang} 
               activeFilter={activeFilters} 
-              setFilter={setActiveFilters} 
+              setFilter={handleFilterChange} 
               searchTerm={searchTerm} 
               setSearchTerm={setSearchTerm} 
               useAiSearch={useAiSearch}
               setUseAiSearch={setUseAiSearch}
               supplierFilterId={supplierFilterId}
-              onClearSupplierFilter={() => setSupplierFilterId(null)}
+              onClearSupplierFilter={() => handleFilterSupplier(null)}
             />
             {isAiSearching && (
               <div className="flex items-center gap-2 mb-4 text-solar-blue font-black text-xs animate-pulse">
@@ -389,13 +610,13 @@ export default function App() {
                                   key={p.id}
                                   product={p} 
                                   lang={lang} 
-                                  onClick={() => setSelectedProduct(p)} 
+                                  onClick={() => navigateToProduct(p)} 
                                   onCompare={(e) => { e.stopPropagation(); toggleCompare(p); }}
                                   onWishlist={(e) => { e.stopPropagation(); toggleWishlist(p); }}
                                   onEdit={(e, product) => {
                                     e.stopPropagation();
                                     setEditingProduct(product);
-                                    setView('add');
+                                    navigateToView('add');
                                   }}
                                   isCompared={!!compareList.find(cp => cp.id === p.id)}
                                   isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
@@ -417,13 +638,13 @@ export default function App() {
                         <ProductCard 
                           product={p} 
                           lang={lang} 
-                          onClick={() => setSelectedProduct(p)} 
+                          onClick={() => navigateToProduct(p)} 
                           onCompare={(e) => { e.stopPropagation(); toggleCompare(p); }}
                           onWishlist={(e) => { e.stopPropagation(); toggleWishlist(p); }}
                           onEdit={(e, product) => {
                             e.stopPropagation();
                             setEditingProduct(product);
-                            setView('add');
+                            navigateToView('add');
                           }}
                           isCompared={!!compareList.find(cp => cp.id === p.id)}
                           isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
@@ -485,7 +706,7 @@ export default function App() {
                 <p className="text-solar-muted font-bold">{isAr ? `${wishlist.length} منتجات محفوظة` : `${wishlist.length} Saved Products`}</p>
               </div>
               <button 
-                onClick={() => setView('home')}
+                onClick={() => navigateBack('home')}
                 className="bg-solar-light text-solar-blue px-6 py-3 rounded-2xl font-black transition-all hover:bg-solar-blue hover:text-white"
               >
                 {t.back}
@@ -499,13 +720,13 @@ export default function App() {
                     key={p.id}
                     product={p} 
                     lang={lang} 
-                    onClick={() => setSelectedProduct(p)} 
+                    onClick={() => navigateToProduct(p, 'wishlist')} 
                     onCompare={(e) => { e.stopPropagation(); toggleCompare(p); }}
                     onWishlist={(e) => { e.stopPropagation(); toggleWishlist(p); }}
                     onEdit={(e, product) => {
                       e.stopPropagation();
                       setEditingProduct(product);
-                      setView('add');
+                      navigateToView('add');
                     }}
                     isCompared={!!compareList.find(cp => cp.id === p.id)}
                     isWishlisted={true}
@@ -518,7 +739,7 @@ export default function App() {
                 <h3 className="text-xl font-black text-solar-text">{t.emptyWishlist}</h3>
                 <p className="text-solar-muted font-bold mt-2">{t.noWishlistItems}</p>
                 <button 
-                  onClick={() => setView('home')}
+                  onClick={() => navigateToView('home')}
                   className="mt-8 bg-solar-blue text-white px-8 py-4 rounded-2xl font-black shadow-xl shadow-solar-blue/20 transition-all hover:scale-105 active:scale-95"
                 >
                   {isAr ? 'استكشف المنتجات' : 'Explore Products'}
@@ -528,22 +749,22 @@ export default function App() {
           </div>
         );
       case 'compare':
-        return <CompareView products={compareList} lang={lang} onBack={() => setView('home')} onRemove={(id) => setCompareList(l => l.filter(p => p.id !== id))} />;
+        return <CompareView products={compareList} lang={lang} onBack={() => navigateBack('home')} onRemove={(id) => setCompareList(l => l.filter(p => p.id !== id))} />;
       case 'add':
-        return <AddProductView lang={lang} onBack={() => { setView(user?.type === 'supplier' ? 'supplier-dashboard' : 'home'); setEditingProduct(null); }} onAdd={handleProductAction} editingProduct={editingProduct} />;
+        return <AddProductView lang={lang} onBack={() => { navigateBack(user?.type === 'supplier' ? 'supplier-dashboard' : 'home'); setEditingProduct(null); }} onAdd={handleProductAction} editingProduct={editingProduct} />;
       case 'login':
-        return <LoginView lang={lang} setView={setView} />;
+        return <LoginView lang={lang} setView={navigateToView} />;
       case 'register':
-        return <RegisterView lang={lang} setView={setView} />;
+        return <RegisterView lang={lang} setView={navigateToView} />;
       case 'supplier-dashboard':
         return (
           <SupplierDashboard 
             lang={lang} 
-            setView={setView} 
+            setView={navigateToView} 
             products={products} 
             suppliers={suppliers}
             onDelete={async (id) => { if(confirm(isAr ? 'تأكيد الحذف؟' : 'Confirm Delete?')) await deleteProduct(id.toString()); }}
-            onEdit={(p) => { setEditingProduct(p); setView('add'); }}
+            onEdit={(p) => { setEditingProduct(p); navigateToView('add'); }}
             adminSearch={adminSearch}
             setAdminSearch={setAdminSearch}
             adminFilterId={adminFilterId}
@@ -558,23 +779,23 @@ export default function App() {
               const s = suppliers.find(sup => sup.id === id);
               if (s) toggleSupplierVerification(id.toString(), !s.verified);
             }}
-            onBack={() => setView('home')}
+            onBack={() => navigateBack('home')}
             initialSearch={adminSearch}
-            onViewSupplier={(id) => { setSupplierFilterId(id); setView('home'); }}
+            onViewSupplier={(id) => { setSupplierFilterId(id); navigateToView('home'); }}
           />
         );
       case 'admin-requests':
         return (
           <AdminSolarRequests
             lang={lang}
-            onBack={() => setView('home')}
+            onBack={() => navigateBack('home')}
           />
         );
       case 'customer-requests':
         return (
           <CustomerRequestsView
             lang={lang}
-            setView={setView}
+            setView={navigateToView}
           />
         );
       case 'profile':
@@ -584,7 +805,7 @@ export default function App() {
             setLang={setLang}
             user={user}
             logout={logout}
-            setView={setView}
+            setView={navigateToView}
             wishlistCount={wishlist.length}
             compareCount={compareList.length}
             productsCount={user ? products.filter(p => p.supplierId === user.uid).length : 0}
@@ -595,10 +816,9 @@ export default function App() {
           <SolarCalculator 
             lang={lang}
             products={products}
-            onBack={() => setView('home')}
+            onBack={() => navigateBack('home')}
             onProductClick={(p) => {
-              setSelectedProduct(p);
-              setView('home');
+              navigateToProduct(p, 'calculator');
             }}
           />
         );
@@ -608,13 +828,13 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen bg-solar-bg ${isAr ? 'rtl' : 'ltr'}`} dir={isAr ? 'rtl' : 'ltr'}>
+    <div className={`min-h-screen bg-solar-bg w-full max-w-full overflow-x-hidden box-border ${isAr ? 'rtl' : 'ltr'}`} dir={isAr ? 'rtl' : 'ltr'}>
       {view !== 'login' && view !== 'register' && (
-        <Header lang={lang} setLang={setLang} user={user} onLogout={logout} setView={setView} />
+        <Header lang={lang} setLang={setLang} user={user} onLogout={logout} setView={navigateToView} />
       )}
       
       {user && (
-        <div className="max-w-7xl mx-auto px-4 mt-2">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 mt-2 w-full max-w-full box-border">
           {/* Case 2: Supplier, but admin has not approved them yet */}
           {user.type === 'supplier' && !user.verified && (
             <div className="bg-blue-600 text-white text-xs py-3.5 px-4 font-bold flex items-center justify-center gap-2 rounded-2xl border border-blue-700/30 shadow-md">
@@ -629,7 +849,7 @@ export default function App() {
         </div>
       )}
       
-      <main className="max-w-7xl mx-auto px-4 pt-6 pb-32 md:pb-12">
+      <main className="w-full max-w-7xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-32 md:pb-12 box-border min-w-0 overflow-x-hidden">
         <AnimatePresence mode="wait">
           <motion.div
             key={view + (selectedProduct?.id || '')}
@@ -637,6 +857,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
+            className="w-full max-w-full box-border min-w-0"
           >
             {renderContent()}
           </motion.div>
@@ -654,7 +875,7 @@ export default function App() {
             ))}
           </div>
           <div className="px-4 text-xs font-black uppercase">{compareList.length} {isAr ? 'منتجات' : 'Products'}</div>
-          <button onClick={() => setView('compare')} className="bg-white text-solar-blue px-4 py-2 rounded-xl text-xs font-black shadow-lg">
+          <button onClick={() => navigateToView('compare')} className="bg-white text-solar-blue px-4 py-2 rounded-xl text-xs font-black shadow-lg">
             {isAr ? 'قارن الآن' : 'Compare Now'}
           </button>
         </motion.div>
@@ -684,7 +905,7 @@ export default function App() {
         showFloatingTrigger={false} 
       />
 
-      <BottomNav currentView={view} setView={setView} lang={lang} user={user} />
+      <BottomNav currentView={view} setView={navigateToView} lang={lang} user={user} />
     </div>
   );
 }

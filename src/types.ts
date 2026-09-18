@@ -41,6 +41,7 @@ export interface Product {
   updatedAt: string;
   image: string;
   image_url?: string;
+  additionalImages?: string[];
   supplierId: string | number;
   datasheetUrl?: string;
   specs: Record<string, any>;
