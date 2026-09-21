@@ -510,11 +510,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             {/* 3.2 اللغة */}
             <button
+              type="button"
               onClick={() => setLang(isAr ? 'en' : 'ar')}
-              className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer"
+              className="w-full flex items-center justify-between p-4 bg-white hover:bg-slate-50/50 transition duration-150 text-right cursor-pointer notranslate"
+              translate="no"
             >
-              <div className="flex items-center gap-2 text-solar-blue font-black text-xs bg-solar-blue/10 px-3 py-1 rounded-full">
-                <span>{isAr ? 'العربية' : 'English'}</span>
+              <div className="flex items-center gap-2 text-solar-blue font-black text-xs bg-solar-blue/10 px-3 py-1 rounded-full notranslate">
+                <span translate="no" className="notranslate font-black">{isAr ? 'العربية' : 'English'}</span>
                 <Globe size={13} />
               </div>
               <div className="flex items-center gap-3">

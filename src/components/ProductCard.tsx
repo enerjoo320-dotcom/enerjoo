@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Power, Zap, Shield, ArrowLeftRight, ShieldCheck, Grid, MapPin, Edit, Heart, Sparkles } from 'lucide-react';
+import { Power, Zap, Shield, ArrowLeftRight, ShieldCheck, Grid, MapPin, Edit, Heart, Sparkles, Building2 } from 'lucide-react';
 import { Product } from '../types';
 import { translations } from '../translations';
 import { motion, useMotionValue, useTransform } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
+import { getSupplierDisplayName } from '../utils/supplierUtils';
 
 interface ProductCardProps {
   product: Product;
@@ -29,7 +30,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const { user } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
-  const isVerified = product.suppliers?.[0]?.verified;
+  const primarySupplier = product.suppliers?.[0];
+  const isVerified = primarySupplier?.verified;
+  const supplierName = getSupplierDisplayName(primarySupplier, isAr);
   const isOwner = user?.uid === product.supplierId;
 
   // Swipe gesture state & motion values
@@ -61,19 +64,34 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     ];
 
     if (product.category === 'panels') {
-      return [
+      const specs = [
         { label: t.power, value: `${product.power}W`, icon: <Power size={14} /> },
-        { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} /> },
-        ...common
+        { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} /> }
       ];
+      if (product.specs?.voltage) {
+        const v = String(product.specs.voltage);
+        specs.push({ label: t.voltage, value: /v|فولت/i.test(v) ? v : `${v}V`, icon: <Zap size={14} /> });
+      } else if (product.specs?.current) {
+        const a = String(product.specs.current);
+        specs.push({ label: t.current, value: /a|أمبير/i.test(a) ? a : `${a}A`, icon: <Power size={14} /> });
+      } else {
+        specs.push(...common);
+      }
+      return specs;
     }
     
     if (product.category === 'inverters') {
-      return [
+      const specs = [
         { label: t.powerKw, value: product.specs.powerKw || 'N/A', icon: <Power size={14} /> },
-        { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} /> },
-        ...common
+        { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} /> }
       ];
+      if (product.specs?.voltage) {
+        const v = String(product.specs.voltage);
+        specs.push({ label: t.voltage, value: /v|فولت/i.test(v) ? v : `${v}V`, icon: <Zap size={14} /> });
+      } else {
+        specs.push(...common);
+      }
+      return specs;
     }
 
     if (product.category === 'batteries') {
@@ -168,11 +186,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                   <span className="text-[10px] font-black uppercase">{isAr ? 'تعديل' : 'Edit'}</span>
                 </button>
               )}
-              <span className="bg-solar-blue/90 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg pointer-events-auto shadow-xs tracking-wide uppercase">
+              <span translate="no" className="bg-solar-blue/90 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg pointer-events-auto shadow-xs tracking-wide uppercase notranslate">
                 {product.brand}
               </span>
               {isVerified && (
-                <span className="bg-solar-success text-white text-[9px] font-black px-2 py-0.5 rounded-lg pointer-events-auto shadow-xs flex items-center gap-1">
+                <span translate="no" className="bg-solar-success text-white text-[9px] font-black px-2 py-0.5 rounded-lg pointer-events-auto shadow-xs flex items-center gap-1 notranslate">
                   <ShieldCheck size={11} />
                   {isAr ? 'معتمد' : 'Verified'}
                 </span>
@@ -202,26 +220,34 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             )}
           </div>
           {product.efficiency >= 22 && (
-            <div className="absolute bottom-2 right-2 bg-solar-success/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-xs">
+            <div translate="no" className="absolute bottom-2 right-2 bg-solar-success/90 backdrop-blur-md text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-xs notranslate">
               {t.bestEfficiencyTag}
             </div>
           )}
         </div>
 
-        <h3 className="text-solar-text font-black text-base sm:text-lg line-clamp-1 mb-1.5">{isAr ? product.nameAr : product.name}</h3>
+        <h3 translate="no" className="text-solar-text font-black text-base sm:text-lg line-clamp-1 mb-1 notranslate">{isAr ? product.nameAr : product.name}</h3>
+
+        {/* Supplier Name & Badge */}
+        <div className="flex items-center gap-1.5 text-xs text-solar-blue font-black mb-2 truncate" title={supplierName}>
+          <Building2 size={13} className="shrink-0 text-solar-blue/80" />
+          <span className="text-[11px] font-bold text-solar-muted shrink-0">{t.supplier}:</span>
+          <span translate="no" className="truncate hover:underline notranslate font-black">{supplierName}</span>
+        </div>
+
         <div className="text-[11px] text-solar-muted mb-3.5 font-bold flex items-center gap-1.5 flex-wrap">
-          <span className="bg-solar-light text-solar-blue px-2 py-0.5 rounded-full uppercase tracking-tight text-[10px]">{product.category}</span>
+          <span translate="no" className="bg-solar-light text-solar-blue px-2 py-0.5 rounded-full uppercase tracking-tight text-[10px] notranslate">{product.category}</span>
           <span className="opacity-30">•</span>
           <div className="flex items-center gap-1">
             <div className={`w-1.5 h-1.5 rounded-full ${product.status === 'out_of_stock' ? 'bg-red-500' : product.status === 'limited' ? 'bg-amber-500' : 'bg-solar-success'}`}></div>
-            <span className={product.status === 'out_of_stock' ? 'text-red-600 font-bold' : product.status === 'limited' ? 'text-amber-600 font-bold' : ''}>
+            <span translate="no" className={`notranslate ${product.status === 'out_of_stock' ? 'text-red-600 font-bold' : product.status === 'limited' ? 'text-amber-600 font-bold' : ''}`}>
               {t[product.status] || t.available}
             </span>
           </div>
           <span className="opacity-30">•</span>
           <div className="flex items-center gap-1">
             <MapPin size={11} className="text-solar-blue" />
-            <span className="truncate max-w-[100px]">{product.suppliers?.[0]?.location || 'Egypt'}</span>
+            <span translate="no" className="truncate max-w-[100px] notranslate">{product.suppliers?.[0]?.location || 'Egypt'}</span>
           </div>
         </div>
 
@@ -229,20 +255,20 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           {specs.map((spec, i) => (
             <div key={i} className="bg-solar-bg p-2 rounded-xl flex flex-col items-center justify-center gap-0.5 border border-solar-border/50 group-hover:border-solar-blue/20 transition-colors min-h-[52px]">
               <div className="text-solar-blue opacity-70 mb-0.5">{spec.icon}</div>
-              <span className="text-[9px] text-solar-muted font-bold text-center leading-none truncate w-full">{spec.label}</span>
-              <span className="text-[10px] text-solar-text font-black truncate w-full text-center">{spec.value}</span>
+              <span translate="no" className="text-[9px] text-solar-muted font-bold text-center leading-none truncate w-full notranslate">{spec.label}</span>
+              <span translate="no" className="text-[10px] text-solar-text font-black truncate w-full text-center notranslate">{spec.value}</span>
             </div>
           ))}
         </div>
 
         <div className="flex items-center justify-between border-t border-solar-border/60 pt-2.5">
           <div className="flex flex-col">
-            <span className="text-[10px] text-solar-muted font-bold leading-none mb-0.5">{t.from}</span>
-            <span className="text-solar-blue font-black text-lg sm:text-xl leading-tight">
-              {product.price.toLocaleString()} <span className="text-xs font-bold">{t.egp}</span>
+            <span translate="no" className="text-[10px] text-solar-muted font-bold leading-none mb-0.5 notranslate">{t.from}</span>
+            <span translate="no" className="text-solar-blue font-black text-lg sm:text-xl leading-tight notranslate">
+              {product.price.toLocaleString()} <span className="text-xs font-bold notranslate">{t.egp}</span>
             </span>
           </div>
-          <div className="flex items-center gap-1 text-[10px] text-solar-muted font-bold opacity-70">
+          <div translate="no" className="flex items-center gap-1 text-[10px] text-solar-muted font-bold opacity-70 notranslate">
             <Zap size={11} />
             {t.verified}
           </div>

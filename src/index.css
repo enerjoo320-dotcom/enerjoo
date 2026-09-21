@@ -96,44 +96,35 @@
   animation: fade-in 0.5s ease-out forwards;
 }
 
-/* Custom Google Translate Widget Styling */
+/* Complete suppression of Google Translate overlays, widgets, and banners */
 body {
   top: 0px !important;
+  position: static !important;
 }
-.skiptranslate iframe, .goog-te-banner-frame {
+.skiptranslate,
+.goog-te-banner-frame,
+.goog-te-balloon-frame,
+#google_translate_element,
+#goog-gt-tt,
+.goog-te-spinner-pos,
+.goog-logo-link,
+.goog-te-gadget,
+.VIpgJd-ZVi9od-ORHb-OEVmfc,
+.VIpgJd-ZVi9od-aZ2wEe-wOHMyf,
+.VIpgJd-ZVi9od-aZ2wEe-OiiCO,
+.VIpgJd-yAWNEb-hvhGLb-SnMDfe {
   display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  width: 0 !important;
 }
-.goog-logo-link {
-  display: none !important;
-}
-.goog-te-gadget {
-  font-family: inherit !important;
-  color: transparent !important;
-  font-size: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-}
-.goog-te-gadget .goog-te-combo {
-  padding: 6px 14px !important;
-  border-radius: 9999px !important;
-  border: 1px solid var(--color-solar-border) !important;
-  background-color: var(--color-solar-light) !important;
-  color: var(--color-solar-text) !important;
-  font-size: 13px !important;
-  font-weight: 700 !important;
-  outline: none !important;
-  cursor: pointer !important;
-  transition: all 0.2s ease-in-out !important;
-}
-.goog-te-gadget .goog-te-combo:hover {
-  background-color: var(--color-solar-border) !important;
-}
-.goog-te-gadget span {
-  display: none !important;
-}
-#google_translate_element {
-  display: flex !important;
-  align-items: center !important;
+
+/* Ensure no text styling changes if browser attempts translation wrapping */
+font[class*="goog"] {
+  background-color: transparent !important;
+  box-shadow: none !important;
 }
 
 /* Completely hide and eliminate default n8n chat floating launcher */

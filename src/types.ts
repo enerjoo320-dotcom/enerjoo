@@ -24,6 +24,8 @@ export interface Supplier {
   email?: string;
   avatar?: string;
   profileImage?: string;
+  rating?: number;
+  totalSales?: number;
 }
 
 export type DimensionUnit = 'mm' | 'cm' | 'm';

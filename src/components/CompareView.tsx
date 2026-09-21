@@ -34,6 +34,8 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
   const specs = [
     { key: 'brand', label: isAr ? 'الماركة' : 'Brand', render: (p: Product) => p.brand },
     { key: 'power', label: t.power, render: (p: Product) => `${p.power} ${t.watt}` },
+    { key: 'voltage', label: t.voltage, render: (p: Product) => p.specs?.voltage || '-' },
+    { key: 'current', label: t.current, render: (p: Product) => p.specs?.current || '-' },
     { key: 'area', label: t.area, render: (p: Product) => `${p.area} m²` },
     { key: 'efficiency', label: t.efficiency, render: (p: Product) => `${p.efficiency}%` },
     { key: 'warranty', label: t.warranty, render: (p: Product) => `${p.warranty} ${t.years}` },
@@ -110,7 +112,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
                       const isBest = spec.key === 'price' ? p.price === bestVal : spec.key === 'power' ? p.power === bestVal : spec.key === 'efficiency' ? p.efficiency === bestVal : false;
                       return (
                         <td key={p.id} className="p-3 md:p-6 transition-colors group-hover:bg-solar-light/10 border-b border-solar-border/50">
-                          <div className={`p-2.5 md:p-4 rounded-xl md:rounded-2xl flex items-center justify-center gap-1.5 md:gap-3 text-[11px] md:text-base font-black transition-all ${isBest ? 'bg-solar-success/10 text-solar-success ring-1 ring-solar-success/20 shadow-inner' : 'text-solar-text bg-solar-bg/20'}`}>
+                          <div translate="no" className={`p-2.5 md:p-4 rounded-xl md:rounded-2xl flex items-center justify-center gap-1.5 md:gap-3 text-[11px] md:text-base font-black transition-all notranslate ${isBest ? 'bg-solar-success/10 text-solar-success ring-1 ring-solar-success/20 shadow-inner' : 'text-solar-text bg-solar-bg/20'}`}>
                             {isBest && <CheckCircle2 size={16} className="text-solar-success shrink-0" />}
                             {val}
                           </div>

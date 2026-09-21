@@ -176,7 +176,9 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
           ) : null}
 
           <div className="text-left">
-            <h1 className="text-xl sm:text-3xl font-black text-solar-text">{t.dashboard}</h1>
+            <h1 className="text-xl sm:text-3xl font-black text-solar-text">
+              {user?.type === 'supplier' ? (t.myProducts || (isAr ? 'منتجاتي' : 'My Products')) : t.dashboard}
+            </h1>
             <div className="text-solar-muted text-xs sm:text-sm">
               {adminFilterId ? (
                 <span className="flex items-center gap-2">

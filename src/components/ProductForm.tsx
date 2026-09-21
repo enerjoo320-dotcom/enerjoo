@@ -528,29 +528,27 @@ export const ProductForm: React.FC<{
         )}
 
         {fields.includes('voltage') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.voltage}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.voltage}</label>
             <input 
               type="text" 
               value={formData.voltage}
               onChange={e => setFormData(p => ({...p, voltage: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="48V / 220V"
-              required
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={isAr ? "مثال: 48V أو 220V أو 41.5V" : "e.g. 48V / 220V / 41.5V"}
             />
           </div>
         )}
 
         {fields.includes('current') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.current}</label>
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.current}</label>
             <input 
               type="text" 
               value={formData.current}
               onChange={e => setFormData(p => ({...p, current: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="10.85A"
-              required
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={isAr ? "مثال: 10.85A أو 13A أو 32A" : "e.g. 10.85A / 13A / 32A"}
             />
           </div>
         )}

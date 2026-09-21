@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare } from 'lucide-react';
+import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare, Building2 } from 'lucide-react';
 import { Product, ProductReview, Supplier } from '../types';
 import { translations } from '../translations';
 import { motion, AnimatePresence } from 'motion/react';
@@ -139,7 +139,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         const pThick = product.thickness || product.specs?.thickness;
         const pUnit = product.dimensionUnit || product.specs?.dimensionUnit || 'mm';
 
-        return [
+        const specsList = [
           { label: t.power, value: `${product.power} ${t.watt}`, icon: <Power className="text-solar-blue" /> },
           { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap className="text-solar-warning" /> },
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> },
@@ -151,14 +151,41 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             icon: <Ruler className="text-solar-accent" /> 
           }
         ];
+
+        if (product.specs?.voltage) {
+          const voltVal = String(product.specs.voltage);
+          const formattedVolt = /v|فولت/i.test(voltVal) ? voltVal : `${voltVal} ${t.volt || 'V'}`;
+          specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
+        }
+        if (product.specs?.current) {
+          const currVal = String(product.specs.current);
+          const formattedCurr = /a|أمبير/i.test(currVal) ? currVal : `${currVal} ${t.ampere || 'A'}`;
+          specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
+        }
+
+        return specsList;
       }
-      case 'inverters':
-        return [
-          { label: t.powerKw, value: product.specs.powerKw || 'N/A', icon: <Power className="text-solar-blue" /> },
+      case 'inverters': {
+        const specsList = [
+          { label: t.powerKw, value: product.specs?.powerKw || 'N/A', icon: <Power className="text-solar-blue" /> },
           { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap className="text-solar-warning" /> },
-          { label: t.type, value: product.specs.type || 'N/A', icon: <Grid className="text-solar-accent" /> },
+          { label: t.type, value: product.specs?.type || 'N/A', icon: <Grid className="text-solar-accent" /> },
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> }
         ];
+
+        if (product.specs?.voltage) {
+          const voltVal = String(product.specs.voltage);
+          const formattedVolt = /v|فولت/i.test(voltVal) ? voltVal : `${voltVal} ${t.volt || 'V'}`;
+          specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
+        }
+        if (product.specs?.current) {
+          const currVal = String(product.specs.current);
+          const formattedCurr = /a|أمبير/i.test(currVal) ? currVal : `${currVal} ${t.ampere || 'A'}`;
+          specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
+        }
+
+        return specsList;
+      }
       case 'batteries':
         return [
           { label: t.capacity, value: product.specs.capacity || 'N/A', icon: <Zap className="text-solar-warning" /> },
@@ -173,6 +200,26 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           { label: t.voltage, value: product.specs.voltage || 'N/A', icon: <Zap className="text-solar-warning" /> },
           { label: t.material, value: product.specs.material || 'N/A', icon: <Grid className="text-solar-success" /> }
         ];
+      case 'protection':
+      case 'combiner': {
+        const specsList = [
+          ...common
+        ];
+        if (product.specs?.poles) {
+          specsList.push({ label: t.poles, value: product.specs.poles, icon: <Grid className="text-solar-accent" /> });
+        }
+        if (product.specs?.voltage) {
+          const voltVal = String(product.specs.voltage);
+          const formattedVolt = /v|فولت/i.test(voltVal) ? voltVal : `${voltVal} ${t.volt || 'V'}`;
+          specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
+        }
+        if (product.specs?.current) {
+          const currVal = String(product.specs.current);
+          const formattedCurr = /a|أمبير/i.test(currVal) ? currVal : `${currVal} ${t.ampere || 'A'}`;
+          specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
+        }
+        return specsList;
+      }
       default:
         return common;
     }
@@ -206,6 +253,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   // Find other products from the same supplier
   const supplierId = product.supplierId;
+  const primarySupplierObj = product.suppliers?.[0];
+  const resolvedPrimarySupplier = suppliers?.find(sup => sup.id === (primarySupplierObj?.id || supplierId)) || 
+    ((primarySupplierObj?.id || supplierId) ? fetchedProfiles[primarySupplierObj?.id || supplierId] : null);
+  const effectivePrimarySupplier = resolvedPrimarySupplier ? { ...primarySupplierObj, ...resolvedPrimarySupplier } : primarySupplierObj;
+  const primarySupplierDisplayName = getSupplierDisplayName(effectivePrimarySupplier, isAr);
+
   const otherProducts = allProducts.filter(p => 
     p.id !== product.id && 
     p.supplierId === supplierId
@@ -241,7 +294,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </button>
           )}
         </div>
-        <span className="text-[10px] font-black text-solar-muted bg-solar-card px-3 py-1.5 rounded-xl border border-solar-border shadow-2xs tracking-wider uppercase truncate max-w-[140px] sm:max-w-none">
+        <span translate="no" className="text-[10px] font-black text-solar-muted bg-solar-card px-3 py-1.5 rounded-xl border border-solar-border shadow-2xs tracking-wider uppercase truncate max-w-[140px] sm:max-w-none notranslate">
           {product.brand}
         </span>
       </div>
@@ -306,8 +359,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 if (key === 'description' || !value) return null;
                 return (
                   <div key={key} className="flex flex-col border-b border-solar-border/30 pb-2 min-w-0 w-full max-w-full box-border">
-                    <span className="text-[10px] font-black text-solar-muted uppercase tracking-wider mb-1 truncate">{getSpecLabel(key)}</span>
-                    <span className="text-xs sm:text-sm font-bold text-solar-text break-words [overflow-wrap:anywhere] [word-break:break-word]">{value as string}</span>
+                    <span translate="no" className="text-[10px] font-black text-solar-muted uppercase tracking-wider mb-1 truncate notranslate">{getSpecLabel(key)}</span>
+                    <span translate="no" className="text-xs sm:text-sm font-bold text-solar-text break-words [overflow-wrap:anywhere] [word-break:break-word] notranslate">{value as string}</span>
                   </div>
                 );
               })}
@@ -326,11 +379,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
         <div className="space-y-6 sm:space-y-8 w-full max-w-full box-border min-w-0">
           <div className="w-full max-w-full box-border min-w-0">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-solar-text leading-tight mb-3 sm:mb-4 break-words [overflow-wrap:anywhere] [word-break:break-word] w-full max-w-full">
+            <h1 translate="no" className="text-2xl sm:text-3xl lg:text-4xl font-black text-solar-text leading-tight mb-3 sm:mb-4 break-words [overflow-wrap:anywhere] [word-break:break-word] w-full max-w-full notranslate">
               {isAr ? product.nameAr : product.name}
             </h1>
             <div className="flex flex-wrap gap-1.5 sm:gap-2 w-full max-w-full box-border">
-              <span className="bg-solar-blue text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest">{product.brand}</span>
+              <span translate="no" className="bg-solar-blue text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest notranslate">{product.brand}</span>
               {product.suppliers?.[0]?.verified && (
                 <span className="bg-solar-success text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest shadow-sm flex items-center gap-1">
                   <CheckCircle2 size={12} />
@@ -345,6 +398,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               }`}>
                 {t[product.status] || t.available}
               </span>
+              <button
+                type="button"
+                onClick={() => onFilterSupplier(primarySupplierObj?.id || supplierId)}
+                className="bg-solar-blue/10 hover:bg-solar-blue hover:text-white text-solar-blue text-[11px] font-black px-3 py-1 rounded-full border border-solar-blue/20 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                title={isAr ? `عرض جميع منتجات المورد: ${primarySupplierDisplayName}` : `View all products by supplier: ${primarySupplierDisplayName}`}
+              >
+                <Building2 size={12} className="shrink-0" />
+                <span>{t.supplier}: <strong className="font-black">{primarySupplierDisplayName}</strong></span>
+              </button>
             </div>
             {reviews.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 mt-3 text-solar-muted text-xs font-bold leading-none w-full max-w-full box-border">

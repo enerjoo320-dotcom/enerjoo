@@ -11,7 +11,8 @@ import {
   Calculator,
   Calendar,
   Layers,
-  Sun
+  Sun,
+  Building2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SolarRequest, ViewType } from '../types';
@@ -220,6 +221,15 @@ export const CustomerRequestsView: React.FC<CustomerRequestsViewProps> = ({ lang
                       <span>{req.calculatedOutputs.batteryQty}x {req.calculatedOutputs.batteryModel || 'بطاريات تخزين'}</span>
                     </div>
                   ) : null}
+                  {req.supplierContacted && (
+                    <div className="flex justify-between pt-1.5 border-t border-slate-200/80 text-solar-blue">
+                      <span className="flex items-center gap-1">
+                        <Building2 size={13} />
+                        <span>{isAr ? 'المورد المسؤول:' : 'Assigned Supplier:'}</span>
+                      </span>
+                      <span className="font-black">{req.supplierContacted}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions */}

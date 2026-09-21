@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, LogIn, LogOut, PlusCircle, Users } from 'lucide-react';
+import { Heart, LogIn, LogOut, PlusCircle, Users, Globe, Package } from 'lucide-react';
 import { translations } from '../translations';
 import { User, ViewType } from '../types';
 
@@ -16,20 +16,55 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
   const isAr = lang === 'ar';
 
   return (
-    <header className="sticky top-0 z-40 w-full glass border-b border-solar-border/70 pt-safe select-none">
+    <header translate="no" className="sticky top-0 z-40 w-full glass border-b border-solar-border/70 pt-safe select-none notranslate">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center justify-between gap-2">
+        {/* Enerjoo Brand Logo */}
         <div 
-          className="flex items-center gap-2 cursor-pointer active:scale-95 transition-transform" 
+          id="header-logo-container"
+          className="h-10 sm:h-12 md:h-13 flex items-center justify-center cursor-pointer active:scale-95 transition-transform shrink-0" 
           onClick={() => setView('home')}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setView('home');
+            }
+          }}
+          title={isAr ? 'Enerjoo - عالم الطاقة بين يديك' : 'Enerjoo - Home'}
         >
-          <div className="w-9 h-9 sm:w-10 sm:h-10 bg-solar-blue rounded-xl flex items-center justify-center shadow-md shadow-solar-blue/25 shrink-0">
-            <span className="text-white font-black text-lg sm:text-xl font-display">S</span>
-          </div>
-          <span className="font-display font-black text-lg sm:text-xl text-solar-text tracking-tight">{t.appName}</span>
+          <img 
+            id="header-enerjoo-logo"
+            src="/enerjoo-logo-original-2026.jpeg" 
+            alt="Enerjoo - عالم الطاقة بين يديك" 
+            className="h-full w-auto max-h-11 sm:max-h-12 object-contain select-none block"
+            referrerPolicy="no-referrer"
+          />
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          {user?.type !== 'admin' && (
+          {/* Language Switcher */}
+          <button 
+            type="button"
+            onClick={() => setLang(isAr ? 'en' : 'ar')}
+            className="flex items-center gap-1.5 text-solar-muted hover:text-solar-blue transition font-black text-xs bg-solar-light hover:bg-solar-border/60 px-2.5 sm:px-3 py-1.5 rounded-full notranslate cursor-pointer active:scale-95"
+            title={isAr ? 'التحويل إلى الإنجليزية' : 'Switch to Arabic'}
+            translate="no"
+          >
+            <Globe size={14} className="text-solar-blue shrink-0" />
+            <span translate="no" className="notranslate font-black text-[11px] sm:text-xs">{isAr ? 'English' : 'العربية'}</span>
+          </button>
+
+          {user?.type === 'supplier' ? (
+            <button 
+              onClick={() => setView('supplier-dashboard')}
+              className="hidden md:flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold text-sm bg-solar-light px-3 py-1.5 rounded-full"
+              title={t.myProducts || (isAr ? 'منتجاتي' : 'My Products')}
+            >
+              <Package size={18} className="text-solar-blue" />
+              <span>{t.myProducts || (isAr ? 'منتجاتي' : 'My Products')}</span>
+            </button>
+          ) : user?.type !== 'admin' && (
             <button 
               onClick={() => setView('wishlist')}
               className="hidden md:flex items-center gap-2 text-solar-muted hover:text-red-500 transition font-bold text-sm bg-solar-light px-3 py-1.5 rounded-full"

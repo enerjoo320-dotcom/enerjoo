@@ -895,43 +895,26 @@ async function startServer() {
     }
   });
 
+  // Static assets from public directory
+  app.use(express.static(path.join(process.cwd(), "public")));
+
   // Vite middleware for development or static serving for production
   if (process.env.NODE_ENV !== "production") {
-    let viteReady = false;
-    let viteMiddleware: any = null;
-    const vitePromise = createViteServer({
+    const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
-    }).then((vite) => {
-      viteMiddleware = vite.middlewares;
-      viteReady = true;
-      console.log("Vite development server middleware ready.");
-      return vite;
-    }).catch((err) => {
-      console.error("Failed to initialize Vite development server:", err);
     });
-
-    // Handle all page requests: wait for Vite if still warming up
-    app.use(async (req, res, next) => {
-      if (!viteReady) {
-        await vitePromise;
-      }
-      if (viteMiddleware) {
-        return viteMiddleware(req, res, next);
-      }
-      next();
-    });
+    app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  // Start listening immediately so port 3000 is open in <10ms for Nginx reverse proxy
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server listening on port ${PORT} (0.0.0.0:${PORT})`);
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 

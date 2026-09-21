@@ -109,7 +109,7 @@ export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = (
           <span>{isAr ? 'الموردين' : 'Suppliers'}</span>
         </div>
 
-        {/* Right side circle logo */}
+        {/* Right side supplier badge */}
         <div className="flex items-center gap-3">
           <button 
             onClick={onBack}

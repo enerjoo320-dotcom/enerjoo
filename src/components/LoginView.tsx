@@ -186,35 +186,31 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
 
   return (
     <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="max-w-md mx-auto pb-20 font-sans px-4 Ltr:text-left rtl:text-right"
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="max-w-md mx-auto pt-6 pb-20 font-sans px-4 ltr:text-left rtl:text-right"
     >
-      {/* Mockup TOP Header layout replication */}
-      <div className="flex items-center justify-between mb-8">
-        {/* Left side: Blue button block containing "تسجيل الدخول" and the icon */}
-        <button 
-          onClick={() => setView('login')}
-          className="flex items-center gap-2 bg-solar-blue text-white px-5 py-2.5 rounded-2xl text-sm font-extrabold shadow-lg shadow-solar-blue/20 transition-all active:scale-95"
+      {/* Top Enerjoo Official Logo Container - Clickable to Home */}
+      <div className="flex flex-col items-center justify-center mb-6 text-center">
+        <button
+          type="button"
+          id="login-enerjoo-logo-btn"
+          onClick={() => setView('home')}
+          className="group focus:outline-none transition-all active:scale-95 flex items-center justify-center py-1 px-4 rounded-2xl hover:bg-white/60"
+          title={isAr ? 'العودة للصفحة الرئيسية - Enerjoo' : 'Return to Home - Enerjoo'}
         >
-          <LogIn size={18} className="stroke-[2.5]" />
-          <span>{isAr ? 'تسجيل الدخول' : 'Sign In'}</span>
+          <img 
+            id="login-enerjoo-logo"
+            src="/enerjoo-logo-original-2026.jpeg" 
+            alt="Enerjoo - عالم الطاقة بين يديك" 
+            className="w-44 sm:w-52 max-w-full h-auto object-contain select-none group-hover:scale-105 transition-transform duration-200 block"
+            referrerPolicy="no-referrer"
+          />
         </button>
-
-        {/* Right side: Circular blue badge containing letter "S" */}
-        <div className="w-10 h-10 bg-solar-blue rounded-xl flex items-center justify-center shadow-lg shadow-solar-blue/20">
-          <span className="text-white font-black text-xl font-display">S</span>
-        </div>
       </div>
 
       {/* Main Login Card Container */}
       <div className="bg-white rounded-[2.5rem] px-6 py-10 md:p-10 border border-solar-border/40 shadow-[0_15px_50px_rgba(0,0,0,0.03)] relative">
-        
-        {/* Styled overlaps/centering Icon Box */}
-        <div className="w-20 h-20 bg-solar-blue text-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-solar-blue/20">
-          <LogIn size={36} className="stroke-[2]" />
-        </div>
-
         {/* Headings */}
         <div className="text-center mb-6">
           <h2 className="text-3xl font-black text-solar-text mb-2 tracking-tight">

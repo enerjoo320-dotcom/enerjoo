@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, PlusCircle, ArrowLeftRight, User, LogIn, LayoutDashboard, Heart, Calculator } from 'lucide-react';
+import { Home, PlusCircle, ArrowLeftRight, User, LogIn, LayoutDashboard, Heart, Calculator, Package } from 'lucide-react';
 import { translations } from '../translations';
 import { User as UserType, ViewType } from '../types';
 import { motion } from 'motion/react';
@@ -13,12 +13,26 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang, user }) => {
   const t = translations[lang];
+  const isSupplier = user?.type === 'supplier';
   
   const navItems: { id: ViewType; icon: React.ReactNode; label: string; show: boolean }[] = [
     { id: 'home', icon: <Home size={20} strokeWidth={2.5} />, label: t.home, show: true },
     { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: user?.type !== 'admin' },
-    { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: user?.type !== 'supplier' },
-    { id: 'wishlist', icon: <Heart size={20} strokeWidth={2.5} />, label: t.wishlist, show: user?.type !== 'admin' },
+    { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: !isSupplier },
+    // For suppliers: show "منتجاتي" (My Products) instead of "المفضلة" (Wishlist)
+    isSupplier
+      ? {
+          id: 'supplier-dashboard',
+          icon: <Package size={20} strokeWidth={2.5} />,
+          label: t.myProducts || (lang === 'ar' ? 'منتجاتي' : 'My Products'),
+          show: true
+        }
+      : {
+          id: 'wishlist',
+          icon: <Heart size={20} strokeWidth={2.5} />,
+          label: t.wishlist,
+          show: user?.type !== 'admin'
+        },
     { 
       id: user?.type === 'admin' ? 'admin-suppliers' : 'add', 
       icon: user?.type === 'admin' ? <LayoutDashboard size={20} strokeWidth={2.5} /> : <PlusCircle size={20} strokeWidth={2.5} />, 

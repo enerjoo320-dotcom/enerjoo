@@ -284,8 +284,27 @@ export const RegisterView: React.FC<{
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="max-w-[550px] mx-auto py-10"
+      className="max-w-[550px] mx-auto pt-6 pb-12 px-4"
     >
+      {/* Top Enerjoo Official Logo Container - Clickable to Home */}
+      <div className="flex flex-col items-center justify-center mb-6 text-center">
+        <button
+          type="button"
+          id="register-enerjoo-logo-btn"
+          onClick={() => setView('home')}
+          className="group focus:outline-none transition-all active:scale-95 flex items-center justify-center py-1 px-4 rounded-2xl hover:bg-white/60"
+          title={isAr ? 'العودة للصفحة الرئيسية - Enerjoo' : 'Return to Home - Enerjoo'}
+        >
+          <img 
+            id="register-enerjoo-logo"
+            src="/enerjoo-logo-original-2026.jpeg" 
+            alt="Enerjoo - عالم الطاقة بين يديك" 
+            className="w-44 sm:w-52 max-w-full h-auto object-contain select-none group-hover:scale-105 transition-transform duration-200 block"
+            referrerPolicy="no-referrer"
+          />
+        </button>
+      </div>
+
       <div className="text-center space-y-2 mb-8">
         <button 
           onClick={() => setView('login')}
@@ -294,9 +313,6 @@ export const RegisterView: React.FC<{
           <ArrowLeft size={16} className={isAr ? 'rotate-180' : ''} />
           {t.back}
         </button>
-        <div className="w-16 h-16 bg-solar-blue text-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-solar-blue/20">
-          <UserIcon size={32} />
-        </div>
         <h1 className="text-3xl font-black text-solar-text">{t.register}</h1>
         <p className="text-solar-muted text-sm leading-relaxed px-10">{t.joinLarge}</p>
       </div>

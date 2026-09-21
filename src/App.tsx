@@ -310,6 +310,12 @@ export default function App() {
     safeLocalStorage.setItem('enerjoo_lang', lang);
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.setAttribute('translate', 'no');
+    document.documentElement.classList.add('notranslate');
+    if (document.body) {
+      document.body.setAttribute('translate', 'no');
+      document.body.classList.add('notranslate');
+    }
   }, [lang]);
 
   useEffect(() => {
@@ -836,7 +842,11 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen bg-solar-bg w-full max-w-full overflow-x-hidden box-border ${isAr ? 'rtl' : 'ltr'}`} dir={isAr ? 'rtl' : 'ltr'}>
+    <div 
+      translate="no" 
+      className={`min-h-screen bg-solar-bg w-full max-w-full overflow-x-hidden box-border notranslate ${isAr ? 'rtl' : 'ltr'}`} 
+      dir={isAr ? 'rtl' : 'ltr'}
+    >
       {view !== 'login' && view !== 'register' && (
         <Header lang={lang} setLang={setLang} user={user} onLogout={logout} setView={navigateToView} />
       )}

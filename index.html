@@ -1,8 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="ar" dir="rtl" translate="no" class="notranslate">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="google" content="notranslate" />
+    <meta name="googlebot" content="notranslate" />
+    <meta http-equiv="Content-Language" content="ar, en" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -12,10 +15,43 @@
     <meta property="og:title" content="Enerjoo | المتجر اللانهائي للطاقة" />
     <meta property="og:description" content="المتجر اللانهائي للطاقة  اكتشف منتجات وحلول الطاقة الشمسية والأنظمة الذكية من مكان واحد." />
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="/enerjoo-logo-original-2026.jpeg" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Enerjoo | المتجر اللانهائي للطاقة" />
     <meta name="twitter:description" content="المتجر اللانهائي للطاقة  اكتشف منتجات وحلول الطاقة الشمسية والأنظمة الذكية من مكان واحد." />
+    <meta name="twitter:image" content="/enerjoo-logo-original-2026.jpeg" />
     <meta name="theme-color" content="#034694" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Enerjoo",
+      "url": "https://enerjoo.com",
+      "logo": "https://enerjoo.com/favicon.png",
+      "description": "المتجر اللانهائي للطاقة - اكتشف منتجات وحلول الطاقة الشمسية والأنظمة الذكية من مكان واحد."
+    }
+    </script>
+
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('enerjoo_lang');
+          var lang = (saved === 'en' || saved === 'ar') ? saved : 'ar';
+          document.documentElement.lang = lang;
+          document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+          document.documentElement.setAttribute('translate', 'no');
+          document.documentElement.classList.add('notranslate');
+        } catch (e) {}
+      })();
+    </script>
   
     <script>
       // Forcefully capture and completely suppress generic cross-origin "Script error." and development dev-server WebSocket noise
@@ -92,8 +128,8 @@
       };
     </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body class="notranslate" translate="no">
+    <div id="root" class="notranslate" translate="no"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
