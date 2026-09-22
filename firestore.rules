@@ -22,7 +22,8 @@ service cloud.firestore {
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin') ||
         (request.auth.token.keys().contains('email') && (
           request.auth.token.email.matches('(?i)^enerjoo365@.*') ||
-          request.auth.token.email.matches('(?i)^enerjoo320@.*')
+          request.auth.token.email.matches('(?i)^enerjoo320@.*') ||
+          request.auth.token.email == 'eng.faressnasser@gmail.com'
         ))
       );
     }

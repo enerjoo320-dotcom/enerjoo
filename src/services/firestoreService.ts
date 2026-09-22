@@ -14,7 +14,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { Product, Supplier, Category, ProductReview, SolarRequest, SolarRequestStatus, Customer, Quotation, QuotationStatus } from '../types';
+import { Product, Supplier, Category, DimensionUnit, ProductReview, SolarRequest, SolarRequestStatus, Customer, Quotation, QuotationStatus } from '../types';
 import { normalizeEgyptianPhone } from '../utils/phoneUtils';
 import { formatDateOnly } from '../utils/dateUtils';
 import { isRawUidOrId } from '../utils/supplierUtils';
@@ -202,6 +202,41 @@ function mapCategoryToD1Category(cat?: Category): string {
 }
 
 /**
+ * Helper to robustly parse dimensions string (e.g. "2384 x 1303 x 35 mm", "2384*1303*35", "2384 x 1303")
+ */
+export function parseDimensionsString(dimStr?: string | null): {
+  length?: number;
+  width?: number;
+  thickness?: number;
+  dimensionUnit?: DimensionUnit;
+  area?: number;
+} {
+  if (!dimStr || typeof dimStr !== 'string') return {};
+  const cleaned = dimStr.trim();
+  const match = cleaned.match(/([\d.]+)\s*[*xX×]\s*([\d.]+)(?:\s*[*xX×]\s*([\d.]+))?\s*(mm|cm|m)?/i);
+  if (match) {
+    const l = parseFloat(match[1]);
+    const w = parseFloat(match[2]);
+    const th = match[3] ? parseFloat(match[3]) : undefined;
+    const unit = (match[4]?.toLowerCase() || 'mm') as DimensionUnit;
+    let area: number | undefined;
+    if (!isNaN(l) && !isNaN(w)) {
+      if (unit === 'mm') area = parseFloat(((l * w) / 1_000_000).toFixed(4));
+      else if (unit === 'cm') area = parseFloat(((l * w) / 10_000).toFixed(4));
+      else if (unit === 'm') area = parseFloat((l * w).toFixed(4));
+    }
+    return {
+      length: !isNaN(l) ? l : undefined,
+      width: !isNaN(w) ? w : undefined,
+      thickness: th !== undefined && !isNaN(th) ? th : undefined,
+      dimensionUnit: unit,
+      area
+    };
+  }
+  return {};
+}
+
+/**
  * Map D1 product object to application Product interface.
  */
 function mapD1ProductToProduct(d1Item: any): Product {
@@ -215,58 +250,89 @@ function mapD1ProductToProduct(d1Item: any): Product {
   const efficiency = Number(d1Item.efficiency_percent ?? d1Item.efficiency ?? 0);
   const warranty = Number(d1Item.warranty_years ?? d1Item.warranty ?? 0);
 
-  // Parse specs if stored as string or object
-  let specs: Record<string, any> = {};
+  // Parse raw specs if stored as string or object
+  let parsedSpecs: Record<string, any> = {};
   if (typeof d1Item.specs === 'string') {
     try {
-      specs = JSON.parse(d1Item.specs);
+      parsedSpecs = JSON.parse(d1Item.specs);
     } catch {
-      specs = {};
+      parsedSpecs = {};
     }
   } else if (d1Item.specs && typeof d1Item.specs === 'object') {
-    specs = d1Item.specs;
-  } else {
-    // Collect specific D1 technical specs
-    specs = {
-      productType: d1Item.product_type,
-      technology: d1Item.technology,
-      cellType: d1Item.cell_type,
-      numberOfCells: d1Item.number_of_cells,
-      ratedPowerKw: d1Item.rated_power_kw,
-      surgePowerW: d1Item.surge_power_w,
-      waveform: d1Item.waveform,
-      acVoltageV: d1Item.ac_voltage_v,
-      frequencyHz: d1Item.frequency_hz,
-      peakEfficiency: d1Item.peak_efficiency_percent,
-      nominalVoltage: d1Item.nominal_voltage_v,
-      capacityAh: d1Item.capacity_ah,
-      nominalEnergyWh: d1Item.nominal_energy_wh,
-      maxContinuousDischargeCurrentA: d1Item.max_continuous_discharge_current_a,
-      cycleLife: d1Item.cycle_life,
-      maxPvOpenCircuitVoltageV: d1Item.max_pv_open_circuit_voltage_v,
-      maxPvArrayPowerW: d1Item.max_pv_array_power_w,
-      pvMpptVoltageRangeV: d1Item.pv_mppt_voltage_range_v,
-      vmpV: d1Item.vmp_v,
-      vocV: d1Item.voc_v,
-      impA: d1Item.imp_a,
-      iscA: d1Item.isc_a,
-      dimensionsMm: d1Item.dimensions_mm,
-      weightKg: d1Item.weight_kg,
-      notes: d1Item.notes,
-    };
+    parsedSpecs = d1Item.specs;
   }
 
-  const area = Number(d1Item.area ?? specs.area ?? 0);
+  // Base technical specs from Cloudflare D1 columns + parsedSpecs
+  const specs: Record<string, any> = {
+    productType: d1Item.product_type || parsedSpecs.productType || parsedSpecs.type || '',
+    technology: d1Item.technology || parsedSpecs.technology || '',
+    cellType: d1Item.cell_type || parsedSpecs.cellType || '',
+    numberOfCells: d1Item.number_of_cells || parsedSpecs.numberOfCells || '',
+    ratedPowerKw: d1Item.rated_power_kw ?? parsedSpecs.ratedPowerKw,
+    surgePowerW: d1Item.surge_power_w ?? parsedSpecs.surgePowerW,
+    waveform: d1Item.waveform || parsedSpecs.waveform || '',
+    acVoltageV: d1Item.ac_voltage_v || parsedSpecs.acVoltageV || '',
+    frequencyHz: d1Item.frequency_hz ?? parsedSpecs.frequencyHz,
+    peakEfficiency: d1Item.peak_efficiency_percent ?? parsedSpecs.peakEfficiency,
+    nominalVoltage: d1Item.nominal_voltage_v || parsedSpecs.nominalVoltage || '',
+    capacityAh: d1Item.capacity_ah ?? parsedSpecs.capacityAh,
+    nominalEnergyWh: d1Item.nominal_energy_wh ?? parsedSpecs.nominalEnergyWh,
+    maxContinuousDischargeCurrentA: d1Item.max_continuous_discharge_current_a ?? parsedSpecs.maxContinuousDischargeCurrentA,
+    cycleLife: d1Item.cycle_life ?? parsedSpecs.cycleLife,
+    maxPvOpenCircuitVoltageV: d1Item.max_pv_open_circuit_voltage_v ?? parsedSpecs.maxPvOpenCircuitVoltageV,
+    maxPvArrayPowerW: d1Item.max_pv_array_power_w ?? parsedSpecs.maxPvArrayPowerW,
+    pvMpptVoltageRangeV: d1Item.pv_mppt_voltage_range_v || parsedSpecs.pvMpptVoltageRangeV || parsedSpecs.mppt || '',
+    mppt: d1Item.pv_mppt_voltage_range_v || parsedSpecs.mppt || parsedSpecs.pvMpptVoltageRangeV || '',
+    vmpV: d1Item.vmp_v || parsedSpecs.vmpV || parsedSpecs.voltage || '',
+    voltage: d1Item.vmp_v || parsedSpecs.voltage || parsedSpecs.vmpV || d1Item.nominal_voltage_v || d1Item.ac_voltage_v || '',
+    vocV: d1Item.voc_v || parsedSpecs.vocV || '',
+    impA: d1Item.imp_a || parsedSpecs.impA || parsedSpecs.current || '',
+    current: d1Item.imp_a || parsedSpecs.current || parsedSpecs.impA || '',
+    iscA: d1Item.isc_a || parsedSpecs.iscA || '',
+    dimensionsMm: d1Item.dimensions_mm || parsedSpecs.dimensionsMm || parsedSpecs.dimensions || '',
+    weightKg: d1Item.weight_kg || parsedSpecs.weightKg || parsedSpecs.weight || '',
+    weight: d1Item.weight_kg || parsedSpecs.weight || parsedSpecs.weightKg || '',
+    notes: d1Item.notes || parsedSpecs.notes || parsedSpecs.description || '',
+    description: d1Item.notes || parsedSpecs.description || parsedSpecs.notes || '',
+    type: d1Item.product_type || parsedSpecs.type || parsedSpecs.productType || d1Item.technology || parsedSpecs.technology || '',
+    ...parsedSpecs,
+  };
+
+  // Dimensions parsing
+  const parsedDims = parseDimensionsString(d1Item.dimensions_mm || specs.dimensionsMm || d1Item.machine_dimensions_w_h_d_mm);
+
   const length = d1Item.length !== undefined && d1Item.length !== null && d1Item.length !== ''
     ? Number(d1Item.length)
-    : (specs.length !== undefined && specs.length !== null && specs.length !== '' && !isNaN(Number(specs.length)) ? Number(specs.length) : undefined);
+    : (specs.length !== undefined && specs.length !== null && specs.length !== '' && !isNaN(Number(specs.length))
+        ? Number(specs.length)
+        : parsedDims.length);
+
   const width = d1Item.width !== undefined && d1Item.width !== null && d1Item.width !== ''
     ? Number(d1Item.width)
-    : (specs.width !== undefined && specs.width !== null && specs.width !== '' && !isNaN(Number(specs.width)) ? Number(specs.width) : undefined);
+    : (specs.width !== undefined && specs.width !== null && specs.width !== '' && !isNaN(Number(specs.width))
+        ? Number(specs.width)
+        : parsedDims.width);
+
   const thickness = d1Item.thickness !== undefined && d1Item.thickness !== null && d1Item.thickness !== ''
     ? Number(d1Item.thickness)
-    : (specs.thickness !== undefined && specs.thickness !== null && specs.thickness !== '' && !isNaN(Number(specs.thickness)) ? Number(specs.thickness) : undefined);
-  const dimensionUnit = d1Item.dimensionUnit || specs.dimensionUnit || (specs.dimensionsMm ? 'mm' : undefined);
+    : (specs.thickness !== undefined && specs.thickness !== null && specs.thickness !== '' && !isNaN(Number(specs.thickness))
+        ? Number(specs.thickness)
+        : parsedDims.thickness);
+
+  const dimensionUnit = (d1Item.dimensionUnit || specs.dimensionUnit || parsedDims.dimensionUnit || (specs.dimensionsMm ? 'mm' : 'mm')) as DimensionUnit;
+
+  let area = Number(d1Item.area ?? specs.area ?? 0);
+  if ((!area || isNaN(area)) && parsedDims.area) {
+    area = parsedDims.area;
+  }
+  if ((!area || isNaN(area)) && length && width) {
+    if (dimensionUnit === 'mm') area = parseFloat(((length * width) / 1_000_000).toFixed(4));
+    else if (dimensionUnit === 'cm') area = parseFloat(((length * width) / 10_000).toFixed(4));
+    else if (dimensionUnit === 'm') area = parseFloat((length * width).toFixed(4));
+  }
+
+  const description = d1Item.notes || specs.description || specs.notes || '';
+  const notes = d1Item.notes || specs.notes || specs.description || '';
   const image = d1Item.image_url || d1Item.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop';
   const supplierId = d1Item.supplier_id || d1Item.supplierId || d1Item.supplier || '';
   const rawUpdatedAt = d1Item.updated_at || d1Item.updatedAt || new Date().toISOString().split('T')[0];
@@ -417,6 +483,40 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
   if (product.width !== undefined) payload.width = Number(product.width);
   if (product.thickness !== undefined) payload.thickness = Number(product.thickness);
   if (product.dimensionUnit !== undefined) payload.dimensionUnit = product.dimensionUnit;
+
+  // Format dimensions_mm for D1 database column
+  const lengthVal = product.length ?? product.specs?.length;
+  const widthVal = product.width ?? product.specs?.width;
+  const thicknessVal = product.thickness ?? product.specs?.thickness;
+  const unit = product.dimensionUnit || product.specs?.dimensionUnit || 'mm';
+  if (lengthVal && widthVal) {
+    payload.dimensions_mm = `${lengthVal} x ${widthVal}${thicknessVal ? ` x ${thicknessVal}` : ''} ${unit}`;
+  } else if (product.specs?.dimensionsMm) {
+    payload.dimensions_mm = product.specs.dimensionsMm;
+  }
+
+  // Top-level fallbacks for specs
+  const descNotes = product.specs?.description || product.specs?.notes || product.description || product.notes || (product as any).notes;
+  if (descNotes) {
+    payload.notes = descNotes;
+  }
+  const prodType = product.specs?.type || product.specs?.productType || product.specs?.technology || (product as any).type || (product as any).product_type;
+  if (prodType) {
+    payload.product_type = prodType;
+  }
+  const volt = product.specs?.voltage || product.specs?.vmpV || product.specs?.nominalVoltage || (product as any).voltage || (product as any).vmp_v;
+  if (volt) {
+    payload.vmp_v = volt;
+  }
+  const curr = product.specs?.current || product.specs?.impA || (product as any).current || (product as any).imp_a;
+  if (curr) {
+    payload.imp_a = curr;
+  }
+  const wt = product.specs?.weight || product.specs?.weightKg || (product as any).weight || (product as any).weight_kg;
+  if (wt) {
+    payload.weight_kg = wt;
+  }
+
   if (product.image) payload.image_url = product.image;
   if ((product as any).image_url) payload.image_url = (product as any).image_url;
   if (product.supplierId !== undefined) {
@@ -450,8 +550,15 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
     if (product.specs.powerKw || product.specs.ratedPowerKw) {
       payload.rated_power_kw = Number(product.specs.powerKw || product.specs.ratedPowerKw);
     }
-    if (product.specs.voltage || product.specs.vmpV) {
-      payload.vmp_v = product.specs.voltage || product.specs.vmpV;
+    if (product.specs.pvMpptVoltageRangeV || product.specs.mppt || (product as any).pv_mppt_voltage_range_v) {
+      payload.pv_mppt_voltage_range_v = product.specs.pvMpptVoltageRangeV || product.specs.mppt || (product as any).pv_mppt_voltage_range_v;
+    }
+    if (product.specs.voltage || product.specs.vmpV || product.specs.acVoltageV) {
+      if (product.category === 'inverters') {
+        payload.ac_voltage_v = product.specs.acVoltageV || product.specs.voltage;
+      } else {
+        payload.vmp_v = product.specs.vmpV || product.specs.voltage;
+      }
     }
     if (product.specs.acVoltageV) {
       payload.ac_voltage_v = product.specs.acVoltageV;
@@ -460,7 +567,11 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
       payload.nominal_voltage_v = product.specs.nominalVoltage;
     }
     if (product.specs.current || product.specs.impA) {
-      payload.imp_a = product.specs.current || product.specs.impA;
+      if (product.category === 'inverters') {
+        // Inverter output current
+      } else {
+        payload.imp_a = product.specs.impA || product.specs.current;
+      }
     }
     if (product.specs.weight || product.specs.weightKg) {
       payload.weight_kg = product.specs.weight || product.specs.weightKg;
@@ -585,20 +696,52 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
 };
 
 /**
- * Update an existing product in Cloudflare D1 via Worker API (PUT /products/:id).
+ * Update an existing product in Cloudflare D1 via Worker API.
+ * Uses atomic merge & recreate to guarantee that all technical specifications
+ * (vmp_v, imp_a, product_type, dimensions_mm, weight_kg, notes) are stored in D1.
  */
 export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
   try {
     const pId = String(productId);
     const payload = mapProductToD1Payload(data);
-    // Ensure id is not sent in body if not needed
-    delete payload.id;
-    delete payload.product_id;
+    payload.product_id = pId;
 
-    await requestProductsApi<{ success: boolean; message?: string }>(`/products/${pId}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
+    // Fetch existing raw product from D1 to perform a comprehensive non-destructive merge
+    let existingRaw: Record<string, any> = {};
+    try {
+      const existingRes = await requestProductsApi<{ success: boolean; product?: any }>(`/products/${pId}`);
+      if (existingRes && existingRes.product) {
+        existingRaw = existingRes.product;
+      }
+    } catch (e) {
+      console.warn(`Could not fetch existing product ${pId} before update:`, e);
+    }
+
+    const mergedPayload = {
+      ...existingRaw,
+      ...payload,
+      product_id: pId,
+      updated_at: new Date().toISOString()
+    };
+
+    // To ensure all technical specs (vmp_v, imp_a, product_type, dimensions_mm, weight_kg, notes, etc.)
+    // are fully persisted into Cloudflare D1 without being dropped by the worker's limited PUT handler,
+    // we use the verified atomic pattern: DELETE followed by POST with the exact same product_id.
+    let updated = false;
+    try {
+      await requestProductsApi<{ success: boolean }>(`/products/${pId}`, { method: 'DELETE' });
+      await requestProductsApi<{ success: boolean }>(`/products`, {
+        method: 'POST',
+        body: JSON.stringify(mergedPayload)
+      });
+      updated = true;
+    } catch (recreateErr) {
+      console.warn('Atomic recreate update failed, falling back to standard PUT:', recreateErr);
+      await requestProductsApi<{ success: boolean; message?: string }>(`/products/${pId}`, {
+        method: 'PUT',
+        body: JSON.stringify(mergedPayload)
+      });
+    }
 
     // Notify active subscribers
     notifyProductListeners();

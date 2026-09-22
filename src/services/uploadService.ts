@@ -192,11 +192,6 @@ export async function uploadSupplierProfileImage(
   return base64DataUrl;
 }
 
-export interface GoogleDriveUploadResult {
-  fileId: string;
-  imageUrl: string;
-}
-
 export interface ProductImageUploadResult {
   key?: string;
   imageUrl: string;
@@ -274,23 +269,6 @@ export async function uploadProductImage(
   }
 
   return imageUrl;
-}
-
-/**
- * Backward-compatible wrapper for uploadProductImage
- */
-export async function uploadProductImageToDrive(
-  file: File,
-  _productId?: string,
-  _userUid?: string,
-  onStatusChange?: (status: string) => void,
-  lang: 'ar' | 'en' = 'ar'
-): Promise<GoogleDriveUploadResult> {
-  const imageUrl = await uploadProductImage(file, onStatusChange, lang);
-  return {
-    fileId: imageUrl,
-    imageUrl,
-  };
 }
 
 

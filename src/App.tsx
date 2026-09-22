@@ -448,7 +448,7 @@ export default function App() {
         };
         // Optimistically update products state immediately
         setProducts(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
-        await updateProduct(prodId, productData);
+        await updateProduct(prodId, mergedProduct);
         setEditingProduct(null);
       } else {
         const newId = await addProduct(productData);

@@ -1,5 +1,3 @@
-/// <reference types="@cloudflare/workers-types" />
-
 /**
  * Cloudflare Worker API for Enerjoo Solar Platform
  * Powered by Cloudflare Workers & Cloudflare D1

@@ -54,6 +54,8 @@ export interface Product {
   datasheetUrl?: string;
   specs: Record<string, any>;
   suppliers: Supplier[];
+  description?: string;
+  notes?: string;
 }
 
 export interface ProductReview {

@@ -202,16 +202,23 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> }
         ];
 
+        const mpptVal = product.specs?.pvMpptVoltageRangeV || product.specs?.mppt || product.specs?.mpptVoltageRange || (product as any).pv_mppt_voltage_range_v;
+        if (mpptVal) {
+          const strMppt = String(mpptVal);
+          const formattedMppt = /v|فولت/i.test(strMppt) ? strMppt : `${strMppt} V`;
+          specsList.push({ label: isAr ? 'جهد MPPT' : 'MPPT Voltage', value: formattedMppt, icon: <Zap className="text-solar-warning" /> });
+        }
+
         const voltVal = product.specs?.voltage || product.specs?.acVoltageV || product.specs?.nominalVoltage;
         if (voltVal) {
           const strVolt = String(voltVal);
           const formattedVolt = /v|فولت/i.test(strVolt) ? strVolt : `${strVolt} ${t.volt || 'V'}`;
-          specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
+          specsList.push({ label: isAr ? 'جهد الخرج (AC)' : t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
         }
         if (product.specs?.current) {
           const strCurr = String(product.specs.current);
           const formattedCurr = /a|أمبير/i.test(strCurr) ? strCurr : `${strCurr} ${t.ampere || 'A'}`;
-          specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
+          specsList.push({ label: isAr ? 'تيار الخرج (AC)' : t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
         }
 
         return specsList;
@@ -273,8 +280,6 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         return common;
     }
   };
-
-  const mainSpecs = getMainSpecs();
 
   const getSpecLabel = (key: string): string => {
     const labels: Record<string, string> = {
@@ -427,39 +432,75 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       list.push({ key: 'dimensions', label: isAr ? 'الأبعاد (مم)' : 'Dimensions (mm)', value: String(specsObj.dimensionsMm), icon: <Ruler size={14} className="text-solar-accent" /> });
     }
 
-    if (product.area && product.area > 0) {
-      list.push({ key: 'area', label: t.area, value: `${product.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
-    } else if (specsObj.area && Number(specsObj.area) > 0) {
-      list.push({ key: 'area', label: t.area, value: `${specsObj.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+    // Only show area for solar panels
+    if (product.category === 'panels') {
+      if (product.area && product.area > 0) {
+        list.push({ key: 'area', label: t.area, value: `${product.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+      } else if (specsObj.area && Number(specsObj.area) > 0) {
+        list.push({ key: 'area', label: t.area, value: `${specsObj.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+      }
     }
 
-    // 5. Voltage
-    if (specsObj.voltage) {
-      list.push({ key: 'voltage', label: t.voltage, value: formatValueWithUnit('voltage', specsObj.voltage), icon: <Zap size={14} className="text-solar-blue" /> });
-    }
-    if (specsObj.vmpV) {
-      list.push({ key: 'vmpV', label: isAr ? 'جهد التشغيل (Vmp)' : 'Max Power Voltage (Vmp)', value: formatValueWithUnit('vmpV', specsObj.vmpV), icon: <Zap size={14} className="text-solar-blue" /> });
-    }
-    if (specsObj.vocV) {
-      list.push({ key: 'vocV', label: isAr ? 'جهد الدائرة المفتوحة (Voc)' : 'Open Circuit Voltage (Voc)', value: formatValueWithUnit('vocV', specsObj.vocV), icon: <Zap size={14} className="text-solar-blue" /> });
-    }
-    if (specsObj.nominalVoltage && !specsObj.voltage) {
-      list.push({ key: 'nominalVoltage', label: isAr ? 'الجهد الاسمي' : 'Nominal Voltage', value: formatValueWithUnit('nominalVoltage', specsObj.nominalVoltage), icon: <Zap size={14} className="text-solar-blue" /> });
-    }
-    if (specsObj.acVoltageV) {
-      list.push({ key: 'acVoltageV', label: isAr ? 'جهد الخرج المتردد (AC)' : 'AC Output Voltage', value: formatValueWithUnit('acVoltageV', specsObj.acVoltageV), icon: <Zap size={14} className="text-solar-blue" /> });
+    // Helper to normalize values for deduplication comparison
+    const normSpecVal = (v: any) => String(v || '').trim().toLowerCase().replace(/\s+/g, '').replace(/v|a|w|فولت|أمبير/g, '');
+
+    // MPPT Voltage Range (especially important for Inverters)
+    const mpptVal = specsObj.pvMpptVoltageRangeV || specsObj.mppt || specsObj.mpptVoltageRange || (product as any).pv_mppt_voltage_range_v;
+    if (mpptVal) {
+      const strMppt = String(mpptVal);
+      const formattedMppt = /v|فولت/i.test(strMppt) ? strMppt : `${strMppt} V`;
+      list.push({ 
+        key: 'mppt', 
+        label: isAr ? 'نطاق جهد الـ MPPT' : 'MPPT Voltage Range', 
+        value: formattedMppt, 
+        icon: <Zap size={14} className="text-solar-warning" /> 
+      });
     }
 
-    // 6. Current
-    if (specsObj.current) {
-      list.push({ key: 'current', label: t.current, value: formatValueWithUnit('current', specsObj.current), icon: <Power size={14} className="text-solar-warning" /> });
+    // 5. Voltage (Deduplicated per category)
+    if (product.category === 'panels') {
+      if (specsObj.vmpV) {
+        list.push({ key: 'vmpV', label: isAr ? 'جهد التشغيل (Vmp)' : 'Max Power Voltage (Vmp)', value: formatValueWithUnit('vmpV', specsObj.vmpV), icon: <Zap size={14} className="text-solar-blue" /> });
+      } else if (specsObj.voltage) {
+        list.push({ key: 'voltage', label: t.voltage, value: formatValueWithUnit('voltage', specsObj.voltage), icon: <Zap size={14} className="text-solar-blue" /> });
+      }
+      if (specsObj.vocV && normSpecVal(specsObj.vocV) !== normSpecVal(specsObj.vmpV || specsObj.voltage)) {
+        list.push({ key: 'vocV', label: isAr ? 'جهد الدائرة المفتوحة (Voc)' : 'Open Circuit Voltage (Voc)', value: formatValueWithUnit('vocV', specsObj.vocV), icon: <Zap size={14} className="text-solar-blue" /> });
+      }
+    } else if (product.category === 'inverters') {
+      const acVolt = specsObj.acVoltageV || specsObj.voltage;
+      if (acVolt) {
+        list.push({ key: 'voltage', label: isAr ? 'جهد الخرج المتردد (AC)' : 'AC Output Voltage', value: formatValueWithUnit('voltage', acVolt), icon: <Zap size={14} className="text-solar-blue" /> });
+      }
+    } else {
+      const voltToDisplay = specsObj.voltage || specsObj.nominalVoltage || specsObj.vmpV;
+      if (voltToDisplay) {
+        list.push({ key: 'voltage', label: t.voltage, value: formatValueWithUnit('voltage', voltToDisplay), icon: <Zap size={14} className="text-solar-blue" /> });
+      }
     }
-    if (specsObj.impA) {
-      list.push({ key: 'impA', label: isAr ? 'تيار التشغيل (Imp)' : 'Max Power Current (Imp)', value: formatValueWithUnit('impA', specsObj.impA), icon: <Power size={14} className="text-solar-warning" /> });
+
+    // 6. Current (Deduplicated per category)
+    if (product.category === 'panels') {
+      if (specsObj.impA) {
+        list.push({ key: 'impA', label: isAr ? 'تيار التشغيل (Imp)' : 'Max Power Current (Imp)', value: formatValueWithUnit('impA', specsObj.impA), icon: <Power size={14} className="text-solar-warning" /> });
+      } else if (specsObj.current) {
+        list.push({ key: 'current', label: t.current, value: formatValueWithUnit('current', specsObj.current), icon: <Power size={14} className="text-solar-warning" /> });
+      }
+      if (specsObj.iscA && normSpecVal(specsObj.iscA) !== normSpecVal(specsObj.impA || specsObj.current)) {
+        list.push({ key: 'iscA', label: isAr ? 'تيار الدائرة القصيرة (Isc)' : 'Short Circuit Current (Isc)', value: formatValueWithUnit('iscA', specsObj.iscA), icon: <Power size={14} className="text-solar-warning" /> });
+      }
+    } else if (product.category === 'inverters') {
+      const curr = specsObj.current || specsObj.impA;
+      if (curr) {
+        list.push({ key: 'current', label: isAr ? 'أقصى تيار خرج (AC)' : 'Max Output Current (AC)', value: formatValueWithUnit('current', curr), icon: <Power size={14} className="text-solar-warning" /> });
+      }
+    } else {
+      const currToDisplay = specsObj.current || specsObj.impA;
+      if (currToDisplay) {
+        list.push({ key: 'current', label: t.current, value: formatValueWithUnit('current', currToDisplay), icon: <Power size={14} className="text-solar-warning" /> });
+      }
     }
-    if (specsObj.iscA) {
-      list.push({ key: 'iscA', label: isAr ? 'تيار الدائرة القصيرة (Isc)' : 'Short Circuit Current (Isc)', value: formatValueWithUnit('iscA', specsObj.iscA), icon: <Power size={14} className="text-solar-warning" /> });
-    }
+
     if (specsObj.maxContinuousDischargeCurrentA) {
       list.push({ key: 'maxContinuousDischargeCurrentA', label: isAr ? 'أقصى تيار تفريغ مستمر' : 'Max Continuous Discharge', value: formatValueWithUnit('maxContinuousDischargeCurrentA', specsObj.maxContinuousDischargeCurrentA), icon: <Power size={14} className="text-solar-warning" /> });
     }
@@ -529,9 +570,6 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     if (specsObj.maxPvArrayPowerW) {
       list.push({ key: 'maxPvArrayPowerW', label: isAr ? 'أقصى قدرة للألواح' : 'Max PV Array Power', value: `${specsObj.maxPvArrayPowerW} W`, icon: <Power size={14} className="text-solar-warning" /> });
     }
-    if (specsObj.pvMpptVoltageRangeV) {
-      list.push({ key: 'pvMpptVoltageRangeV', label: isAr ? 'نطاق جهد الـ MPPT' : 'MPPT Voltage Range', value: `${specsObj.pvMpptVoltageRangeV} V`, icon: <Zap size={14} className="text-solar-blue" /> });
-    }
     if (specsObj.quantity) {
       list.push({ key: 'quantity', label: t.quantityValue, value: String(specsObj.quantity), icon: <Grid size={14} className="text-solar-accent" /> });
     }
@@ -548,7 +586,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       'numberOfCells', 'waveform', 'capacity', 'capacityAh', 'nominalEnergyWh', 'cycleLife', 
       'crossSection', 'cableLength', 'material', 'ipRating', 'poles', 'maxWind', 'weight', 
       'weightKg', 'frequencyHz', 'maxPvOpenCircuitVoltageV', 'maxPvArrayPowerW', 
-      'pvMpptVoltageRangeV', 'quantity', 'color', 'description', 'notes'
+      'pvMpptVoltageRangeV', 'mppt', 'mpptVoltageRange', 'quantity', 'color', 'description', 'notes'
     ]);
 
     Object.entries(specsObj).forEach(([k, v]) => {
@@ -624,16 +662,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 lg:gap-10 mb-12 sm:mb-16 w-full max-w-full box-border min-w-0">
-        <div className="space-y-4 sm:space-y-6 w-full max-w-full box-border min-w-0">
-          <div className="relative group w-full max-w-full rounded-2xl sm:rounded-[40px] overflow-hidden box-border">
+      {/* Main Ordered Content: 1. Image -> 2. Name -> 3. Specs -> 4. Description -> 5. Supplier */}
+      <div className="w-full max-w-5xl mx-auto space-y-6 sm:space-y-8 mb-12 sm:mb-16 box-border min-w-0">
+        
+        {/* 1. صورة المنتج (Product Image & Thumbnails) */}
+        <div className="space-y-4 w-full max-w-full box-border min-w-0">
+          <div className="relative group w-full max-w-full rounded-2xl sm:rounded-[36px] overflow-hidden box-border bg-white border-2 sm:border-4 border-white shadow-xl shadow-solar-blue/5 flex items-center justify-center p-2 sm:p-4">
             <img 
               src={selectedImage || product.image || DEFAULT_PRODUCT_IMAGE} 
               onError={(e) => {
                 (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
               }}
               referrerPolicy="no-referrer" 
-              className="w-full max-w-full h-auto aspect-[4/3] object-cover rounded-2xl sm:rounded-[40px] shadow-2xl shadow-solar-blue/10 border-2 sm:border-4 border-white box-border" 
+              className="w-full max-w-full h-auto max-h-[440px] sm:max-h-[500px] object-contain rounded-2xl sm:rounded-[30px] box-border" 
               alt={product.name} 
             />
             {user?.type !== 'admin' && (
@@ -665,7 +706,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                   key={idx}
                   type="button"
                   onClick={() => setSelectedImage(imgUrl)}
-                  className={`w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl overflow-hidden border-2 shrink-0 transition ${
+                  className={`w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl overflow-hidden border-2 shrink-0 transition bg-white p-1 ${
                     (selectedImage || product.image) === imgUrl 
                       ? 'border-solar-blue ring-2 ring-solar-blue/30 shadow-md scale-105' 
                       : 'border-solar-border opacity-70 hover:opacity-100'
@@ -677,312 +718,268 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                       (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
                     }}
                     alt="" 
-                    className="w-full h-full object-cover" 
+                    className="w-full h-full object-contain" 
                   />
                 </button>
               ))}
             </div>
           )}
-          
-          {/* Detailed Technical Specifications Card */}
-          <div className="bg-solar-card rounded-2xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
-            <div className="flex items-center justify-between mb-4 sm:mb-6">
-              <h3 className="text-base sm:text-lg font-black text-solar-text flex items-center gap-2">
-                <Zap size={20} className="text-solar-blue shrink-0" />
-                <span>{t.specs}</span>
-              </h3>
-              {detailedSpecs.length > 0 && (
-                <span className="text-[11px] font-black text-solar-blue bg-solar-blue/10 px-2.5 py-0.5 rounded-full">
-                  {detailedSpecs.length} {isAr ? 'مواصفة' : 'specs'}
-                </span>
-              )}
-            </div>
+        </div>
 
-            {detailedSpecs.length > 0 ? (
-              <div className="grid grid-cols-2 gap-y-4 sm:gap-y-6 gap-x-3 sm:gap-x-6 md:gap-x-10 w-full max-w-full box-border min-w-0">
-                {detailedSpecs.map((spec) => (
-                  <div key={spec.key} className="flex flex-col border-b border-solar-border/30 pb-2.5 min-w-0 w-full max-w-full box-border">
-                    <span className="text-[10px] font-black text-solar-muted uppercase tracking-wider mb-1 truncate flex items-center gap-1.5">
-                      {spec.icon && <span className="opacity-70 shrink-0">{spec.icon}</span>}
-                      <span className="truncate">{spec.label}</span>
-                    </span>
-                    <span className="text-xs sm:text-sm font-bold text-solar-text break-words [overflow-wrap:anywhere] [word-break:break-word]">
-                      {spec.value}
-                    </span>
-                  </div>
+        {/* 2. اسم المنتج (Product Name & Badges) */}
+        <div className="bg-solar-card rounded-2xl sm:rounded-[32px] p-5 sm:p-7 md:p-8 border border-solar-border shadow-xs w-full max-w-full box-border min-w-0">
+          <h1 translate="no" className="text-2xl sm:text-3xl lg:text-4xl font-black text-solar-text leading-tight mb-3 sm:mb-4 break-words [overflow-wrap:anywhere] [word-break:break-word] w-full max-w-full notranslate">
+            {isAr ? product.nameAr : product.name}
+          </h1>
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 w-full max-w-full box-border">
+            <span translate="no" className="bg-solar-blue text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest notranslate">{product.brand}</span>
+            {product.suppliers?.[0]?.verified && (
+              <span className="bg-solar-success text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest shadow-sm flex items-center gap-1">
+                <CheckCircle2 size={12} />
+                {isAr ? 'معتمد' : 'Verified'}
+              </span>
+            )}
+            <span className="bg-solar-light text-solar-blue text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest border border-solar-blue/10">{product.category}</span>
+            <span className={`text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest border border-current transition-colors ${
+              product.status === 'out_of_stock' ? 'bg-red-50 text-red-600 border-red-200' : 
+              product.status === 'limited' ? 'bg-amber-50 text-amber-600 border-amber-200' : 
+              'bg-solar-success/10 text-solar-success border-solar-success/10'
+            }`}>
+              {t[product.status] || t.available}
+            </span>
+            <button
+              type="button"
+              onClick={() => onFilterSupplier(primarySupplierObj?.id || supplierId)}
+              className="bg-solar-blue/10 hover:bg-solar-blue hover:text-white text-solar-blue text-[11px] font-black px-3 py-1 rounded-full border border-solar-blue/20 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+              title={isAr ? `عرض جميع منتجات المورد: ${primarySupplierDisplayName}` : `View all products by supplier: ${primarySupplierDisplayName}`}
+            >
+              <Building2 size={12} className="shrink-0" />
+              <span>{t.supplier}: <strong className="font-black">{primarySupplierDisplayName}</strong></span>
+            </button>
+          </div>
+          {reviews.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-solar-border/40 text-solar-muted text-xs font-bold leading-none w-full max-w-full box-border">
+              <div className="flex items-center text-amber-500">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Star
+                    key={i}
+                    size={14}
+                    className={i < Math.round(averageRating) ? "fill-amber-500 text-amber-500" : "text-gray-300"}
+                  />
                 ))}
               </div>
-            ) : (
-              <div className="text-center py-6 text-solar-muted text-xs font-bold">
-                {isAr ? 'لا توجد مواصفات فنية إضافية مسجلة لهذا المنتج' : 'No additional technical specifications recorded for this product'}
-              </div>
-            )}
-
-            {product.datasheetUrl && (
-              <button 
-                onClick={handleDownloadDatasheet}
-                className="w-full max-w-full mt-6 sm:mt-8 border-2 border-dashed border-solar-border text-solar-muted hover:text-solar-blue hover:border-solar-blue py-3 px-4 rounded-2xl text-xs font-black transition flex items-center justify-center gap-2 box-border"
-              >
-                <Download size={16} />
-                <span>{t.downloadPDF}</span>
-              </button>
-            )}
-          </div>
-
-          {/* Product Overview / Description if available */}
-          {productDescription && (
-            <div className="bg-solar-card rounded-2xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
-              <h3 className="text-base sm:text-lg font-black text-solar-text mb-3 sm:mb-4 flex items-center gap-2">
-                <Info size={20} className="text-solar-blue shrink-0" />
-                <span>{isAr ? 'وصف المنتج وتفاصيله' : 'Product Description'}</span>
-              </h3>
-              <p className="text-xs sm:text-sm font-medium text-solar-text/80 leading-relaxed whitespace-pre-wrap">
-                {productDescription}
-              </p>
+              <span className="text-solar-text font-black text-sm">{averageRating}</span>
+              <span>•</span>
+              <span>{reviews.length} {isAr ? 'تقييم' : 'reviews'}</span>
             </div>
           )}
         </div>
 
-        <div className="space-y-6 sm:space-y-8 w-full max-w-full box-border min-w-0">
-          <div className="w-full max-w-full box-border min-w-0">
-            <h1 translate="no" className="text-2xl sm:text-3xl lg:text-4xl font-black text-solar-text leading-tight mb-3 sm:mb-4 break-words [overflow-wrap:anywhere] [word-break:break-word] w-full max-w-full notranslate">
-              {isAr ? product.nameAr : product.name}
-            </h1>
-            <div className="flex flex-wrap gap-1.5 sm:gap-2 w-full max-w-full box-border">
-              <span translate="no" className="bg-solar-blue text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest notranslate">{product.brand}</span>
-              {product.suppliers?.[0]?.verified && (
-                <span className="bg-solar-success text-white text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest shadow-sm flex items-center gap-1">
-                  <CheckCircle2 size={12} />
-                  {isAr ? 'معتمد' : 'Verified'}
-                </span>
-              )}
-              <span className="bg-solar-light text-solar-blue text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest border border-solar-blue/10">{product.category}</span>
-              <span className={`text-[10px] font-black px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest border border-current transition-colors ${
-                product.status === 'out_of_stock' ? 'bg-red-50 text-red-600 border-red-200' : 
-                product.status === 'limited' ? 'bg-amber-50 text-amber-600 border-amber-200' : 
-                'bg-solar-success/10 text-solar-success border-solar-success/10'
-              }`}>
-                {t[product.status] || t.available}
+        {/* 3. المواصفات الفنية والهندسية المعتمدة (Certified Technical & Engineering Specifications) */}
+        <div className="bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 md:p-10 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 sm:pb-6 border-b border-solar-border/50 gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-solar-blue/10 text-solar-blue flex items-center justify-center shrink-0">
+                <Zap size={22} />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-xl font-black text-solar-text flex items-center gap-2">
+                  <span>{isAr ? 'المواصفات الفنية والهندسية المعتمدة' : 'Certified Technical & Engineering Specifications'}</span>
+                </h3>
+                <p className="text-xs font-bold text-solar-muted mt-0.5">
+                  {isAr ? 'بيانات معتمدة من الكتالوج الرسمي وداتا شيت الشركة المصنعة' : 'Verified data from official manufacturer catalog and datasheet'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="text-xs font-black text-solar-blue bg-solar-blue/10 px-3 py-1 rounded-full border border-solar-blue/20">
+                {detailedSpecs.length} {isAr ? 'مواصفة تقنية' : 'technical specs'}
               </span>
-              <button
-                type="button"
-                onClick={() => onFilterSupplier(primarySupplierObj?.id || supplierId)}
-                className="bg-solar-blue/10 hover:bg-solar-blue hover:text-white text-solar-blue text-[11px] font-black px-3 py-1 rounded-full border border-solar-blue/20 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
-                title={isAr ? `عرض جميع منتجات المورد: ${primarySupplierDisplayName}` : `View all products by supplier: ${primarySupplierDisplayName}`}
-              >
-                <Building2 size={12} className="shrink-0" />
-                <span>{t.supplier}: <strong className="font-black">{primarySupplierDisplayName}</strong></span>
-              </button>
+              {product.datasheetUrl && (
+                <button 
+                  onClick={handleDownloadDatasheet}
+                  className="bg-solar-blue hover:bg-solar-blue/90 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                >
+                  <Download size={14} />
+                  <span>{t.downloadPDF}</span>
+                </button>
+              )}
             </div>
-            {reviews.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 mt-3 text-solar-muted text-xs font-bold leading-none w-full max-w-full box-border">
-                <div className="flex items-center text-amber-500">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star
-                      key={i}
-                      size={14}
-                      className={i < Math.round(averageRating) ? "fill-amber-500 text-amber-500" : "text-gray-300"}
-                    />
-                  ))}
-                </div>
-                <span className="text-solar-text font-black text-sm">{averageRating}</span>
-                <span>•</span>
-                <span>{reviews.length} {isAr ? 'تقييم' : 'reviews'}</span>
-              </div>
-            )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-4 w-full max-w-full box-border min-w-0">
-            {mainSpecs.map((spec, i) => (
-              <div key={i} className="bg-solar-card border border-solar-border p-3 sm:p-5 rounded-2xl sm:rounded-3xl shadow-sm hover:shadow-md transition w-full max-w-full box-border min-w-0 overflow-hidden">
-                <div className="flex items-center gap-2 sm:gap-3 mb-1.5 sm:mb-2 min-w-0">
-                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-solar-bg flex items-center justify-center shrink-0">
-                    {spec.icon}
-                  </div>
-                  <span className="text-[11px] sm:text-xs font-black text-solar-muted uppercase tracking-tighter truncate">{spec.label}</span>
-                </div>
-                <div className="text-base sm:text-xl font-black text-solar-text break-words [overflow-wrap:anywhere] [word-break:break-word] leading-snug">{spec.value}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="bg-white/50 backdrop-blur-sm rounded-2xl sm:rounded-[32px] md:rounded-[40px] p-4 sm:p-6 md:p-8 border-2 border-white shadow-sm w-full max-w-full box-border min-w-0">
-            <h4 className="text-xs sm:text-sm font-black text-solar-muted uppercase tracking-widest mb-4 sm:mb-6">{t.supplier}</h4>
-            <div className="space-y-3 sm:space-y-4 w-full max-w-full box-border min-w-0">
-              {product.suppliers.map((s, i) => {
-                const supId = s.id || product.supplierId;
-                const matchedSup = suppliers?.find(sup => sup.id === supId) || (supId ? fetchedProfiles[supId] : null);
-                const effectiveSupplier = matchedSup ? { ...s, ...matchedSup } : s;
-                const displayName = getSupplierDisplayName(effectiveSupplier, isAr);
-                const avatarInitial = getSupplierAvatarInitial(effectiveSupplier, isAr);
-                const displayLocation = effectiveSupplier.location || s.location || (isAr ? 'القاهرة، مصر' : 'Cairo, Egypt');
-
-                return (
-                  <div 
-                    key={i} 
-                    onClick={() => onFilterSupplier(supId)}
-                    className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[32px] border border-solar-border hover:border-solar-blue transition-all cursor-pointer group shadow-sm hover:shadow-xl hover:shadow-solar-blue/10 w-full max-w-full box-border min-w-0 overflow-hidden"
-                  >
-                    <div className="flex justify-between items-center mb-3 sm:mb-4 gap-2 min-w-0">
-                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
-                        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-solar-blue overflow-hidden shrink-0 shadow-sm">
-                          {effectiveSupplier.profileImage || effectiveSupplier.avatar || s.profileImage || s.avatar ? (
-                            <img 
-                              src={effectiveSupplier.profileImage || effectiveSupplier.avatar || s.profileImage || s.avatar} 
-                              alt={displayName} 
-                              className="w-full h-full rounded-full object-cover" 
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <span className="text-xs sm:text-sm font-black text-solar-blue">
-                              {avatarInitial}
-                            </span>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-black text-solar-text group-hover:text-solar-blue transition truncate text-sm sm:text-base">
-                            {displayName}
-                          </div>
-                          <div className="text-[10px] font-bold text-solar-muted flex items-center gap-1 truncate">
-                            <MapPin size={10} className="shrink-0" />
-                            <span className="truncate">{displayLocation}</span>
-                          </div>
-                        </div>
-                      </div>
-                      {(effectiveSupplier.verified ?? s.verified) && (
-                        <div className="flex items-center gap-1 text-solar-success bg-solar-success/10 px-2 py-1 rounded-lg text-[10px] font-black uppercase shrink-0">
-                          <CheckCircle2 size={12} />
-                          <span>{t.verified}</span>
-                        </div>
-                      )}
+          {/* Specifications Grid */}
+          {detailedSpecs.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5 mt-6 w-full max-w-full box-border">
+              {detailedSpecs.map((spec) => (
+                <div 
+                  key={spec.key} 
+                  className="bg-white/70 hover:bg-white border border-solar-border/60 hover:border-solar-blue/40 rounded-2xl p-3.5 sm:p-4.5 transition-all shadow-xs flex items-center justify-between gap-3 min-w-0"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-solar-bg flex items-center justify-center text-solar-blue shrink-0">
+                      {spec.icon || <Grid size={15} />}
                     </div>
-                    <div className="flex items-center justify-between pt-3 sm:pt-4 border-t border-solar-border/50 gap-2">
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-[10px] font-black text-solar-muted uppercase tracking-widest leading-none mb-1">{t.price}</span>
-                        <span className="text-xl sm:text-2xl font-black text-solar-blue truncate">{s.price.toLocaleString()} <span className="text-xs">{t.egp}</span></span>
-                      </div>
-                      <div className="text-[10px] font-bold text-solar-muted text-right shrink-0">
-                        {t.lastUpdate}: {formatDateOnly(s.lastUpdate)}
-                      </div>
+                    <div className="min-w-0">
+                      <span className="text-[11px] font-black text-solar-muted uppercase tracking-wider block truncate">
+                        {spec.label}
+                      </span>
                     </div>
                   </div>
-                );
-              })}
+                  <div className="text-right shrink-0">
+                    <span className="text-xs sm:text-sm font-black text-solar-text">
+                      {spec.value}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
-            
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-10 w-full max-w-full box-border min-w-0">
+          ) : (
+            <div className="text-center py-10 text-solar-muted text-sm font-bold">
+              {isAr ? 'جاري تحديث واستكمال المواصفات الفنية لهذا المنتج من الكتالوج المعتمد.' : 'Technical specifications for this product are currently being updated.'}
+            </div>
+          )}
+
+          {/* Datasheet Callout if available */}
+          {product.datasheetUrl && (
+            <div className="mt-6 sm:mt-8 p-4 sm:p-5 rounded-2xl bg-solar-blue/5 border border-solar-blue/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3 text-center sm:text-start">
+                <FileText className="text-solar-blue shrink-0 hidden sm:block" size={24} />
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-solar-text">
+                    {isAr ? 'الداتا شيت الفنية الأصلية للمنتج (PDF)' : 'Original Product Technical Datasheet (PDF)'}
+                  </h4>
+                  <p className="text-[11px] font-medium text-solar-muted mt-0.5">
+                    {isAr ? 'يمكنك تنزيل ملف المواصفات الهندسية ومخططات التشغيل الرسمية' : 'Download official engineering specifications and technical diagrams'}
+                  </p>
+                </div>
+              </div>
               <button 
-                onClick={() => {
-                  const message = isAr 
-                    ? `مرحباً، أنا مهتم بطلب / الاستفسار عن منتج: ${product.nameAr || product.name}` 
-                    : `Hi, I am interested in ordering/inquiring about: ${product.name}`;
-                  window.open(getSupplierWhatsAppUrl(message), '_blank');
-                }}
-                className="w-full sm:flex-[2] bg-solar-blue text-white py-4 sm:py-5 px-4 rounded-2xl sm:rounded-[24px] font-black shadow-2xl shadow-solar-blue/30 transition hover:bg-opacity-90 active:scale-95 text-sm sm:text-base md:text-lg flex items-center justify-center gap-2 box-border min-w-0"
+                onClick={handleDownloadDatasheet}
+                className="bg-solar-blue text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-md hover:bg-solar-blue/90 transition flex items-center gap-2 shrink-0 active:scale-95"
               >
-                <span className="truncate">{t.contactSupplier}</span>
-                <span className="text-xs font-normal opacity-80 shrink-0" dir="ltr">({SUPPLIER_CONTACT_PHONE_DISPLAY})</span>
-              </button>
-              <button 
-                onClick={() => onCompare(product)}
-                className={`w-full sm:flex-1 py-3.5 sm:py-4 px-4 border font-black transition active:scale-95 flex items-center justify-center rounded-2xl sm:rounded-[24px] box-border min-w-0 ${isCompared(product.id) ? 'bg-solar-accent border-solar-accent text-white' : 'bg-white border-solar-border text-solar-muted hover:text-solar-text'}`}
-                aria-label={isAr ? 'مقارنة' : 'Compare'}
-              >
-                <ArrowLeftRight size={22} />
+                <Download size={15} />
+                <span>{t.downloadPDF}</span>
               </button>
             </div>
-          </div>
+          )}
         </div>
-      </div>
 
-      {/* Comprehensive Full-Width Technical Specifications Sheet */}
-      <div className="mt-8 sm:mt-12 bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 md:p-10 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 sm:pb-6 border-b border-solar-border/50 gap-3">
-          <div className="flex items-center gap-3">
+        {/* 4. وصف المنتج وتفاصيله (Product Description) */}
+        {productDescription && (
+          <div className="bg-solar-card rounded-2xl sm:rounded-[32px] p-5 sm:p-7 md:p-8 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
+            <h3 className="text-base sm:text-lg font-black text-solar-text mb-3 sm:mb-4 flex items-center gap-2">
+              <Info size={20} className="text-solar-blue shrink-0" />
+              <span>{isAr ? 'وصف المنتج وتفاصيله' : 'Product Description'}</span>
+            </h3>
+            <p className="text-xs sm:text-sm font-medium text-solar-text/80 leading-relaxed whitespace-pre-wrap">
+              {productDescription}
+            </p>
+          </div>
+        )}
+
+        {/* 5. المورد (Supplier Information, Pricing & Action Buttons) */}
+        <div className="bg-white/70 backdrop-blur-sm rounded-2xl sm:rounded-[36px] p-5 sm:p-8 md:p-10 border-2 border-white shadow-sm w-full max-w-full box-border min-w-0">
+          <div className="flex items-center gap-3 mb-4 sm:mb-6">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-solar-blue/10 text-solar-blue flex items-center justify-center shrink-0">
-              <Zap size={22} />
+              <Building2 size={22} />
             </div>
             <div>
-              <h3 className="text-base sm:text-xl font-black text-solar-text flex items-center gap-2">
-                <span>{isAr ? 'المواصفات الفنية والهندسية المعتمدة' : 'Certified Technical & Engineering Specifications'}</span>
-              </h3>
+              <h4 className="text-base sm:text-xl font-black text-solar-text">
+                {t.supplier}
+              </h4>
               <p className="text-xs font-bold text-solar-muted mt-0.5">
-                {isAr ? 'بيانات معتمدة من الكتالوج الرسمي وداتا شيت الشركة المصنعة' : 'Verified data from official manufacturer catalog and datasheet'}
+                {isAr ? 'بيانات المورد المعتمد والأسعار المتاحة' : 'Verified supplier information and current pricing'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <span className="text-xs font-black text-solar-blue bg-solar-blue/10 px-3 py-1 rounded-full border border-solar-blue/20">
-              {detailedSpecs.length} {isAr ? 'مواصفة تقنية' : 'technical specs'}
-            </span>
-            {product.datasheetUrl && (
-              <button 
-                onClick={handleDownloadDatasheet}
-                className="bg-solar-blue hover:bg-solar-blue/90 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-sm active:scale-95"
-              >
-                <Download size={14} />
-                <span>{t.downloadPDF}</span>
-              </button>
-            )}
+          <div className="space-y-3 sm:space-y-4 w-full max-w-full box-border min-w-0">
+            {product.suppliers.map((s, i) => {
+              const supId = s.id || product.supplierId;
+              const matchedSup = suppliers?.find(sup => sup.id === supId) || (supId ? fetchedProfiles[supId] : null);
+              const effectiveSupplier = matchedSup ? { ...s, ...matchedSup } : s;
+              const displayName = getSupplierDisplayName(effectiveSupplier, isAr);
+              const avatarInitial = getSupplierAvatarInitial(effectiveSupplier, isAr);
+              const displayLocation = effectiveSupplier.location || s.location || (isAr ? 'القاهرة، مصر' : 'Cairo, Egypt');
+
+              return (
+                <div 
+                  key={i} 
+                  onClick={() => onFilterSupplier(supId)}
+                  className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[28px] border border-solar-border hover:border-solar-blue transition-all cursor-pointer group shadow-xs hover:shadow-lg hover:shadow-solar-blue/10 w-full max-w-full box-border min-w-0 overflow-hidden"
+                >
+                  <div className="flex justify-between items-center mb-3 sm:mb-4 gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-solar-bg border border-solar-border flex items-center justify-center font-black text-solar-blue overflow-hidden shrink-0 shadow-sm">
+                        {effectiveSupplier.profileImage || effectiveSupplier.avatar || s.profileImage || s.avatar ? (
+                          <img 
+                            src={effectiveSupplier.profileImage || effectiveSupplier.avatar || s.profileImage || s.avatar} 
+                            alt={displayName} 
+                            className="w-full h-full rounded-full object-cover" 
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <span className="text-sm sm:text-base font-black text-solar-blue">
+                            {avatarInitial}
+                          </span>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-solar-text group-hover:text-solar-blue transition truncate text-sm sm:text-base">
+                          {displayName}
+                        </div>
+                        <div className="text-[11px] font-bold text-solar-muted flex items-center gap-1 truncate mt-0.5">
+                          <MapPin size={11} className="shrink-0" />
+                          <span className="truncate">{displayLocation}</span>
+                        </div>
+                      </div>
+                    </div>
+                    {(effectiveSupplier.verified ?? s.verified) && (
+                      <div className="flex items-center gap-1 text-solar-success bg-solar-success/10 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase shrink-0">
+                        <CheckCircle2 size={12} />
+                        <span>{t.verified}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between pt-3 sm:pt-4 border-t border-solar-border/50 gap-2">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[10px] font-black text-solar-muted uppercase tracking-widest leading-none mb-1">{t.price}</span>
+                      <span className="text-xl sm:text-2xl font-black text-solar-blue truncate">{s.price.toLocaleString()} <span className="text-xs">{t.egp}</span></span>
+                    </div>
+                    <div className="text-[10px] font-bold text-solar-muted text-right shrink-0">
+                      {t.lastUpdate}: {formatDateOnly(s.lastUpdate)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-8 w-full max-w-full box-border min-w-0">
+            <button 
+              onClick={() => {
+                const message = isAr 
+                  ? `مرحباً، أنا مهتم بطلب / الاستفسار عن منتج: ${product.nameAr || product.name}` 
+                  : `Hi, I am interested in ordering/inquiring about: ${product.name}`;
+                window.open(getSupplierWhatsAppUrl(message), '_blank');
+              }}
+              className="w-full sm:flex-[2] bg-solar-blue text-white py-4 sm:py-4.5 px-4 rounded-2xl sm:rounded-[20px] font-black shadow-xl shadow-solar-blue/25 transition hover:bg-opacity-90 active:scale-95 text-sm sm:text-base flex items-center justify-center gap-2 box-border min-w-0 cursor-pointer"
+            >
+              <span className="truncate">{t.contactSupplier}</span>
+              <span className="text-xs font-normal opacity-80 shrink-0" dir="ltr">({SUPPLIER_CONTACT_PHONE_DISPLAY})</span>
+            </button>
+            <button 
+              onClick={() => onCompare(product)} 
+              className={`w-full sm:flex-1 py-3.5 sm:py-4 px-4 border font-black transition active:scale-95 flex items-center justify-center rounded-2xl sm:rounded-[20px] box-border min-w-0 cursor-pointer ${isCompared(product.id) ? 'bg-solar-accent border-solar-accent text-white' : 'bg-white border-solar-border text-solar-muted hover:text-solar-text'}`}
+              aria-label={isAr ? 'مقارنة' : 'Compare'}
+            >
+              <ArrowLeftRight size={20} />
+              <span className="ms-2 text-xs font-black">{isAr ? 'مقارنة' : 'Compare'}</span>
+            </button>
           </div>
         </div>
 
-        {/* Specifications Grid */}
-        {detailedSpecs.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5 mt-6 w-full max-w-full box-border">
-            {detailedSpecs.map((spec) => (
-              <div 
-                key={spec.key} 
-                className="bg-white/70 hover:bg-white border border-solar-border/60 hover:border-solar-blue/40 rounded-2xl p-3.5 sm:p-4.5 transition-all shadow-xs flex items-center justify-between gap-3 min-w-0"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-solar-bg flex items-center justify-center text-solar-blue shrink-0">
-                    {spec.icon || <Grid size={15} />}
-                  </div>
-                  <div className="min-w-0">
-                    <span className="text-[11px] font-black text-solar-muted uppercase tracking-wider block truncate">
-                      {spec.label}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className="text-xs sm:text-sm font-black text-solar-text">
-                    {spec.value}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-10 text-solar-muted text-sm font-bold">
-            {isAr ? 'جاري تحديث واستكمال المواصفات الفنية لهذا المنتج من الكتالوج المعتمد.' : 'Technical specifications for this product are currently being updated.'}
-          </div>
-        )}
-
-        {/* Datasheet Callout if available */}
-        {product.datasheetUrl && (
-          <div className="mt-6 sm:mt-8 p-4 sm:p-5 rounded-2xl bg-solar-blue/5 border border-solar-blue/20 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-center sm:text-start">
-              <FileText className="text-solar-blue shrink-0 hidden sm:block" size={24} />
-              <div>
-                <h4 className="text-xs sm:text-sm font-black text-solar-text">
-                  {isAr ? 'الداتا شيت الفنية الأصلية للمنتج (PDF)' : 'Original Product Technical Datasheet (PDF)'}
-                </h4>
-                <p className="text-[11px] font-medium text-solar-muted mt-0.5">
-                  {isAr ? 'يمكنك تنزيل ملف المواصفات الهندسية ومخططات التشغيل الرسمية' : 'Download official engineering specifications and technical diagrams'}
-                </p>
-              </div>
-            </div>
-            <button 
-              onClick={handleDownloadDatasheet}
-              className="bg-solar-blue text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-md hover:bg-solar-blue/90 transition flex items-center gap-2 shrink-0 active:scale-95"
-            >
-              <Download size={15} />
-              <span>{t.downloadPDF}</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Dynamic Reviews and Rating Section */}

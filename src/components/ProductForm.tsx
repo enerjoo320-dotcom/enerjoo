@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2, Ruler, Maximize2, Calculator } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2, Ruler, Maximize2, Calculator, Zap } from 'lucide-react';
 import { translations } from '../translations';
 import { uploadProductImage } from '../services/uploadService';
 import { autoCompressImage, formatFileSize, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
 import { Product } from '../types';
+import { parseDimensionsString } from '../services/firestoreService';
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
@@ -130,11 +131,24 @@ const extractInitialFormData = (data?: Product | null) => {
     ''
   ).toString();
 
+  // Extract MPPT voltage range
+  const mppt = (
+    specs.pvMpptVoltageRangeV ||
+    specs.mppt ||
+    specs.mpptVoltageRange ||
+    (data as any).pv_mppt_voltage_range_v ||
+    (data as any).mppt ||
+    ''
+  ).toString();
+
   // Extract description
   const description = (
+    data.description ||
+    data.notes ||
     specs.description ||
     specs.notes ||
     (data as any).notes ||
+    (data as any).description ||
     ''
   ).toString();
 
@@ -161,19 +175,63 @@ const extractInitialFormData = (data?: Product | null) => {
   }
 
   // Dimensions
-  const dimLength = data.length !== undefined && data.length !== null
+  let dimLength = data.length !== undefined && data.length !== null
     ? data.length.toString()
     : (specs.length && category !== 'cables' ? specs.length.toString() : '');
-  const dimWidth = data.width !== undefined && data.width !== null
+  let dimWidth = data.width !== undefined && data.width !== null
     ? data.width.toString()
     : (specs.width ? specs.width.toString() : '');
-  const dimThickness = data.thickness !== undefined && data.thickness !== null
+  let dimThickness = data.thickness !== undefined && data.thickness !== null
     ? data.thickness.toString()
     : (specs.thickness ? specs.thickness.toString() : '');
-  const dimensionUnit = ((data.dimensionUnit || specs.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm');
-  const area = data.area !== undefined && data.area !== null
+  let dimensionUnit = ((data.dimensionUnit || specs.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm');
+  let area = data.area !== undefined && data.area !== null
     ? data.area.toString()
     : (specs.area ? specs.area.toString() : '');
+
+  // Fallback parsing for dimensions string if length/width are missing
+  if (!dimLength || !dimWidth) {
+    const rawDimStr = (data as any).dimensions_mm || specs.dimensionsMm || (data as any).dimensions;
+    if (rawDimStr) {
+      const parsed = parseDimensionsString(rawDimStr);
+      if (parsed.length && !dimLength) dimLength = parsed.length.toString();
+      if (parsed.width && !dimWidth) dimWidth = parsed.width.toString();
+      if (parsed.thickness && !dimThickness) dimThickness = parsed.thickness.toString();
+      if (parsed.dimensionUnit) dimensionUnit = parsed.dimensionUnit;
+      if (parsed.area && !area) area = parsed.area.toString();
+    }
+  }
+
+  // Heuristic auto-fallback for known models if technical specs were empty
+  let finalType = type;
+  let finalVoltage = voltage;
+  let finalCurrent = current;
+  let finalWeight = weight;
+  let finalMppt = mppt;
+  let finalDescription = description;
+
+  const prodNameLower = ((data.name || '') + ' ' + (data.nameAr || '') + ' ' + ((data as any).model || '') + ' ' + (data.brand || '')).toLowerCase();
+  if (category === 'panels' && (prodNameLower.includes('620') || prodNameLower.includes('66hl4m') || prodNameLower.includes('jinco') || prodNameLower.includes('jinko'))) {
+    if (!finalType) finalType = 'Monocrystalline N-type';
+    if (!finalVoltage) finalVoltage = '41.5';
+    if (!finalCurrent) finalCurrent = '14.94';
+    if (!finalWeight) finalWeight = '28';
+    if (!dimLength) dimLength = '2384';
+    if (!dimWidth) dimWidth = '1303';
+    if (!dimThickness) dimThickness = '35';
+    if (!area) area = '3.106';
+    if (!finalDescription) finalDescription = 'لوح شمسي عالي الكفاءة بقدرة 620 واط بتقنية N-type TOPCon مناسب للمشاريع السكنية والتجارية ومحطات الطاقة الشمسية.';
+  } else if (category === 'inverters' && (prodNameLower.includes('sun2000') || prodNameLower.includes('huawei'))) {
+    if (!finalType) finalType = 'Three Phase On-Grid Inverter';
+    if (!finalVoltage) finalVoltage = '380/400';
+    if (!finalCurrent) finalCurrent = '8.5';
+    if (!finalWeight) finalWeight = '17';
+    if (!dimLength) dimLength = '525';
+    if (!dimWidth) dimWidth = '470';
+    if (!dimThickness) dimThickness = '146';
+    if (!finalMppt) finalMppt = '160 - 950 V (2 MPPT)';
+    if (!finalDescription) finalDescription = 'محول طاقة شمسية ذكي ثلاثي الأوجه بقدرة 5 كيلوواط من هواوي بكفاءة عالية وحماية مدمجة مع 2 متتبع MPPT.';
+  }
 
   return {
     name: data.nameAr || data.name || (data as any).model || '',
@@ -181,15 +239,16 @@ const extractInitialFormData = (data?: Product | null) => {
     category,
     price: data.price !== undefined && data.price !== null ? data.price.toString() : '',
     phone: data.suppliers?.[0]?.phone || SUPPLIER_CONTACT_PHONE_DISPLAY,
-    description,
+    description: finalDescription,
     power,
     powerKw,
     efficiency,
     warranty,
-    type,
-    voltage,
-    current,
-    weight,
+    type: finalType,
+    voltage: finalVoltage,
+    current: finalCurrent,
+    weight: finalWeight,
+    mppt: finalMppt,
     capacity,
     crossSection: (specs.crossSection || '').toString(),
     length: (specs.cableLength || (category === 'cables' ? specs.length : '') || '').toString(),
@@ -234,7 +293,7 @@ export const ProductForm: React.FC<{
       case 'panels':
         return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'weight'];
       case 'inverters':
-        return [...common, 'powerKw', 'efficiency', 'type', 'voltage', 'current', 'weight'];
+        return [...common, 'powerKw', 'efficiency', 'type', 'mppt', 'voltage', 'current', 'weight'];
       case 'batteries':
         return [...common, 'capacity', 'voltage', 'type', 'weight'];
       case 'cables':
@@ -501,6 +560,8 @@ export const ProductForm: React.FC<{
         status: formData.status as any,
         updatedAt: new Date().toISOString().split('T')[0],
         supplierId: initialData?.supplierId || user?.uid || '',
+        description: formData.description,
+        notes: formData.description,
         specs: {
           ...(initialData?.specs || {}),
           description: formData.description,
@@ -512,12 +573,14 @@ export const ProductForm: React.FC<{
           productType: formData.type,
           technology: formData.type,
           voltage: formData.voltage,
-          vmpV: formData.voltage,
+          vmpV: formData.category === 'panels' ? formData.voltage : undefined,
           nominalVoltage: formData.voltage,
-          acVoltageV: formData.voltage,
+          acVoltageV: formData.category === 'inverters' ? formData.voltage : undefined,
           current: formData.current,
-          impA: formData.current,
+          impA: formData.category === 'panels' ? formData.current : undefined,
           maxContinuousDischargeCurrentA: formData.current,
+          pvMpptVoltageRangeV: formData.mppt || undefined,
+          mppt: formData.mppt || undefined,
           weight: formData.weight,
           weightKg: formData.weight,
           capacity: formData.capacity,
@@ -730,28 +793,68 @@ export const ProductForm: React.FC<{
           </div>
         )}
 
+        {fields.includes('mppt') && (
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center gap-1">
+              <Zap size={13} className="text-solar-blue" />
+              <span>{t.mppt || (isAr ? 'نطاق جهد الـ MPPT (فولت)' : 'MPPT Voltage Range (V)')}</span>
+            </label>
+            <input 
+              type="text" 
+              value={formData.mppt}
+              onChange={e => setFormData(p => ({...p, mppt: e.target.value}))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={t.mpptPlaceholder || (isAr ? "مثال: 160V - 950V أو 2 MPPT" : "e.g. 160V - 950V (2 MPPT)")}
+            />
+          </div>
+        )}
+
         {fields.includes('voltage') && (
           <div className="space-y-1.5 text-left">
-            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.voltage}</label>
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
+              {formData.category === 'inverters' 
+                ? (isAr ? 'جهد الخرج المتردد (AC)' : 'AC Output Voltage')
+                : formData.category === 'panels'
+                ? (isAr ? 'جهد التشغيل الأقصى (Vmp)' : 'Max Power Voltage (Vmp)')
+                : t.voltage}
+            </label>
             <input 
               type="text" 
               value={formData.voltage}
               onChange={e => setFormData(p => ({...p, voltage: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder={isAr ? "مثال: 48V أو 220V أو 41.5V" : "e.g. 48V / 220V / 41.5V"}
+              placeholder={
+                formData.category === 'inverters'
+                  ? (isAr ? "مثال: 380/400V أو 220V" : "e.g. 380/400V or 220V")
+                  : formData.category === 'panels'
+                  ? (isAr ? "مثال: 41.5V" : "e.g. 41.5V")
+                  : (isAr ? "مثال: 48V أو 220V أو 41.5V" : "e.g. 48V / 220V / 41.5V")
+              }
             />
           </div>
         )}
 
         {fields.includes('current') && (
           <div className="space-y-1.5 text-left">
-            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.current}</label>
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
+              {formData.category === 'inverters' 
+                ? (isAr ? 'أقصى تيار خرج (AC)' : 'Max Output Current (AC)')
+                : formData.category === 'panels'
+                ? (isAr ? 'تيار التشغيل الأقصى (Imp)' : 'Max Power Current (Imp)')
+                : t.current}
+            </label>
             <input 
               type="text" 
               value={formData.current}
               onChange={e => setFormData(p => ({...p, current: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder={isAr ? "مثال: 10.85A أو 13A أو 32A" : "e.g. 10.85A / 13A / 32A"}
+              placeholder={
+                formData.category === 'inverters'
+                  ? (isAr ? "مثال: 8.5A أو 16A" : "e.g. 8.5A or 16A")
+                  : formData.category === 'panels'
+                  ? (isAr ? "مثال: 14.94A" : "e.g. 14.94A")
+                  : (isAr ? "مثال: 10.85A أو 13A أو 32A" : "e.g. 10.85A / 13A / 32A")
+              }
             />
           </div>
         )}
