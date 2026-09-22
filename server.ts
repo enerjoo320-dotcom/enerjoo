@@ -584,8 +584,13 @@ async function startServer() {
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        console.warn("GEMINI_API_KEY is not defined or is empty.");
-        return res.status(200).json([]);
+        console.warn("GEMINI_API_KEY is not defined or is empty, utilizing smart semantic search fallback.");
+        try {
+          const fallbackResults = fallbackSemanticSearch(query, products, isAr);
+          return res.status(200).json(fallbackResults);
+        } catch {
+          return res.status(200).json([]);
+        }
       }
 
       const ai = new GoogleGenAI({ 
@@ -630,7 +635,7 @@ async function startServer() {
       ].join("\n");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         contents: [
           { parts: [{ text: `Query: ${query}` }] },
           { parts: [{ text: `Products: ${JSON.stringify(productContext)}` }] }
@@ -675,7 +680,13 @@ async function startServer() {
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(500).json({ error: isAr ? "مفتاح API الخاص بـ Gemini غير مهيأ" : "Gemini API key is not configured" });
+        console.warn("GEMINI_API_KEY is not defined, utilizing precision mathematical solar sizing fallback.");
+        try {
+          const fallbackResults = fallbackSolarSizing(stationPower, landArea, loadDetails, products, isAr);
+          return res.json(fallbackResults);
+        } catch (fbErr: any) {
+          return res.status(500).json({ error: fbErr.message || "Failed to calculate sizing" });
+        }
       }
 
       const ai = new GoogleGenAI({ 
@@ -731,7 +742,7 @@ async function startServer() {
       ].join("\n");
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         contents: prompt,
         config: {
           systemInstruction,
@@ -796,7 +807,20 @@ async function startServer() {
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(500).json({ error: isAr ? "مفتاح API الخاص بـ Gemini غير مهيأ" : "Gemini API key is not configured" });
+        console.warn("GEMINI_API_KEY is not defined, utilizing intelligent solar consultant fallback.");
+        const lastText = messages && messages.length > 0 ? (messages[messages.length - 1]?.text || "") : "";
+        const parsed = parseSizingInPrompt(lastText);
+        const reply = fallbackSolarChat(messages, isAr, req.body);
+        return res.json({ 
+          reply,
+          updatedSizing: {
+            bill: parsed.bill,
+            kwh: parsed.kwh,
+            pumpHp: parsed.pumpHp,
+            systemType: parsed.systemType,
+            cityChoice: parsed.cityChoice
+          }
+        });
       }
 
       const ai = new GoogleGenAI({ 
@@ -835,12 +859,12 @@ async function startServer() {
 
       // Format messages safely for @google/genai SDK
       const contents = (messages || []).map((m: any) => ({
-        role: m.sender === 'ai' ? 'model' : 'user',
+        role: m.sender === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.text || '' }]
       }));
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         contents,
         config: {
           systemInstruction,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare, Building2 } from 'lucide-react';
+import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare, Building2, Info, Cpu, Battery, Activity, FileText, Trash2, AlertTriangle, Loader2, X } from 'lucide-react';
 import { Product, ProductReview, Supplier } from '../types';
 import { translations } from '../translations';
 import { motion, AnimatePresence } from 'motion/react';
@@ -10,6 +10,8 @@ import { auth } from '../lib/firebase';
 import { getSupplierWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { formatDateOnly } from '../utils/dateUtils';
 import { getSupplierDisplayName, getSupplierAvatarInitial, isRawUidOrId } from '../utils/supplierUtils';
+
+const DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=800';
 
 interface ProductDetailProps {
   product: Product;
@@ -24,6 +26,7 @@ interface ProductDetailProps {
   onProductClick: (product: Product) => void;
   onFilterSupplier: (id: string | number) => void;
   onEdit?: (product: Product) => void;
+  onDelete?: (id: string | number) => void | Promise<void>;
 }
 
 export const ProductDetail: React.FC<ProductDetailProps> = ({ 
@@ -38,13 +41,30 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   isInWishlist,
   onProductClick,
   onFilterSupplier,
-  onEdit
+  onEdit,
+  onDelete
 }) => {
   const { user } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
   const isWishlisted = isInWishlist(product.id);
-  const isOwner = user?.uid === product.supplierId;
+  const isOwner = user?.uid === product.supplierId || user?.type === 'admin';
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!onDelete) return;
+    try {
+      setIsDeleting(true);
+      await onDelete(product.id);
+      onBack();
+    } catch (err) {
+      console.error('Failed to delete product from detail view:', err);
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteModal(false);
+    }
+  };
 
   const [selectedImage, setSelectedImage] = useState<string>(product.image);
 
@@ -152,53 +172,70 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           }
         ];
 
-        if (product.specs?.voltage) {
-          const voltVal = String(product.specs.voltage);
-          const formattedVolt = /v|فولت/i.test(voltVal) ? voltVal : `${voltVal} ${t.volt || 'V'}`;
+        const voltVal = product.specs?.voltage || product.specs?.vmpV || product.specs?.vocV;
+        if (voltVal) {
+          const strVolt = String(voltVal);
+          const formattedVolt = /v|فولت/i.test(strVolt) ? strVolt : `${strVolt} ${t.volt || 'V'}`;
           specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
         }
-        if (product.specs?.current) {
-          const currVal = String(product.specs.current);
-          const formattedCurr = /a|أمبير/i.test(currVal) ? currVal : `${currVal} ${t.ampere || 'A'}`;
+        const currVal = product.specs?.current || product.specs?.impA || product.specs?.iscA;
+        if (currVal) {
+          const strCurr = String(currVal);
+          const formattedCurr = /a|أمبير/i.test(strCurr) ? strCurr : `${strCurr} ${t.ampere || 'A'}`;
           specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
         }
 
         return specsList;
       }
       case 'inverters': {
+        const powerVal = product.specs?.powerKw 
+          ? (String(product.specs.powerKw).includes('kW') || String(product.specs.powerKw).includes('كيلو') ? String(product.specs.powerKw) : `${product.specs.powerKw} kW`)
+          : (product.power ? (product.power >= 1000 ? `${product.power / 1000} kW` : `${product.power} W`) : (product.specs?.ratedPowerKw ? `${product.specs.ratedPowerKw} kW` : 'N/A'));
+
+        const effVal = product.efficiency ? `${product.efficiency}%` : (product.specs?.peakEfficiency ? `${product.specs.peakEfficiency}%` : 'N/A');
+        const typeVal = product.specs?.type || product.specs?.waveform || product.specs?.productType || 'N/A';
+
         const specsList = [
-          { label: t.powerKw, value: product.specs?.powerKw || 'N/A', icon: <Power className="text-solar-blue" /> },
-          { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap className="text-solar-warning" /> },
-          { label: t.type, value: product.specs?.type || 'N/A', icon: <Grid className="text-solar-accent" /> },
+          { label: t.powerKw, value: powerVal, icon: <Power className="text-solar-blue" /> },
+          { label: t.efficiency, value: effVal, icon: <Zap className="text-solar-warning" /> },
+          { label: t.type, value: typeVal, icon: <Grid className="text-solar-accent" /> },
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> }
         ];
 
-        if (product.specs?.voltage) {
-          const voltVal = String(product.specs.voltage);
-          const formattedVolt = /v|فولت/i.test(voltVal) ? voltVal : `${voltVal} ${t.volt || 'V'}`;
+        const voltVal = product.specs?.voltage || product.specs?.acVoltageV || product.specs?.nominalVoltage;
+        if (voltVal) {
+          const strVolt = String(voltVal);
+          const formattedVolt = /v|فولت/i.test(strVolt) ? strVolt : `${strVolt} ${t.volt || 'V'}`;
           specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
         }
         if (product.specs?.current) {
-          const currVal = String(product.specs.current);
-          const formattedCurr = /a|أمبير/i.test(currVal) ? currVal : `${currVal} ${t.ampere || 'A'}`;
+          const strCurr = String(product.specs.current);
+          const formattedCurr = /a|أمبير/i.test(strCurr) ? strCurr : `${strCurr} ${t.ampere || 'A'}`;
           specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
         }
 
         return specsList;
       }
-      case 'batteries':
+      case 'batteries': {
+        const capacityVal = product.specs?.capacity 
+          ? String(product.specs.capacity)
+          : (product.specs?.capacityAh ? `${product.specs.capacityAh} Ah` : (product.specs?.nominalEnergyWh ? `${product.specs.nominalEnergyWh} Wh` : (product.power ? `${product.power} W` : 'N/A')));
+        const voltVal = product.specs?.voltage || product.specs?.nominalVoltage ? `${product.specs?.voltage || product.specs?.nominalVoltage} V` : 'N/A';
+        const typeVal = product.specs?.type || product.specs?.cellType || product.specs?.technology || 'N/A';
+
         return [
-          { label: t.capacity, value: product.specs.capacity || 'N/A', icon: <Zap className="text-solar-warning" /> },
-          { label: t.voltage, value: product.specs.voltage || 'N/A', icon: <Zap className="text-solar-blue" /> },
-          { label: t.type, value: product.specs.type || 'N/A', icon: <Grid className="text-solar-accent" /> },
+          { label: t.capacity, value: capacityVal, icon: <Zap className="text-solar-warning" /> },
+          { label: t.voltage, value: voltVal, icon: <Zap className="text-solar-blue" /> },
+          { label: t.type, value: typeVal, icon: <Grid className="text-solar-accent" /> },
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> }
         ];
+      }
       case 'cables':
         return [
-          { label: t.crossSection, value: product.specs.crossSection || 'N/A', icon: <Ruler className="text-solar-accent" /> },
-          { label: t.length, value: product.specs.length || 'N/A', icon: <Ruler className="text-solar-blue" /> },
-          { label: t.voltage, value: product.specs.voltage || 'N/A', icon: <Zap className="text-solar-warning" /> },
-          { label: t.material, value: product.specs.material || 'N/A', icon: <Grid className="text-solar-success" /> }
+          { label: t.crossSection, value: product.specs?.crossSection ? `${product.specs.crossSection} mm²` : 'N/A', icon: <Ruler className="text-solar-accent" /> },
+          { label: t.length, value: product.specs?.cableLength || product.specs?.length ? `${product.specs?.cableLength || product.specs?.length} m` : 'N/A', icon: <Ruler className="text-solar-blue" /> },
+          { label: t.voltage, value: product.specs?.voltage || 'N/A', icon: <Zap className="text-solar-warning" /> },
+          { label: t.material, value: product.specs?.material || 'N/A', icon: <Grid className="text-solar-success" /> }
         ];
       case 'protection':
       case 'combiner': {
@@ -209,14 +246,26 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           specsList.push({ label: t.poles, value: product.specs.poles, icon: <Grid className="text-solar-accent" /> });
         }
         if (product.specs?.voltage) {
-          const voltVal = String(product.specs.voltage);
-          const formattedVolt = /v|فولت/i.test(voltVal) ? voltVal : `${voltVal} ${t.volt || 'V'}`;
+          const strVolt = String(product.specs.voltage);
+          const formattedVolt = /v|فولت/i.test(strVolt) ? strVolt : `${strVolt} ${t.volt || 'V'}`;
           specsList.push({ label: t.voltage, value: formattedVolt, icon: <Zap className="text-solar-blue" /> });
         }
         if (product.specs?.current) {
-          const currVal = String(product.specs.current);
-          const formattedCurr = /a|أمبير/i.test(currVal) ? currVal : `${currVal} ${t.ampere || 'A'}`;
+          const strCurr = String(product.specs.current);
+          const formattedCurr = /a|أمبير/i.test(strCurr) ? strCurr : `${strCurr} ${t.ampere || 'A'}`;
           specsList.push({ label: t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
+        }
+        return specsList;
+      }
+      case 'mounting': {
+        const specsList = [
+          ...common
+        ];
+        if (product.specs?.material) {
+          specsList.push({ label: t.material, value: String(product.specs.material), icon: <Grid className="text-solar-accent" /> });
+        }
+        if (product.specs?.maxWind) {
+          specsList.push({ label: t.maxWind, value: `${product.specs.maxWind} km/h`, icon: <Zap className="text-solar-warning" /> });
         }
         return specsList;
       }
@@ -227,7 +276,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   const mainSpecs = getMainSpecs();
 
-  const getSpecLabel = (key: string) => {
+  const getSpecLabel = (key: string): string => {
     const labels: Record<string, string> = {
       type: t.type,
       voltage: t.voltage,
@@ -247,9 +296,276 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       poles: t.poles,
       quantity: t.quantityValue,
       color: t.color,
+      power: t.power,
+      efficiency: t.efficiency,
+      warranty: t.warranty,
+      vmpV: isAr ? 'جهد التشغيل الأقصى (Vmp)' : 'Max Power Voltage (Vmp)',
+      vocV: isAr ? 'جهد الدائرة المفتوحة (Voc)' : 'Open Circuit Voltage (Voc)',
+      impA: isAr ? 'تيار التشغيل الأقصى (Imp)' : 'Max Power Current (Imp)',
+      iscA: isAr ? 'تيار الدائرة القصيرة (Isc)' : 'Short Circuit Current (Isc)',
+      cellType: isAr ? 'نوع الخلايا' : 'Cell Type',
+      technology: isAr ? 'التقنية' : 'Technology',
+      productType: isAr ? 'نوع المنتج' : 'Product Type',
+      numberOfCells: isAr ? 'عدد الخلايا' : 'Number of Cells',
+      ratedPowerKw: isAr ? 'القدرة المقننة (كيلوواط)' : 'Rated Power (kW)',
+      surgePowerW: isAr ? 'قدرة التحمل القصوى (W)' : 'Surge Power (W)',
+      waveform: isAr ? 'شكل الموجة' : 'Waveform',
+      acVoltageV: isAr ? 'جهد التيار المتردد (AC)' : 'AC Voltage',
+      frequencyHz: isAr ? 'التردد (هرتز)' : 'Frequency (Hz)',
+      peakEfficiency: isAr ? 'أقصى كفاءة' : 'Peak Efficiency',
+      nominalVoltage: isAr ? 'الجهد الاسمي' : 'Nominal Voltage',
+      capacityAh: isAr ? 'السعة (أمبير-ساعة)' : 'Capacity (Ah)',
+      nominalEnergyWh: isAr ? 'الطاقة الاسمية (Wh)' : 'Nominal Energy (Wh)',
+      maxContinuousDischargeCurrentA: isAr ? 'أقصى تيار تفريغ مستمر' : 'Max Continuous Discharge',
+      cycleLife: isAr ? 'دورات الحياة (Cycle Life)' : 'Cycle Life',
+      maxPvOpenCircuitVoltageV: isAr ? 'أقصى جهد PV (Voc)' : 'Max PV Voc',
+      maxPvArrayPowerW: isAr ? 'أقصى قدرة للألواح (W)' : 'Max PV Array Power',
+      pvMpptVoltageRangeV: isAr ? 'نطاق جهد الـ MPPT' : 'MPPT Voltage Range',
+      cableLength: isAr ? 'طول الكابل' : 'Cable Length',
+      weightKg: isAr ? 'الوزن (كجم)' : 'Weight (kg)',
+      dimensionsMm: isAr ? 'الأبعاد (مم)' : 'Dimensions (mm)',
+      notes: isAr ? 'ملاحظات' : 'Notes',
     };
     return labels[key] || key;
   };
+
+  // Comprehensive technical specifications builder ensuring all available data is displayed
+  const detailedSpecs = useMemo(() => {
+    const list: Array<{ key: string; label: string; value: string; icon?: React.ReactNode }> = [];
+    const specsObj = product.specs || {};
+
+    const formatValueWithUnit = (key: string, val: any): string => {
+      if (val === undefined || val === null || val === '') return '';
+      const strVal = String(val).trim();
+      if (!strVal || strVal === 'N/A') return '';
+
+      switch (key) {
+        case 'voltage':
+        case 'vmpV':
+        case 'vocV':
+        case 'acVoltageV':
+        case 'nominalVoltage':
+          return /v|فولت/i.test(strVal) ? strVal : `${strVal} V`;
+        case 'current':
+        case 'impA':
+        case 'iscA':
+        case 'maxContinuousDischargeCurrentA':
+          return /a|أمبير/i.test(strVal) ? strVal : `${strVal} A`;
+        case 'power':
+          return /w|وات/i.test(strVal) ? strVal : `${strVal} W`;
+        case 'powerKw':
+        case 'ratedPowerKw':
+          return /kw|كيلو/i.test(strVal) ? strVal : `${strVal} kW`;
+        case 'efficiency':
+        case 'peakEfficiency':
+          return strVal.endsWith('%') ? strVal : `${strVal}%`;
+        case 'warranty':
+          return /year|سنة/i.test(strVal) ? strVal : `${strVal} ${t.years}`;
+        case 'capacityAh':
+          return /ah|أمبير/i.test(strVal) ? strVal : `${strVal} Ah`;
+        case 'nominalEnergyWh':
+          return /wh|واط/i.test(strVal) ? strVal : `${strVal} Wh`;
+        case 'crossSection':
+          return /mm|مم/i.test(strVal) ? strVal : `${strVal} mm²`;
+        case 'cableLength':
+          return /m|متر/i.test(strVal) ? strVal : `${strVal} m`;
+        case 'weight':
+        case 'weightKg':
+          return /kg|كجم|كيلو/i.test(strVal) ? strVal : `${strVal} kg`;
+        case 'frequencyHz':
+          return /hz|هرتز/i.test(strVal) ? strVal : `${strVal} Hz`;
+        case 'maxWind':
+          return /km|كم/i.test(strVal) ? strVal : `${strVal} km/h`;
+        case 'area':
+          return /m²|متر/i.test(strVal) ? strVal : `${strVal} m²`;
+        default:
+          return strVal;
+      }
+    };
+
+    // 1. Power
+    if (product.power && product.power > 0) {
+      list.push({ key: 'power', label: t.power, value: `${product.power} ${t.watt}`, icon: <Power size={14} className="text-solar-blue" /> });
+    } else if (specsObj.power) {
+      list.push({ key: 'power', label: t.power, value: formatValueWithUnit('power', specsObj.power), icon: <Power size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.powerKw || specsObj.ratedPowerKw) {
+      list.push({ key: 'powerKw', label: t.powerKw, value: formatValueWithUnit('powerKw', specsObj.powerKw || specsObj.ratedPowerKw), icon: <Power size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.surgePowerW) {
+      list.push({ key: 'surgePowerW', label: isAr ? 'قدرة التحمل القصوى' : 'Surge Power', value: `${specsObj.surgePowerW} W`, icon: <Zap size={14} className="text-solar-warning" /> });
+    }
+
+    // 2. Efficiency
+    if (product.efficiency && product.efficiency > 0) {
+      list.push({ key: 'efficiency', label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} className="text-solar-warning" /> });
+    } else if (specsObj.peakEfficiency || specsObj.efficiency) {
+      list.push({ key: 'efficiency', label: t.efficiency, value: formatValueWithUnit('efficiency', specsObj.peakEfficiency || specsObj.efficiency), icon: <Zap size={14} className="text-solar-warning" /> });
+    }
+
+    // 3. Warranty
+    if (product.warranty && product.warranty > 0) {
+      list.push({ key: 'warranty', label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield size={14} className="text-solar-success" /> });
+    } else if (specsObj.warranty) {
+      list.push({ key: 'warranty', label: t.warranty, value: formatValueWithUnit('warranty', specsObj.warranty), icon: <Shield size={14} className="text-solar-success" /> });
+    }
+
+    // 4. Dimensions & Area
+    const hasDimensions = (product.length && product.width) || (specsObj.length && specsObj.width && !isNaN(Number(specsObj.length)) && !isNaN(Number(specsObj.width)));
+    if (hasDimensions) {
+      const pLen = product.length || specsObj.length;
+      const pWidth = product.width || specsObj.width;
+      const pThick = product.thickness || specsObj.thickness;
+      const pUnit = product.dimensionUnit || specsObj.dimensionUnit || 'mm';
+      list.push({ 
+        key: 'dimensions', 
+        label: isAr ? 'الأبعاد' : 'Dimensions', 
+        value: `${pLen} × ${pWidth}${pThick ? ` × ${pThick}` : ''} ${pUnit}`,
+        icon: <Ruler size={14} className="text-solar-accent" />
+      });
+    } else if (specsObj.dimensionsMm) {
+      list.push({ key: 'dimensions', label: isAr ? 'الأبعاد (مم)' : 'Dimensions (mm)', value: String(specsObj.dimensionsMm), icon: <Ruler size={14} className="text-solar-accent" /> });
+    }
+
+    if (product.area && product.area > 0) {
+      list.push({ key: 'area', label: t.area, value: `${product.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+    } else if (specsObj.area && Number(specsObj.area) > 0) {
+      list.push({ key: 'area', label: t.area, value: `${specsObj.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+    }
+
+    // 5. Voltage
+    if (specsObj.voltage) {
+      list.push({ key: 'voltage', label: t.voltage, value: formatValueWithUnit('voltage', specsObj.voltage), icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.vmpV) {
+      list.push({ key: 'vmpV', label: isAr ? 'جهد التشغيل (Vmp)' : 'Max Power Voltage (Vmp)', value: formatValueWithUnit('vmpV', specsObj.vmpV), icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.vocV) {
+      list.push({ key: 'vocV', label: isAr ? 'جهد الدائرة المفتوحة (Voc)' : 'Open Circuit Voltage (Voc)', value: formatValueWithUnit('vocV', specsObj.vocV), icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.nominalVoltage && !specsObj.voltage) {
+      list.push({ key: 'nominalVoltage', label: isAr ? 'الجهد الاسمي' : 'Nominal Voltage', value: formatValueWithUnit('nominalVoltage', specsObj.nominalVoltage), icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.acVoltageV) {
+      list.push({ key: 'acVoltageV', label: isAr ? 'جهد الخرج المتردد (AC)' : 'AC Output Voltage', value: formatValueWithUnit('acVoltageV', specsObj.acVoltageV), icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+
+    // 6. Current
+    if (specsObj.current) {
+      list.push({ key: 'current', label: t.current, value: formatValueWithUnit('current', specsObj.current), icon: <Power size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.impA) {
+      list.push({ key: 'impA', label: isAr ? 'تيار التشغيل (Imp)' : 'Max Power Current (Imp)', value: formatValueWithUnit('impA', specsObj.impA), icon: <Power size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.iscA) {
+      list.push({ key: 'iscA', label: isAr ? 'تيار الدائرة القصيرة (Isc)' : 'Short Circuit Current (Isc)', value: formatValueWithUnit('iscA', specsObj.iscA), icon: <Power size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.maxContinuousDischargeCurrentA) {
+      list.push({ key: 'maxContinuousDischargeCurrentA', label: isAr ? 'أقصى تيار تفريغ مستمر' : 'Max Continuous Discharge', value: formatValueWithUnit('maxContinuousDischargeCurrentA', specsObj.maxContinuousDischargeCurrentA), icon: <Power size={14} className="text-solar-warning" /> });
+    }
+
+    // 7. Type, Cell, Technology, Waveform
+    if (specsObj.type) {
+      list.push({ key: 'type', label: t.type, value: String(specsObj.type), icon: <Grid size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.cellType && specsObj.cellType !== specsObj.type) {
+      list.push({ key: 'cellType', label: isAr ? 'نوع الخلايا' : 'Cell Type', value: String(specsObj.cellType), icon: <Cpu size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.technology && specsObj.technology !== specsObj.type) {
+      list.push({ key: 'technology', label: isAr ? 'التقنية' : 'Technology', value: String(specsObj.technology), icon: <Cpu size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.productType && specsObj.productType !== specsObj.type) {
+      list.push({ key: 'productType', label: isAr ? 'نوع المنتج' : 'Product Type', value: String(specsObj.productType), icon: <Grid size={14} className="text-solar-muted" /> });
+    }
+    if (specsObj.numberOfCells) {
+      list.push({ key: 'numberOfCells', label: isAr ? 'عدد الخلايا' : 'Number of Cells', value: String(specsObj.numberOfCells), icon: <Grid size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.waveform) {
+      list.push({ key: 'waveform', label: isAr ? 'شكل الموجة' : 'Waveform', value: String(specsObj.waveform), icon: <Activity size={14} className="text-solar-blue" /> });
+    }
+
+    // 8. Capacity & Storage
+    if (specsObj.capacity) {
+      list.push({ key: 'capacity', label: t.capacity, value: String(specsObj.capacity), icon: <Battery size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.capacityAh && !specsObj.capacity?.includes(String(specsObj.capacityAh))) {
+      list.push({ key: 'capacityAh', label: isAr ? 'السعة (أمبير-ساعة)' : 'Capacity (Ah)', value: formatValueWithUnit('capacityAh', specsObj.capacityAh), icon: <Battery size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.nominalEnergyWh) {
+      list.push({ key: 'nominalEnergyWh', label: isAr ? 'الطاقة الاسمية' : 'Nominal Energy', value: formatValueWithUnit('nominalEnergyWh', specsObj.nominalEnergyWh), icon: <Zap size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.cycleLife) {
+      list.push({ key: 'cycleLife', label: isAr ? 'دورات الحياة (Cycle Life)' : 'Cycle Life', value: String(specsObj.cycleLife), icon: <Activity size={14} className="text-solar-success" /> });
+    }
+
+    // 9. Mechanical, Cables, Mounting
+    if (specsObj.crossSection) {
+      list.push({ key: 'crossSection', label: t.crossSection, value: formatValueWithUnit('crossSection', specsObj.crossSection), icon: <Ruler size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.cableLength || (product.category === 'cables' && specsObj.length)) {
+      list.push({ key: 'cableLength', label: isAr ? 'طول الكابل' : 'Cable Length', value: formatValueWithUnit('cableLength', specsObj.cableLength || specsObj.length), icon: <Ruler size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.material) {
+      list.push({ key: 'material', label: t.material, value: String(specsObj.material), icon: <Grid size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.ipRating) {
+      list.push({ key: 'ipRating', label: t.ipRating, value: String(specsObj.ipRating), icon: <Shield size={14} className="text-solar-success" /> });
+    }
+    if (specsObj.poles) {
+      list.push({ key: 'poles', label: t.poles, value: String(specsObj.poles), icon: <Grid size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.maxWind) {
+      list.push({ key: 'maxWind', label: t.maxWind, value: formatValueWithUnit('maxWind', specsObj.maxWind), icon: <Zap size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.weight || specsObj.weightKg) {
+      list.push({ key: 'weight', label: t.weight, value: formatValueWithUnit('weight', specsObj.weight || specsObj.weightKg), icon: <Ruler size={14} className="text-solar-muted" /> });
+    }
+    if (specsObj.frequencyHz) {
+      list.push({ key: 'frequencyHz', label: isAr ? 'التردد' : 'Frequency', value: formatValueWithUnit('frequencyHz', specsObj.frequencyHz), icon: <Activity size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.maxPvOpenCircuitVoltageV) {
+      list.push({ key: 'maxPvOpenCircuitVoltageV', label: isAr ? 'أقصى جهد PV (Voc)' : 'Max PV Voc', value: `${specsObj.maxPvOpenCircuitVoltageV} V`, icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.maxPvArrayPowerW) {
+      list.push({ key: 'maxPvArrayPowerW', label: isAr ? 'أقصى قدرة للألواح' : 'Max PV Array Power', value: `${specsObj.maxPvArrayPowerW} W`, icon: <Power size={14} className="text-solar-warning" /> });
+    }
+    if (specsObj.pvMpptVoltageRangeV) {
+      list.push({ key: 'pvMpptVoltageRangeV', label: isAr ? 'نطاق جهد الـ MPPT' : 'MPPT Voltage Range', value: `${specsObj.pvMpptVoltageRangeV} V`, icon: <Zap size={14} className="text-solar-blue" /> });
+    }
+    if (specsObj.quantity) {
+      list.push({ key: 'quantity', label: t.quantityValue, value: String(specsObj.quantity), icon: <Grid size={14} className="text-solar-accent" /> });
+    }
+    if (specsObj.color) {
+      list.push({ key: 'color', label: t.color, value: String(specsObj.color), icon: <Grid size={14} className="text-solar-accent" /> });
+    }
+
+    // 10. Dynamic keys from specsObj not already covered
+    const knownKeys = new Set([
+      'power', 'powerKw', 'ratedPowerKw', 'surgePowerW', 'efficiency', 'peakEfficiency', 
+      'warranty', 'dimensions', 'length', 'width', 'thickness', 'dimensionUnit', 'dimensionsMm', 
+      'area', 'voltage', 'vmpV', 'vocV', 'nominalVoltage', 'acVoltageV', 'current', 'impA', 
+      'iscA', 'maxContinuousDischargeCurrentA', 'type', 'cellType', 'technology', 'productType', 
+      'numberOfCells', 'waveform', 'capacity', 'capacityAh', 'nominalEnergyWh', 'cycleLife', 
+      'crossSection', 'cableLength', 'material', 'ipRating', 'poles', 'maxWind', 'weight', 
+      'weightKg', 'frequencyHz', 'maxPvOpenCircuitVoltageV', 'maxPvArrayPowerW', 
+      'pvMpptVoltageRangeV', 'quantity', 'color', 'description', 'notes'
+    ]);
+
+    Object.entries(specsObj).forEach(([k, v]) => {
+      if (!knownKeys.has(k) && v !== undefined && v !== null && v !== '') {
+        list.push({
+          key: k,
+          label: getSpecLabel(k),
+          value: String(v),
+          icon: <Grid size={14} className="text-solar-blue" />
+        });
+      }
+    });
+
+    return list;
+  }, [product, isAr, t]);
+
+  const productDescription = product.specs?.description || (product as any).description;
 
   // Find other products from the same supplier
   const supplierId = product.supplierId;
@@ -287,10 +603,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           {isOwner && onEdit && (
             <button 
               onClick={() => onEdit(product)}
-              className="flex items-center gap-1.5 text-solar-blue hover:text-solar-blue/80 transition font-black text-xs bg-solar-blue/10 px-3 py-2 rounded-xl border border-solar-blue/20 active:scale-95 shrink-0"
+              className="flex items-center gap-1.5 text-solar-blue hover:text-solar-blue/80 transition font-black text-xs bg-solar-blue/10 px-3 py-2 rounded-xl border border-solar-blue/20 active:scale-95 shrink-0 cursor-pointer"
             >
               <Edit size={13} />
               <span>{isAr ? 'تعديل' : 'Edit'}</span>
+            </button>
+          )}
+          {isOwner && onDelete && (
+            <button 
+              onClick={() => setShowDeleteModal(true)}
+              className="flex items-center gap-1.5 text-solar-danger hover:text-red-700 transition font-black text-xs bg-red-500/10 px-3 py-2 rounded-xl border border-red-500/20 active:scale-95 shrink-0 cursor-pointer"
+            >
+              <Trash2 size={13} />
+              <span>{isAr ? 'حذف' : 'Delete'}</span>
             </button>
           )}
         </div>
@@ -303,7 +628,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         <div className="space-y-4 sm:space-y-6 w-full max-w-full box-border min-w-0">
           <div className="relative group w-full max-w-full rounded-2xl sm:rounded-[40px] overflow-hidden box-border">
             <img 
-              src={selectedImage || product.image} 
+              src={selectedImage || product.image || DEFAULT_PRODUCT_IMAGE} 
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+              }}
               referrerPolicy="no-referrer" 
               className="w-full max-w-full h-auto aspect-[4/3] object-cover rounded-2xl sm:rounded-[40px] shadow-2xl shadow-solar-blue/10 border-2 sm:border-4 border-white box-border" 
               alt={product.name} 
@@ -343,28 +671,53 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                       : 'border-solar-border opacity-70 hover:opacity-100'
                   }`}
                 >
-                  <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                  <img 
+                    src={imgUrl || DEFAULT_PRODUCT_IMAGE} 
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+                    }}
+                    alt="" 
+                    className="w-full h-full object-cover" 
+                  />
                 </button>
               ))}
             </div>
           )}
           
+          {/* Detailed Technical Specifications Card */}
           <div className="bg-solar-card rounded-2xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
-            <h3 className="text-base sm:text-lg font-black text-solar-text mb-4 sm:mb-6 flex items-center gap-2">
-              <Zap size={20} className="text-solar-blue shrink-0" />
-              <span>{t.specs}</span>
-            </h3>
-            <div className="grid grid-cols-2 gap-y-4 sm:gap-y-6 gap-x-3 sm:gap-x-6 md:gap-x-10 w-full max-w-full box-border min-w-0">
-              {Object.entries(product.specs).map(([key, value]) => {
-                if (key === 'description' || !value) return null;
-                return (
-                  <div key={key} className="flex flex-col border-b border-solar-border/30 pb-2 min-w-0 w-full max-w-full box-border">
-                    <span translate="no" className="text-[10px] font-black text-solar-muted uppercase tracking-wider mb-1 truncate notranslate">{getSpecLabel(key)}</span>
-                    <span translate="no" className="text-xs sm:text-sm font-bold text-solar-text break-words [overflow-wrap:anywhere] [word-break:break-word] notranslate">{value as string}</span>
-                  </div>
-                );
-              })}
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
+              <h3 className="text-base sm:text-lg font-black text-solar-text flex items-center gap-2">
+                <Zap size={20} className="text-solar-blue shrink-0" />
+                <span>{t.specs}</span>
+              </h3>
+              {detailedSpecs.length > 0 && (
+                <span className="text-[11px] font-black text-solar-blue bg-solar-blue/10 px-2.5 py-0.5 rounded-full">
+                  {detailedSpecs.length} {isAr ? 'مواصفة' : 'specs'}
+                </span>
+              )}
             </div>
+
+            {detailedSpecs.length > 0 ? (
+              <div className="grid grid-cols-2 gap-y-4 sm:gap-y-6 gap-x-3 sm:gap-x-6 md:gap-x-10 w-full max-w-full box-border min-w-0">
+                {detailedSpecs.map((spec) => (
+                  <div key={spec.key} className="flex flex-col border-b border-solar-border/30 pb-2.5 min-w-0 w-full max-w-full box-border">
+                    <span className="text-[10px] font-black text-solar-muted uppercase tracking-wider mb-1 truncate flex items-center gap-1.5">
+                      {spec.icon && <span className="opacity-70 shrink-0">{spec.icon}</span>}
+                      <span className="truncate">{spec.label}</span>
+                    </span>
+                    <span className="text-xs sm:text-sm font-bold text-solar-text break-words [overflow-wrap:anywhere] [word-break:break-word]">
+                      {spec.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-solar-muted text-xs font-bold">
+                {isAr ? 'لا توجد مواصفات فنية إضافية مسجلة لهذا المنتج' : 'No additional technical specifications recorded for this product'}
+              </div>
+            )}
+
             {product.datasheetUrl && (
               <button 
                 onClick={handleDownloadDatasheet}
@@ -375,6 +728,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               </button>
             )}
           </div>
+
+          {/* Product Overview / Description if available */}
+          {productDescription && (
+            <div className="bg-solar-card rounded-2xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
+              <h3 className="text-base sm:text-lg font-black text-solar-text mb-3 sm:mb-4 flex items-center gap-2">
+                <Info size={20} className="text-solar-blue shrink-0" />
+                <span>{isAr ? 'وصف المنتج وتفاصيله' : 'Product Description'}</span>
+              </h3>
+              <p className="text-xs sm:text-sm font-medium text-solar-text/80 leading-relaxed whitespace-pre-wrap">
+                {productDescription}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="space-y-6 sm:space-y-8 w-full max-w-full box-border min-w-0">
@@ -527,6 +893,96 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Comprehensive Full-Width Technical Specifications Sheet */}
+      <div className="mt-8 sm:mt-12 bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 md:p-10 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 sm:pb-6 border-b border-solar-border/50 gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-solar-blue/10 text-solar-blue flex items-center justify-center shrink-0">
+              <Zap size={22} />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-xl font-black text-solar-text flex items-center gap-2">
+                <span>{isAr ? 'المواصفات الفنية والهندسية المعتمدة' : 'Certified Technical & Engineering Specifications'}</span>
+              </h3>
+              <p className="text-xs font-bold text-solar-muted mt-0.5">
+                {isAr ? 'بيانات معتمدة من الكتالوج الرسمي وداتا شيت الشركة المصنعة' : 'Verified data from official manufacturer catalog and datasheet'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="text-xs font-black text-solar-blue bg-solar-blue/10 px-3 py-1 rounded-full border border-solar-blue/20">
+              {detailedSpecs.length} {isAr ? 'مواصفة تقنية' : 'technical specs'}
+            </span>
+            {product.datasheetUrl && (
+              <button 
+                onClick={handleDownloadDatasheet}
+                className="bg-solar-blue hover:bg-solar-blue/90 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-sm active:scale-95"
+              >
+                <Download size={14} />
+                <span>{t.downloadPDF}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Specifications Grid */}
+        {detailedSpecs.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5 mt-6 w-full max-w-full box-border">
+            {detailedSpecs.map((spec) => (
+              <div 
+                key={spec.key} 
+                className="bg-white/70 hover:bg-white border border-solar-border/60 hover:border-solar-blue/40 rounded-2xl p-3.5 sm:p-4.5 transition-all shadow-xs flex items-center justify-between gap-3 min-w-0"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-solar-bg flex items-center justify-center text-solar-blue shrink-0">
+                    {spec.icon || <Grid size={15} />}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-black text-solar-muted uppercase tracking-wider block truncate">
+                      {spec.label}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-xs sm:text-sm font-black text-solar-text">
+                    {spec.value}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-10 text-solar-muted text-sm font-bold">
+            {isAr ? 'جاري تحديث واستكمال المواصفات الفنية لهذا المنتج من الكتالوج المعتمد.' : 'Technical specifications for this product are currently being updated.'}
+          </div>
+        )}
+
+        {/* Datasheet Callout if available */}
+        {product.datasheetUrl && (
+          <div className="mt-6 sm:mt-8 p-4 sm:p-5 rounded-2xl bg-solar-blue/5 border border-solar-blue/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-center sm:text-start">
+              <FileText className="text-solar-blue shrink-0 hidden sm:block" size={24} />
+              <div>
+                <h4 className="text-xs sm:text-sm font-black text-solar-text">
+                  {isAr ? 'الداتا شيت الفنية الأصلية للمنتج (PDF)' : 'Original Product Technical Datasheet (PDF)'}
+                </h4>
+                <p className="text-[11px] font-medium text-solar-muted mt-0.5">
+                  {isAr ? 'يمكنك تنزيل ملف المواصفات الهندسية ومخططات التشغيل الرسمية' : 'Download official engineering specifications and technical diagrams'}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={handleDownloadDatasheet}
+              className="bg-solar-blue text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-md hover:bg-solar-blue/90 transition flex items-center gap-2 shrink-0 active:scale-95"
+            >
+              <Download size={15} />
+              <span>{t.downloadPDF}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Dynamic Reviews and Rating Section */}
@@ -811,6 +1267,86 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-solar-card w-full max-w-md rounded-3xl p-6 sm:p-8 border border-solar-border shadow-2xl relative text-left"
+            >
+              <button 
+                onClick={() => !isDeleting && setShowDeleteModal(false)}
+                className="absolute top-5 right-5 p-2 rounded-xl text-solar-muted hover:text-solar-text hover:bg-solar-bg transition"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+
+              <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center mb-5">
+                <AlertTriangle size={28} />
+              </div>
+
+              <h3 className="text-xl font-black text-solar-text mb-2">
+                {isAr ? 'تأكيد حذف المنتج' : 'Confirm Product Deletion'}
+              </h3>
+              
+              <p className="text-solar-muted text-sm font-medium leading-relaxed mb-6">
+                {isAr 
+                  ? 'هل أنت متأكد من رغبتك في حذف هذا المنتج نهائياً من المنصة؟ لن تتمكن من استرجاعه بعد الحذف.'
+                  : 'Are you sure you want to permanently delete this product? It will be removed from the catalog.'}
+              </p>
+
+              {/* Product Info Preview */}
+              <div className="flex items-center gap-3 p-3 bg-solar-bg rounded-2xl border border-solar-border mb-6">
+                <div className="w-12 h-12 rounded-xl bg-white overflow-hidden border border-solar-border shrink-0">
+                  <img src={product.image || DEFAULT_PRODUCT_IMAGE} alt={product.name} className="w-full h-full object-cover" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-xs sm:text-sm text-solar-text truncate">
+                    {isAr ? product.nameAr : product.name}
+                  </div>
+                  <div className="text-[11px] text-solar-blue font-bold">
+                    {product.brand}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 py-3 px-4 rounded-xl border border-solar-border text-solar-text font-bold text-sm hover:bg-solar-bg transition active:scale-95 disabled:opacity-50"
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={handleConfirmDelete}
+                  className="flex-1 py-3 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-600/20 transition active:scale-95 disabled:opacity-50"
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>{isAr ? 'جاري الحذف...' : 'Deleting...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} />
+                      <span>{isAr ? 'نعم، احذف المنتج' : 'Delete Product'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

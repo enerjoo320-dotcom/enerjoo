@@ -36,7 +36,13 @@ export const AddProductView: React.FC<AddProductViewProps> = ({ lang, onBack, on
         <h2 className="text-3xl font-black text-solar-text mb-3">{editingProduct ? (isAr ? 'تعديل المنتج' : 'Edit Product') : t.addNewProduct}</h2>
         <p className="text-solar-muted text-sm mb-10 max-w-sm mx-auto leading-relaxed">{t.addNewProductDesc}</p>
         
-        <ProductForm lang={lang} onSave={async (p) => { await onAdd(p); onBack(); }} onCancel={onBack} initialData={editingProduct} />
+        <ProductForm 
+          key={editingProduct?.id ? `edit-${editingProduct.id}` : 'new-product'}
+          lang={lang} 
+          onSave={async (p) => { await onAdd(p); }} 
+          onCancel={onBack} 
+          initialData={editingProduct} 
+        />
       </div>
     </motion.div>
   );

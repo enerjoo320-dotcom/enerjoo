@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Sparkles, ShieldCheck, LogIn, ChevronLeft, ChevronRight, Sun, Zap, Battery, Wrench, Calculator } from 'lucide-react';
+import { Sparkles, ShieldCheck, LogIn, ChevronLeft, ChevronRight, Sun, Zap, Battery, Wrench, Calculator, AlertTriangle, X, Loader2 } from 'lucide-react';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { ProductCard } from './components/ProductCard';
@@ -88,6 +88,8 @@ export default function App() {
   
   // Supplier/Admin Management States
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
   const [adminSearch, setAdminSearch] = useState('');
   const [adminFilterId, setAdminFilterId] = useState<string | number | null>(null);
   const [supplierFilterId, setSupplierFilterId] = useState<string | number | null>(initialNav.supplierFilterId || null);
@@ -434,16 +436,54 @@ export default function App() {
   const handleProductAction = async (productData: Omit<Product, 'id'>) => {
     try {
       if (editingProduct) {
-        await updateProduct(editingProduct.id.toString(), productData);
+        const prodId = editingProduct.id.toString();
+        const mergedProduct: Product = {
+          ...editingProduct,
+          ...productData,
+          id: editingProduct.id,
+          specs: {
+            ...(editingProduct.specs || {}),
+            ...(productData.specs || {})
+          }
+        };
+        // Optimistically update products state immediately
+        setProducts(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
+        await updateProduct(prodId, productData);
         setEditingProduct(null);
       } else {
-        await addProduct(productData);
+        const newId = await addProduct(productData);
+        const createdProduct: Product = {
+          ...productData,
+          id: newId
+        } as Product;
+        setProducts(prev => [createdProduct, ...prev]);
       }
-      navigateToView(user?.type === 'supplier' ? 'supplier-dashboard' : 'home');
+      navigateToView(user?.type === 'supplier' || user?.type === 'admin' ? 'supplier-dashboard' : 'home');
     } catch (err) {
       console.error("Action error:", err);
       alert(isAr ? 'حدث خطأ أثناء حفظ المنتج في قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to save product in database. Please try again.');
       throw err;
+    }
+  };
+
+  const handleConfirmDeleteProduct = async () => {
+    if (!productToDelete) return;
+    try {
+      setIsDeletingProduct(true);
+      const pId = productToDelete.id.toString();
+      // Optimistically remove from state immediately
+      setProducts(prev => prev.filter(p => p.id.toString() !== pId));
+      if (selectedProduct && selectedProduct.id.toString() === pId) {
+        setSelectedProduct(null);
+        navigateBack('home');
+      }
+      await deleteProduct(pId);
+      setProductToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete product:', err);
+      alert(isAr ? 'حدث خطأ أثناء حذف المنتج من قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to delete product from database. Please try again.');
+    } finally {
+      setIsDeletingProduct(false);
     }
   };
 
@@ -480,6 +520,13 @@ export default function App() {
                 setEditingProduct(p);
                 setSelectedProduct(null);
                 navigateToView('add');
+              }}
+              onDelete={async (id) => {
+                const pId = id.toString();
+                setProducts(prev => prev.filter(p => p.id.toString() !== pId));
+                await deleteProduct(pId);
+                setSelectedProduct(null);
+                navigateBack('home');
               }}
             />
           );
@@ -632,6 +679,10 @@ export default function App() {
                                     setEditingProduct(product);
                                     navigateToView('add');
                                   }}
+                                  onDelete={(e, product) => {
+                                    e.stopPropagation();
+                                    setProductToDelete(product);
+                                  }}
                                   isCompared={!!compareList.find(cp => cp.id === p.id)}
                                   isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
                                 />
@@ -659,6 +710,10 @@ export default function App() {
                             e.stopPropagation();
                             setEditingProduct(product);
                             navigateToView('add');
+                          }}
+                          onDelete={(e, product) => {
+                            e.stopPropagation();
+                            setProductToDelete(product);
                           }}
                           isCompared={!!compareList.find(cp => cp.id === p.id)}
                           isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
@@ -742,6 +797,10 @@ export default function App() {
                       setEditingProduct(product);
                       navigateToView('add');
                     }}
+                    onDelete={(e, product) => {
+                      e.stopPropagation();
+                      setProductToDelete(product);
+                    }}
                     isCompared={!!compareList.find(cp => cp.id === p.id)}
                     isWishlisted={true}
                   />
@@ -765,7 +824,7 @@ export default function App() {
       case 'compare':
         return <CompareView products={compareList} lang={lang} onBack={() => navigateBack('home')} onRemove={(id) => setCompareList(l => l.filter(p => p.id !== id))} />;
       case 'add':
-        return <AddProductView lang={lang} onBack={() => { navigateBack(user?.type === 'supplier' ? 'supplier-dashboard' : 'home'); setEditingProduct(null); }} onAdd={handleProductAction} editingProduct={editingProduct} />;
+        return <AddProductView lang={lang} onBack={() => { navigateBack(user?.type === 'supplier' || user?.type === 'admin' ? 'supplier-dashboard' : 'home'); setEditingProduct(null); }} onAdd={handleProductAction} editingProduct={editingProduct} />;
       case 'login':
         return <LoginView lang={lang} setView={navigateToView} />;
       case 'register':
@@ -777,11 +836,16 @@ export default function App() {
             setView={navigateToView} 
             products={products} 
             suppliers={suppliers}
-            onDelete={async (id) => { if(confirm(isAr ? 'تأكيد الحذف؟' : 'Confirm Delete?')) await deleteProduct(id.toString()); }}
+            onDelete={async (id) => {
+              const pId = id.toString();
+              setProducts(prev => prev.filter(p => p.id.toString() !== pId));
+              await deleteProduct(pId);
+            }}
             onEdit={(p) => { setEditingProduct(p); navigateToView('add'); }}
             adminSearch={adminSearch}
             setAdminSearch={setAdminSearch}
             adminFilterId={adminFilterId}
+            setAdminFilterId={setAdminFilterId}
           />
         );
       case 'admin-suppliers':
@@ -789,6 +853,7 @@ export default function App() {
           <AdminSupplierManagement 
             lang={lang} 
             suppliers={suppliers} 
+            products={products}
             onToggleVerification={(id) => {
               const s = suppliers.find(sup => sup.id === id);
               if (s) toggleSupplierVerification(id.toString(), !s.verified);
@@ -796,6 +861,7 @@ export default function App() {
             onBack={() => navigateBack('home')}
             initialSearch={adminSearch}
             onViewSupplier={(id) => { setSupplierFilterId(id); navigateToView('home'); }}
+            onManageProducts={(id) => { setAdminFilterId(id); navigateToView('supplier-dashboard'); }}
           />
         );
       case 'admin-requests':
@@ -922,6 +988,69 @@ export default function App() {
         onClose={() => setIsAiChatOpen(false)} 
         showFloatingTrigger={false} 
       />
+
+      {/* Product Deletion Confirmation Modal */}
+      <AnimatePresence>
+        {productToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-solar-border"
+              dir={isAr ? 'rtl' : 'ltr'}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <AlertTriangle size={24} />
+                </div>
+                <button 
+                  onClick={() => setProductToDelete(null)}
+                  disabled={isDeletingProduct}
+                  className="p-2 text-solar-muted hover:text-solar-text rounded-xl transition cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <h3 className="text-xl font-black text-solar-text mb-2">
+                {isAr ? 'تأكيد حذف المنتج' : 'Confirm Delete Product'}
+              </h3>
+              
+              <p className="text-solar-muted text-sm leading-relaxed mb-6 font-medium">
+                {isAr 
+                  ? `هل أنت متأكد من رغبتك في حذف "${productToDelete.nameAr || productToDelete.name}" نهائياً من منصة Enerjoo؟ لا يمكن التراجع عن هذا الإجراء.`
+                  : `Are you sure you want to permanently delete "${productToDelete.name}" from Enerjoo? This action cannot be undone.`
+                }
+              </p>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setProductToDelete(null)}
+                  disabled={isDeletingProduct}
+                  className="flex-1 py-3 px-4 rounded-xl border border-solar-border text-solar-text font-bold text-sm hover:bg-solar-light transition cursor-pointer"
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  onClick={handleConfirmDeleteProduct}
+                  disabled={isDeletingProduct}
+                  className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-sm shadow-md shadow-rose-600/20 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingProduct ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>{isAr ? 'جاري الحذف...' : 'Deleting...'}</span>
+                    </>
+                  ) : (
+                    <span>{isAr ? 'حذف نهائي' : 'Delete'}</span>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <BottomNav currentView={view} setView={navigateToView} lang={lang} user={user} />
     </div>

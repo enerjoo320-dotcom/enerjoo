@@ -13,30 +13,32 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang, user }) => {
   const t = translations[lang];
+  const isAr = lang === 'ar';
   const isSupplier = user?.type === 'supplier';
+  const isAdmin = user?.type === 'admin';
   
   const navItems: { id: ViewType; icon: React.ReactNode; label: string; show: boolean }[] = [
     { id: 'home', icon: <Home size={20} strokeWidth={2.5} />, label: t.home, show: true },
-    { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: user?.type !== 'admin' },
+    { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: !isAdmin },
     { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: !isSupplier },
-    // For suppliers: show "منتجاتي" (My Products) instead of "المفضلة" (Wishlist)
-    isSupplier
+    // For suppliers and admin: show products dashboard
+    isSupplier || isAdmin
       ? {
           id: 'supplier-dashboard',
           icon: <Package size={20} strokeWidth={2.5} />,
-          label: t.myProducts || (lang === 'ar' ? 'منتجاتي' : 'My Products'),
+          label: isAdmin ? (isAr ? 'المنتجات' : 'Products') : (t.myProducts || (isAr ? 'منتجاتي' : 'My Products')),
           show: true
         }
       : {
           id: 'wishlist',
           icon: <Heart size={20} strokeWidth={2.5} />,
           label: t.wishlist,
-          show: user?.type !== 'admin'
+          show: true
         },
     { 
-      id: user?.type === 'admin' ? 'admin-suppliers' : 'add', 
-      icon: user?.type === 'admin' ? <LayoutDashboard size={20} strokeWidth={2.5} /> : <PlusCircle size={20} strokeWidth={2.5} />, 
-      label: user?.type === 'admin' ? t.manageSuppliers : t.addProduct, 
+      id: isAdmin ? 'admin-suppliers' : 'add', 
+      icon: isAdmin ? <LayoutDashboard size={20} strokeWidth={2.5} /> : <PlusCircle size={20} strokeWidth={2.5} />, 
+      label: isAdmin ? t.manageSuppliers : t.addProduct, 
       show: user !== null && user.type !== 'customer'
     },
     { 

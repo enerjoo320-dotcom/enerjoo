@@ -85,6 +85,15 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
               </button>
 
               <button 
+                onClick={() => setView('supplier-dashboard')}
+                className="hidden sm:flex items-center gap-1.5 text-solar-muted hover:text-solar-blue transition font-bold text-xs bg-solar-light px-3 py-1.5 rounded-full cursor-pointer"
+                title={isAr ? 'إدارة وتعديل منتجات الموردين' : 'Manage Supplier Products'}
+              >
+                <Package size={15} />
+                <span>{isAr ? 'منتجات الموردين' : 'Products'}</span>
+              </button>
+
+              <button 
                 onClick={() => setView('admin-suppliers')}
                 className="hidden sm:flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold text-xs bg-solar-light px-3 py-1.5 rounded-full"
               >

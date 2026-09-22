@@ -211,6 +211,33 @@ export default function EnerjooAIChat({
       }
 
       if (!response.ok) {
+        // Fallback to internal solar advisor API so user always gets a smart, helpful reply
+        try {
+          const fallbackRes = await fetch('/api/solar-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [...messages, userMessage],
+              lang: lang
+            })
+          });
+          if (fallbackRes.ok) {
+            const fbData: any = await fallbackRes.json();
+            if (fbData?.reply) {
+              const aiReply: ChatMessage = {
+                id: `reply-${Date.now()}`,
+                sender: 'assistant',
+                text: fbData.reply,
+                timestamp: new Date().toISOString()
+              };
+              setMessages(prev => [...prev, aiReply]);
+              return;
+            }
+          }
+        } catch {
+          // If fallback also fails, proceed to informative message
+        }
+
         let errorMessage = 'نأسف، حدث خطأ أثناء الاتصال بمساعد Enerjoo الذكي.';
         
         try {
@@ -302,7 +329,33 @@ export default function EnerjooAIChat({
 
       setMessages(prev => [...prev, botReply]);
     } catch (err: any) {
-      console.warn('Unable to complete request to n8n chat:', err?.message || err);
+      console.warn('Unable to complete request to n8n chat, attempting fallback to solar advisor:', err?.message || err);
+      try {
+        const fallbackRes = await fetch('/api/solar-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [...messages, userMessage],
+            lang: lang
+          })
+        });
+        if (fallbackRes.ok) {
+          const fbData: any = await fallbackRes.json();
+          if (fbData?.reply) {
+            const aiReply: ChatMessage = {
+              id: `reply-${Date.now()}`,
+              sender: 'assistant',
+              text: fbData.reply,
+              timestamp: new Date().toISOString()
+            };
+            setMessages(prev => [...prev, aiReply]);
+            return;
+          }
+        }
+      } catch {
+        // Proceed to network error reply
+      }
+
       const networkErrorReply: ChatMessage = {
         id: `reply-err-${Date.now()}`,
         sender: 'assistant',

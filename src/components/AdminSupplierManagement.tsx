@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Shield, ShieldCheck, ShieldAlert, Phone, MapPin, Search, ArrowRight, Eye, Clock, LogOut, Users, Trash } from 'lucide-react';
-import { Supplier } from '../types';
+import { Shield, ShieldCheck, ShieldAlert, Phone, MapPin, Search, ArrowRight, Eye, Clock, LogOut, Users, Trash, Package } from 'lucide-react';
+import { Supplier, Product } from '../types';
 import { translations } from '../translations';
 import { motion, AnimatePresence } from 'motion/react';
 import { updateSupplierStatus } from '../services/firestoreService';
@@ -9,19 +9,23 @@ import { useAuth } from '../context/AuthContext';
 interface AdminSupplierManagementProps {
   lang: 'ar' | 'en';
   suppliers: Supplier[];
+  products?: Product[];
   onToggleVerification: (id: any) => void;
   onBack: () => void;
   initialSearch?: string;
   onViewSupplier: (id: any) => void;
+  onManageProducts?: (id: any) => void;
 }
 
 export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = ({ 
   lang, 
   suppliers, 
+  products,
   onToggleVerification,
   onBack,
   initialSearch = '',
-  onViewSupplier
+  onViewSupplier,
+  onManageProducts
 }) => {
   const t = translations[lang];
   const isAr = lang === 'ar';
@@ -326,10 +330,26 @@ export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = (
                   </button>
                 )}
 
+                {onManageProducts && (
+                  <button 
+                    onClick={() => onManageProducts(supplier.id)}
+                    className="px-3.5 py-2.5 bg-solar-blue text-white rounded-xl hover:bg-solar-blue/90 transition-all flex items-center gap-1.5 font-black text-xs cursor-pointer shadow-sm shadow-solar-blue/20 active:scale-95"
+                    title={isAr ? 'تعديل وحذف منتجات المورد' : 'Manage & Edit Supplier Products'}
+                  >
+                    <Package size={15} />
+                    <span>{isAr ? 'إدارة المنتجات' : 'Manage Products'}</span>
+                    {products && (
+                      <span className="bg-white/20 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">
+                        {products.filter(p => p.supplierId === supplier.id || p.supplierId?.toString() === supplier.id?.toString() || p.suppliers?.some(s => s.id === supplier.id || s.id?.toString() === supplier.id?.toString())).length}
+                      </span>
+                    )}
+                  </button>
+                )}
+
                 <button 
                   onClick={() => onViewSupplier(supplier.id)}
-                  className="w-10 h-10 bg-solar-light text-solar-muted rounded-xl hover:bg-solar-blue/10 hover:text-solar-blue transition-all flex items-center justify-center"
-                  title={isAr ? 'تصفح منتجات المورد' : 'View Supplier Products'}
+                  className="w-10 h-10 bg-solar-light text-solar-muted rounded-xl hover:bg-solar-blue/10 hover:text-solar-blue transition-all flex items-center justify-center cursor-pointer active:scale-95"
+                  title={isAr ? 'عرض منتجات المورد في المتجر' : 'View Supplier Products in Store'}
                 >
                   <Eye size={17} />
                 </button>

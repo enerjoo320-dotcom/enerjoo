@@ -445,6 +445,38 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
   }
   if (product.specs) {
     payload.specs = JSON.stringify(product.specs);
+
+    // Map technical specifications to specific Cloudflare D1 columns
+    if (product.specs.powerKw || product.specs.ratedPowerKw) {
+      payload.rated_power_kw = Number(product.specs.powerKw || product.specs.ratedPowerKw);
+    }
+    if (product.specs.voltage || product.specs.vmpV) {
+      payload.vmp_v = product.specs.voltage || product.specs.vmpV;
+    }
+    if (product.specs.acVoltageV) {
+      payload.ac_voltage_v = product.specs.acVoltageV;
+    }
+    if (product.specs.nominalVoltage) {
+      payload.nominal_voltage_v = product.specs.nominalVoltage;
+    }
+    if (product.specs.current || product.specs.impA) {
+      payload.imp_a = product.specs.current || product.specs.impA;
+    }
+    if (product.specs.weight || product.specs.weightKg) {
+      payload.weight_kg = product.specs.weight || product.specs.weightKg;
+    }
+    if (product.specs.capacity || product.specs.capacityAh) {
+      payload.capacity_ah = product.specs.capacity || product.specs.capacityAh;
+    }
+    if (product.specs.type || product.specs.productType) {
+      payload.product_type = product.specs.type || product.specs.productType;
+    }
+    if (product.specs.technology) {
+      payload.technology = product.specs.technology;
+    }
+    if (product.specs.description || product.specs.notes) {
+      payload.notes = product.specs.description || product.specs.notes;
+    }
   }
   if (product.suppliers) {
     payload.suppliers = JSON.stringify(product.suppliers);

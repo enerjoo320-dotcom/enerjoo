@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2, Ruler, Maximize2, Calculator } from 'lucide-react';
 import { translations } from '../translations';
 import { uploadProductImage } from '../services/uploadService';
@@ -7,6 +7,206 @@ import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
+
+const normalizeCategory = (cat?: string): string => {
+  if (!cat) return 'panels';
+  const c = cat.toLowerCase();
+  if (c.includes('panel')) return 'panels';
+  if (c.includes('invert')) return 'inverters';
+  if (c.includes('batter')) return 'batteries';
+  if (c.includes('mount') || c.includes('structur')) return 'mounting';
+  if (c.includes('protect')) return 'protection';
+  if (c.includes('combin')) return 'combiner';
+  if (c.includes('cable')) return 'cables';
+  if (c.includes('mc4')) return 'mc4';
+  if (c.includes('seal')) return 'sealings';
+  if (c.includes('clamp')) return 'clamps';
+  return c;
+};
+
+const extractInitialFormData = (data?: Product | null) => {
+  if (!data) {
+    return {
+      name: '',
+      brand: '',
+      category: 'panels',
+      price: '',
+      phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
+      description: '',
+      power: '',
+      powerKw: '',
+      efficiency: '',
+      warranty: '',
+      type: '',
+      voltage: '',
+      current: '',
+      weight: '',
+      capacity: '',
+      crossSection: '',
+      length: '',
+      material: '',
+      maxWind: '',
+      ipRating: '',
+      poles: '',
+      quantity: '',
+      color: '',
+      status: 'available' as const,
+      dimLength: '',
+      dimWidth: '',
+      dimThickness: '',
+      dimensionUnit: 'mm' as 'mm' | 'cm' | 'm',
+      area: '',
+    };
+  }
+
+  const category = normalizeCategory(data.category as string);
+  const specs = data.specs || {};
+
+  // Extract power in Watts or kW
+  let power = '';
+  let powerKw = '';
+  if (data.power !== undefined && data.power !== null && data.power > 0) {
+    power = data.power.toString();
+    powerKw = (data.power / 1000).toString();
+  }
+  if (specs.power !== undefined && specs.power !== null && specs.power !== '') {
+    power = specs.power.toString();
+  }
+  if (specs.powerKw !== undefined && specs.powerKw !== null && specs.powerKw !== '') {
+    powerKw = specs.powerKw.toString();
+    if (!power) power = (parseFloat(specs.powerKw) * 1000).toString();
+  }
+  if (specs.ratedPowerKw !== undefined && specs.ratedPowerKw !== null && specs.ratedPowerKw !== '') {
+    powerKw = specs.ratedPowerKw.toString();
+    if (!power) power = (parseFloat(specs.ratedPowerKw) * 1000).toString();
+  }
+
+  // Extract voltage
+  const voltage = (
+    specs.voltage ||
+    specs.vmpV ||
+    specs.nominalVoltage ||
+    specs.acVoltageV ||
+    (data as any).vmp_v ||
+    (data as any).nominal_voltage_v ||
+    (data as any).ac_voltage_v ||
+    ''
+  ).toString();
+
+  // Extract current
+  const current = (
+    specs.current ||
+    specs.impA ||
+    specs.maxContinuousDischargeCurrentA ||
+    (data as any).imp_a ||
+    (data as any).isc_a ||
+    ''
+  ).toString();
+
+  // Extract weight
+  const weight = (
+    specs.weight ||
+    specs.weightKg ||
+    (data as any).weight_kg ||
+    ''
+  ).toString();
+
+  // Extract capacity
+  const capacity = (
+    specs.capacity ||
+    specs.capacityAh ||
+    (data as any).capacity_ah ||
+    ''
+  ).toString();
+
+  // Extract type
+  const type = (
+    specs.type ||
+    specs.productType ||
+    specs.technology ||
+    specs.cellType ||
+    (data as any).product_type ||
+    (data as any).technology ||
+    ''
+  ).toString();
+
+  // Extract description
+  const description = (
+    specs.description ||
+    specs.notes ||
+    (data as any).notes ||
+    ''
+  ).toString();
+
+  // Extract efficiency
+  let efficiency = '';
+  if (data.efficiency !== undefined && data.efficiency !== null && data.efficiency > 0) {
+    efficiency = data.efficiency.toString();
+  } else if (specs.efficiency !== undefined && specs.efficiency !== null && specs.efficiency !== '') {
+    efficiency = specs.efficiency.toString();
+  } else if (specs.peakEfficiency !== undefined && specs.peakEfficiency !== null && specs.peakEfficiency !== '') {
+    efficiency = specs.peakEfficiency.toString();
+  } else if ((data as any).efficiency_percent !== undefined && (data as any).efficiency_percent !== null) {
+    efficiency = (data as any).efficiency_percent.toString();
+  }
+
+  // Extract warranty
+  let warranty = '';
+  if (data.warranty !== undefined && data.warranty !== null && data.warranty > 0) {
+    warranty = data.warranty.toString();
+  } else if (specs.warranty !== undefined && specs.warranty !== null && specs.warranty !== '') {
+    warranty = specs.warranty.toString();
+  } else if ((data as any).warranty_years !== undefined && (data as any).warranty_years !== null) {
+    warranty = (data as any).warranty_years.toString();
+  }
+
+  // Dimensions
+  const dimLength = data.length !== undefined && data.length !== null
+    ? data.length.toString()
+    : (specs.length && category !== 'cables' ? specs.length.toString() : '');
+  const dimWidth = data.width !== undefined && data.width !== null
+    ? data.width.toString()
+    : (specs.width ? specs.width.toString() : '');
+  const dimThickness = data.thickness !== undefined && data.thickness !== null
+    ? data.thickness.toString()
+    : (specs.thickness ? specs.thickness.toString() : '');
+  const dimensionUnit = ((data.dimensionUnit || specs.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm');
+  const area = data.area !== undefined && data.area !== null
+    ? data.area.toString()
+    : (specs.area ? specs.area.toString() : '');
+
+  return {
+    name: data.nameAr || data.name || (data as any).model || '',
+    brand: data.brand || '',
+    category,
+    price: data.price !== undefined && data.price !== null ? data.price.toString() : '',
+    phone: data.suppliers?.[0]?.phone || SUPPLIER_CONTACT_PHONE_DISPLAY,
+    description,
+    power,
+    powerKw,
+    efficiency,
+    warranty,
+    type,
+    voltage,
+    current,
+    weight,
+    capacity,
+    crossSection: (specs.crossSection || '').toString(),
+    length: (specs.cableLength || (category === 'cables' ? specs.length : '') || '').toString(),
+    material: (specs.material || '').toString(),
+    maxWind: (specs.maxWind || '').toString(),
+    ipRating: (specs.ipRating || '').toString(),
+    poles: (specs.poles || '').toString(),
+    quantity: (specs.quantity || '').toString(),
+    color: (specs.color || '').toString(),
+    status: (data.status || 'available') as 'available' | 'limited' | 'out_of_stock',
+    dimLength,
+    dimWidth,
+    dimThickness,
+    dimensionUnit,
+    area,
+  };
+};
 
 export const ProductForm: React.FC<{ 
   lang: 'ar' | 'en'; 
@@ -19,40 +219,14 @@ export const ProductForm: React.FC<{
   const { user } = useAuth();
   const imageInputRef = useRef<HTMLInputElement>(null);
   
-  const [formData, setFormData] = useState({
-    name: initialData?.name || '',
-    brand: initialData?.brand || '',
-    category: (initialData?.category as string) || 'panels',
-    price: initialData?.price?.toString() || '',
-    phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
-    description: initialData?.specs?.description || '',
-    // Dynamic specs
-    power: initialData?.power?.toString() || '',
-    powerKw: initialData?.specs?.powerKw || '',
-    efficiency: initialData?.efficiency?.toString() || '',
-    warranty: initialData?.warranty?.toString() || '',
-    type: initialData?.specs?.type || '',
-    voltage: initialData?.specs?.voltage || '',
-    current: initialData?.specs?.current || '',
-    weight: initialData?.specs?.weight || '',
-    capacity: initialData?.specs?.capacity || '',
-    crossSection: initialData?.specs?.crossSection || '',
-    length: initialData?.specs?.length || '',
-    material: initialData?.specs?.material || '',
-    maxWind: initialData?.specs?.maxWind || '',
-    ipRating: initialData?.specs?.ipRating || '',
-    poles: initialData?.specs?.poles || '',
-    quantity: initialData?.specs?.quantity || '',
-    color: initialData?.specs?.color || '',
-    status: initialData?.status || 'available',
+  const [formData, setFormData] = useState(() => extractInitialFormData(initialData));
 
-    // Product Dimensions & Area
-    dimLength: initialData?.length !== undefined && initialData?.length !== null ? initialData.length.toString() : (initialData?.specs?.length && initialData?.category !== 'cables' ? initialData.specs.length.toString() : ''),
-    dimWidth: initialData?.width !== undefined && initialData?.width !== null ? initialData.width.toString() : (initialData?.specs?.width ? initialData.specs.width.toString() : ''),
-    dimThickness: initialData?.thickness !== undefined && initialData?.thickness !== null ? initialData.thickness.toString() : (initialData?.specs?.thickness ? initialData.specs.thickness.toString() : ''),
-    dimensionUnit: ((initialData?.dimensionUnit || initialData?.specs?.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm'),
-    area: initialData?.area !== undefined && initialData?.area !== null ? initialData.area.toString() : '',
-  });
+  // Sync state whenever initialData changes (e.g. user selects another product or switches views)
+  useEffect(() => {
+    setFormData(extractInitialFormData(initialData));
+    setImagePreview(initialData?.image || null);
+    setExistingAdditionalUrls(initialData?.additionalImages || []);
+  }, [initialData]);
 
   const getFieldsForCategory = (cat: string) => {
     const common = ['price', 'warranty'];
@@ -294,21 +468,31 @@ export const ProductForm: React.FC<{
 
       const finalArea = calculatedAreaInM2 > 0 
         ? calculatedAreaInM2 
-        : (formData.area ? parseFloat(formData.area) || 0 : 0);
+        : (formData.area ? parseFloat(formData.area) || 0 : (initialData?.area ?? 0));
+
+      let effectivePower = 0;
+      if (formData.category === 'inverters') {
+        effectivePower = formData.powerKw 
+          ? Math.round(parseFloat(formData.powerKw) * 1000) 
+          : (parseInt(formData.power) || initialData?.power || 0);
+      } else {
+        effectivePower = parseInt(formData.power) || (formData.powerKw ? Math.round(parseFloat(formData.powerKw) * 1000) : initialData?.power || 0);
+      }
 
       const newProduct: any = {
+        ...(initialData || {}),
         name: formData.name,
         nameAr: formData.name,
         brand: formData.brand,
         category: formData.category as any,
-        price: parseInt(formData.price) || 0,
-        power: parseInt(formData.power) || 0,
-        efficiency: parseFloat(formData.efficiency) || 0,
-        warranty: parseInt(formData.warranty) || 0,
-        image: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
-        image_url: imageUrl || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
+        price: parseInt(formData.price) || (initialData?.price ?? 0),
+        power: effectivePower,
+        efficiency: parseFloat(formData.efficiency) || (initialData?.efficiency ?? 0),
+        warranty: parseInt(formData.warranty) || (initialData?.warranty ?? 0),
+        image: imageUrl || initialData?.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
+        image_url: imageUrl || initialData?.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
         additionalImages: finalAdditionalUrls,
-        datasheetUrl: datasheetUrl,
+        datasheetUrl: datasheetUrl || initialData?.datasheetUrl,
         length: lengthVal,
         width: widthVal,
         thickness: thicknessVal,
@@ -318,13 +502,28 @@ export const ProductForm: React.FC<{
         updatedAt: new Date().toISOString().split('T')[0],
         supplierId: initialData?.supplierId || user?.uid || '',
         specs: {
+          ...(initialData?.specs || {}),
           description: formData.description,
+          notes: formData.description,
+          power: effectivePower,
+          efficiency: parseFloat(formData.efficiency) || undefined,
+          warranty: parseInt(formData.warranty) || undefined,
           type: formData.type,
+          productType: formData.type,
+          technology: formData.type,
           voltage: formData.voltage,
+          vmpV: formData.voltage,
+          nominalVoltage: formData.voltage,
+          acVoltageV: formData.voltage,
           current: formData.current,
+          impA: formData.current,
+          maxContinuousDischargeCurrentA: formData.current,
           weight: formData.weight,
+          weightKg: formData.weight,
           capacity: formData.capacity,
-          powerKw: formData.powerKw,
+          capacityAh: formData.capacity,
+          powerKw: formData.powerKw || (effectivePower ? (effectivePower / 1000).toString() : undefined),
+          ratedPowerKw: formData.powerKw ? parseFloat(formData.powerKw) : (effectivePower ? effectivePower / 1000 : undefined),
           crossSection: formData.crossSection,
           cableLength: formData.category === 'cables' ? formData.length : undefined,
           length: lengthVal !== undefined ? lengthVal : (formData.category === 'cables' ? formData.length : undefined),
@@ -339,26 +538,30 @@ export const ProductForm: React.FC<{
           quantity: formData.quantity,
           color: formData.color,
         },
-        suppliers: [
-          {
-            id: user?.uid || initialData?.supplierId || '',
-            name: (!isRawUidOrId(user?.company) && user?.company) ||
-                  (!isRawUidOrId(user?.name) && user?.name) ||
-                  (initialData?.suppliers?.[0]?.name && !isRawUidOrId(initialData.suppliers[0].name) ? initialData.suppliers[0].name : '') ||
-                  'Enerjoo Certified Supplier',
-            nameAr: (!isRawUidOrId(user?.companyAr) && user?.companyAr) ||
-                    (!isRawUidOrId(user?.company) && user?.company) ||
-                    (!isRawUidOrId(user?.nameAr) && user?.nameAr) ||
-                    (!isRawUidOrId(user?.name) && user?.name) ||
-                    (initialData?.suppliers?.[0]?.nameAr && !isRawUidOrId(initialData.suppliers[0].nameAr) ? initialData.suppliers[0].nameAr : '') ||
-                    'مورد معتمد',
-            price: parseInt(formData.price) || 0,
-            phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
-            location: user?.location || 'Cairo, Egypt',
-            verified: user?.verified || false,
-            lastUpdate: new Date().toISOString().split('T')[0]
-          }
-        ]
+        suppliers: (initialData?.suppliers && initialData.suppliers.length > 0)
+          ? initialData.suppliers.map(s => ({
+              ...s,
+              price: parseInt(formData.price) || s.price || 0,
+              lastUpdate: new Date().toISOString().split('T')[0]
+            }))
+          : [
+              {
+                id: initialData?.supplierId || user?.uid || '',
+                name: (!isRawUidOrId(user?.company) && user?.company) ||
+                      (!isRawUidOrId(user?.name) && user?.name) ||
+                      'Enerjoo Certified Supplier',
+                nameAr: (!isRawUidOrId(user?.companyAr) && user?.companyAr) ||
+                        (!isRawUidOrId(user?.company) && user?.company) ||
+                        (!isRawUidOrId(user?.nameAr) && user?.nameAr) ||
+                        (!isRawUidOrId(user?.name) && user?.name) ||
+                        'مورد معتمد',
+                price: parseInt(formData.price) || 0,
+                phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
+                location: user?.location || 'Cairo, Egypt',
+                verified: user?.verified || false,
+                lastUpdate: new Date().toISOString().split('T')[0]
+              }
+            ]
       };
       
       await onSave(newProduct);

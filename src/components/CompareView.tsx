@@ -4,6 +4,9 @@ import { Product } from '../types';
 import { translations } from '../translations';
 import { motion } from 'motion/react';
 import { getSupplierDisplayName } from '../utils/supplierUtils';
+import { getSupplierWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
+
+const DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=800';
 
 interface CompareViewProps {
   products: Product[];
@@ -33,12 +36,24 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
 
   const specs = [
     { key: 'brand', label: isAr ? 'الماركة' : 'Brand', render: (p: Product) => p.brand },
-    { key: 'power', label: t.power, render: (p: Product) => `${p.power} ${t.watt}` },
-    { key: 'voltage', label: t.voltage, render: (p: Product) => p.specs?.voltage || '-' },
-    { key: 'current', label: t.current, render: (p: Product) => p.specs?.current || '-' },
-    { key: 'area', label: t.area, render: (p: Product) => `${p.area} m²` },
-    { key: 'efficiency', label: t.efficiency, render: (p: Product) => `${p.efficiency}%` },
-    { key: 'warranty', label: t.warranty, render: (p: Product) => `${p.warranty} ${t.years}` },
+    { 
+      key: 'power', 
+      label: t.power, 
+      render: (p: Product) => {
+        if (p.category === 'inverters') {
+          return p.specs?.powerKw ? `${p.specs.powerKw} kW` : (p.specs?.ratedPowerKw ? `${p.specs.ratedPowerKw} kW` : (p.power >= 1000 ? `${p.power / 1000} kW` : `${p.power} W`));
+        }
+        if (p.category === 'batteries') {
+          return p.specs?.capacity ? `${p.specs.capacity}` : (p.specs?.capacityAh ? `${p.specs.capacityAh} Ah` : (p.power ? `${p.power} W` : '-'));
+        }
+        return p.power ? `${p.power} ${t.watt}` : '-';
+      }
+    },
+    { key: 'voltage', label: t.voltage, render: (p: Product) => p.specs?.voltage || p.specs?.vmpV || p.specs?.vocV || p.specs?.nominalVoltage || p.specs?.acVoltageV || '-' },
+    { key: 'current', label: t.current, render: (p: Product) => p.specs?.current || p.specs?.impA || p.specs?.iscA || p.specs?.maxContinuousDischargeCurrentA || '-' },
+    { key: 'area', label: t.area, render: (p: Product) => p.area ? `${p.area} m²` : '-' },
+    { key: 'efficiency', label: t.efficiency, render: (p: Product) => p.efficiency ? `${p.efficiency}%` : (p.specs?.peakEfficiency ? `${p.specs.peakEfficiency}%` : '-') },
+    { key: 'warranty', label: t.warranty, render: (p: Product) => p.warranty ? `${p.warranty} ${t.years}` : (p.specs?.warranty ? `${p.specs.warranty} ${t.years}` : '-') },
     { key: 'price', label: t.price, render: (p: Product) => `${p.price.toLocaleString()} ${t.egp}` }
   ];
 
@@ -92,7 +107,14 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
                       >
                         <X size={14} />
                       </button>
-                      <img src={p.image} className="w-full h-20 md:h-36 object-cover rounded-xl md:rounded-2xl mb-3 md:mb-5 shadow-sm border border-solar-border/50" alt={p.name} />
+                      <img 
+                        src={p.image || DEFAULT_PRODUCT_IMAGE} 
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+                        }}
+                        className="w-full h-20 md:h-36 object-cover rounded-xl md:rounded-2xl mb-3 md:mb-5 shadow-sm border border-solar-border/50" 
+                        alt={p.name} 
+                      />
                       <h4 className="text-solar-text font-black text-[11px] md:text-base line-clamp-2 leading-tight h-10 md:h-auto">{isAr ? p.nameAr : p.name}</h4>
                     </div>
                   </th>
@@ -127,7 +149,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
                 {products.map(p => (
                   <td key={p.id} className="p-3 md:p-6 border-b border-solar-border/50">
                     <div className="space-y-2">
-                      {p.suppliers.map((s, i) => (
+                      {(p.suppliers || []).map((s, i) => (
                         <div key={i} className="bg-white p-3 md:p-5 rounded-xl md:rounded-2xl border border-solar-border shadow-sm hover:border-solar-blue/30 transition-all group/sup">
                           <div className="font-black text-solar-blue text-[11px] md:text-sm mb-1 leading-none group-hover/sup:translate-x-1 transition-transform">{getSupplierDisplayName(s, isAr)}</div>
                           <div className="text-[9px] md:text-[11px] text-solar-muted flex items-center gap-1.5 font-bold uppercase tracking-wider">
@@ -142,13 +164,25 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
               </tr>
               <tr className="bg-solar-light/20">
                 <td className={`sticky ${isAr ? 'right-0' : 'left-0'} z-20 bg-solar-light/30 p-4 md:p-6 border-transparent`}></td>
-                {products.map(p => (
-                  <td key={p.id} className="p-3 md:p-6 text-center">
-                    <button className="w-full bg-solar-blue text-white py-3 md:py-5 rounded-xl md:rounded-2xl text-[10px] md:text-sm font-black shadow-xl shadow-solar-blue/20 transition hover:bg-solar-text active:scale-95 uppercase tracking-widest">
-                      {t.contactSupplier}
-                    </button>
-                  </td>
-                ))}
+                {products.map(p => {
+                  const targetName = isAr ? p.nameAr || p.name : p.name;
+                  const message = isAr 
+                    ? `مرحباً، أود الاستفسار عن منتج "${targetName}" المعروض على منصة Enerjoo.` 
+                    : `Hello, I would like to inquire about the product "${targetName}" on Enerjoo.`;
+                  const whatsappUrl = getSupplierWhatsAppUrl(message);
+                  return (
+                    <td key={p.id} className="p-3 md:p-6 text-center">
+                      <a 
+                        href={whatsappUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full inline-flex items-center justify-center bg-solar-blue text-white py-3 md:py-5 rounded-xl md:rounded-2xl text-[10px] md:text-sm font-black shadow-xl shadow-solar-blue/20 transition hover:bg-solar-text active:scale-95 uppercase tracking-widest"
+                      >
+                        {t.contactSupplier}
+                      </a>
+                    </td>
+                  );
+                })}
               </tr>
             </tbody>
           </table>

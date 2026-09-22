@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Power, Zap, Shield, ArrowLeftRight, ShieldCheck, Grid, MapPin, Edit, Heart, Sparkles, Building2 } from 'lucide-react';
+import { Power, Zap, Shield, ArrowLeftRight, ShieldCheck, Grid, MapPin, Edit, Heart, Sparkles, Building2, Trash2 } from 'lucide-react';
 import { Product } from '../types';
 import { translations } from '../translations';
 import { motion, useMotionValue, useTransform } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { getSupplierDisplayName } from '../utils/supplierUtils';
+
+const DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=800';
 
 interface ProductCardProps {
   product: Product;
@@ -12,6 +14,7 @@ interface ProductCardProps {
   onClick: () => void;
   onCompare: (e: React.MouseEvent) => void;
   onEdit?: (e: React.MouseEvent, product: Product) => void;
+  onDelete?: (e: React.MouseEvent, product: Product) => void;
   onWishlist?: (e: React.MouseEvent) => void;
   isCompared: boolean;
   isWishlisted?: boolean;
@@ -23,6 +26,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onClick, 
   onCompare, 
   onEdit, 
+  onDelete,
   onWishlist,
   isCompared,
   isWishlisted 
@@ -33,7 +37,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const primarySupplier = product.suppliers?.[0];
   const isVerified = primarySupplier?.verified;
   const supplierName = getSupplierDisplayName(primarySupplier, isAr);
-  const isOwner = user?.uid === product.supplierId;
+  const isOwner = user?.uid === product.supplierId || user?.type === 'admin';
 
   // Swipe gesture state & motion values
   const x = useMotionValue(0);
@@ -63,16 +67,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield size={14} /> }
     ];
 
+    const specsObj = product.specs || {};
+
     if (product.category === 'panels') {
       const specs = [
         { label: t.power, value: `${product.power}W`, icon: <Power size={14} /> },
         { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} /> }
       ];
-      if (product.specs?.voltage) {
-        const v = String(product.specs.voltage);
+      const voltVal = specsObj.voltage || specsObj.vmpV || specsObj.vocV;
+      if (voltVal) {
+        const v = String(voltVal);
         specs.push({ label: t.voltage, value: /v|فولت/i.test(v) ? v : `${v}V`, icon: <Zap size={14} /> });
-      } else if (product.specs?.current) {
-        const a = String(product.specs.current);
+      } else if (specsObj.current || specsObj.impA) {
+        const a = String(specsObj.current || specsObj.impA);
         specs.push({ label: t.current, value: /a|أمبير/i.test(a) ? a : `${a}A`, icon: <Power size={14} /> });
       } else {
         specs.push(...common);
@@ -81,38 +88,51 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     }
     
     if (product.category === 'inverters') {
-      const specs = [
-        { label: t.powerKw, value: product.specs.powerKw || 'N/A', icon: <Power size={14} /> },
-        { label: t.efficiency, value: `${product.efficiency}%`, icon: <Zap size={14} /> }
-      ];
-      if (product.specs?.voltage) {
-        const v = String(product.specs.voltage);
-        specs.push({ label: t.voltage, value: /v|فولت/i.test(v) ? v : `${v}V`, icon: <Zap size={14} /> });
-      } else {
-        specs.push(...common);
+      const pKw = specsObj.powerKw 
+        ? String(specsObj.powerKw)
+        : (specsObj.ratedPowerKw ? `${specsObj.ratedPowerKw}kW` : (product.power ? `${product.power >= 1000 ? product.power / 1000 : product.power}${product.power >= 1000 ? 'kW' : 'W'}` : ''));
+      
+      const effVal = product.efficiency ? `${product.efficiency}%` : (specsObj.peakEfficiency ? `${specsObj.peakEfficiency}%` : '');
+      const specs = [];
+      if (pKw) {
+        specs.push({ label: t.powerKw, value: pKw, icon: <Power size={14} /> });
       }
-      return specs;
+      if (effVal) {
+        specs.push({ label: t.efficiency, value: effVal, icon: <Zap size={14} /> });
+      }
+      const voltVal = specsObj.voltage || specsObj.acVoltageV;
+      if (voltVal) {
+        const v = String(voltVal);
+        specs.push({ label: t.voltage, value: /v|فولت/i.test(v) ? v : `${v}V`, icon: <Zap size={14} /> });
+      }
+      while (specs.length < 3) {
+        specs.push(...common);
+        break;
+      }
+      return specs.slice(0, 3);
     }
 
     if (product.category === 'batteries') {
-       return [
-        { label: t.capacity, value: product.specs.capacity || 'N/A', icon: <Zap size={14} /> },
-        { label: t.voltage, value: product.specs.voltage || 'N/A', icon: <Zap size={14} /> },
-        ...common
-      ];
+      const cap = specsObj.capacity ? String(specsObj.capacity) : (specsObj.capacityAh ? `${specsObj.capacityAh}Ah` : (specsObj.nominalEnergyWh ? `${specsObj.nominalEnergyWh}Wh` : ''));
+      const volt = specsObj.voltage || specsObj.nominalVoltage ? `${specsObj.voltage || specsObj.nominalVoltage}V` : '';
+      const specs = [];
+      if (cap) specs.push({ label: t.capacity, value: cap, icon: <Zap size={14} /> });
+      if (volt) specs.push({ label: t.voltage, value: volt, icon: <Zap size={14} /> });
+      specs.push(...common);
+      return specs.slice(0, 3);
     }
 
     if (product.category === 'cables') {
       return [
-        { label: t.crossSection, value: product.specs.crossSection || 'N/A', icon: <Grid size={14} /> },
-        { label: t.length, value: product.specs.length || 'N/A', icon: <Grid size={14} /> },
+        { label: t.crossSection, value: specsObj.crossSection ? `${specsObj.crossSection} mm²` : 'N/A', icon: <Grid size={14} /> },
+        { label: t.length, value: specsObj.cableLength || specsObj.length ? `${specsObj.cableLength || specsObj.length} m` : 'N/A', icon: <Grid size={14} /> },
         ...common
       ];
     }
 
     // Default for others
     return [
-       { label: t.type, value: product.specs.type || 'N/A', icon: <Grid size={14} /> },
+       { label: t.type, value: specsObj.type || product.category, icon: <Grid size={14} /> },
        { label: t.brand, value: product.brand, icon: <Zap size={14} /> },
        ...common
     ];
@@ -169,7 +189,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       >
         <div className="relative aspect-[16/10] sm:aspect-video rounded-2xl overflow-hidden mb-3.5 bg-solar-bg">
           <img 
-            src={product.image} 
+            src={product.image || DEFAULT_PRODUCT_IMAGE} 
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = DEFAULT_PRODUCT_IMAGE;
+            }}
             referrerPolicy="no-referrer" 
             loading="lazy"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none" 
@@ -177,14 +200,29 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           />
           <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
             <div className="flex flex-col gap-1 items-start">
-              {isOwner && onEdit && (
-                <button 
-                  onClick={(e) => onEdit(e, product)}
-                  className="bg-solar-blue text-white min-h-[32px] px-2.5 py-1 rounded-xl pointer-events-auto shadow-md hover:bg-solar-blue/90 transition active:scale-95 flex items-center gap-1.5 mb-1"
-                >
-                  <Edit size={13} />
-                  <span className="text-[10px] font-black uppercase">{isAr ? 'تعديل' : 'Edit'}</span>
-                </button>
+              {isOwner && (
+                <div className="flex items-center gap-1.5 pointer-events-auto mb-1">
+                  {onEdit && (
+                    <button 
+                      onClick={(e) => onEdit(e, product)}
+                      className="bg-solar-blue text-white min-h-[30px] px-2.5 py-1 rounded-xl shadow-md hover:bg-solar-blue/90 transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                      title={isAr ? 'تعديل المنتج' : 'Edit Product'}
+                    >
+                      <Edit size={12} />
+                      <span className="text-[10px] font-black uppercase">{isAr ? 'تعديل' : 'Edit'}</span>
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button 
+                      onClick={(e) => onDelete(e, product)}
+                      className="bg-red-600 text-white min-h-[30px] w-7 h-7 rounded-xl shadow-md hover:bg-red-700 transition active:scale-95 flex items-center justify-center cursor-pointer"
+                      title={isAr ? 'حذف المنتج' : 'Delete Product'}
+                      aria-label="Delete"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
               )}
               <span translate="no" className="bg-solar-blue/90 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg pointer-events-auto shadow-xs tracking-wide uppercase notranslate">
                 {product.brand}
