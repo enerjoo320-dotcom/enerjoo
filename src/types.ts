@@ -3,6 +3,7 @@ export type Category =
   | 'panels' 
   | 'inverters' 
   | 'batteries' 
+  | 'pumps'
   | 'mounting' 
   | 'protection' 
   | 'combiner' 

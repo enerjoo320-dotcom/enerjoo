@@ -172,6 +172,7 @@ function mapD1CategoryToCategory(catStr?: string | null): Category {
   if (c.includes('panel')) return 'panels';
   if (c.includes('invert')) return 'inverters';
   if (c.includes('batter')) return 'batteries';
+  if (c.includes('pump') || c.includes('مضخ') || c.includes('طلمب')) return 'pumps';
   if (c.includes('mount') || c.includes('structur')) return 'mounting';
   if (c.includes('protect')) return 'protection';
   if (c.includes('combin')) return 'combiner';
@@ -190,6 +191,7 @@ function mapCategoryToD1Category(cat?: Category): string {
     case 'panels': return 'Solar Panels';
     case 'inverters': return 'Inverters';
     case 'batteries': return 'Batteries';
+    case 'pumps': return 'Pumps';
     case 'mounting': return 'Mounting Structures';
     case 'protection': return 'Protection & Distribution';
     case 'combiner': return 'Combiner Boxes';

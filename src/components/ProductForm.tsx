@@ -15,6 +15,7 @@ const normalizeCategory = (cat?: string): string => {
   if (c.includes('panel')) return 'panels';
   if (c.includes('invert')) return 'inverters';
   if (c.includes('batter')) return 'batteries';
+  if (c.includes('pump') || c.includes('مضخ') || c.includes('طلمب')) return 'pumps';
   if (c.includes('mount') || c.includes('structur')) return 'mounting';
   if (c.includes('protect')) return 'protection';
   if (c.includes('combin')) return 'combiner';
@@ -296,6 +297,8 @@ export const ProductForm: React.FC<{
         return [...common, 'powerKw', 'efficiency', 'type', 'mppt', 'voltage', 'current', 'weight'];
       case 'batteries':
         return [...common, 'capacity', 'voltage', 'type', 'weight'];
+      case 'pumps':
+        return [...common, 'powerKw', 'voltage', 'current', 'type', 'weight'];
       case 'cables':
         return ['price', 'crossSection', 'length', 'voltage', 'material', 'color'];
       case 'mounting':
@@ -668,6 +671,7 @@ export const ProductForm: React.FC<{
             <option value="panels">{t.panels}</option>
             <option value="inverters">{t.inverters}</option>
             <option value="batteries">{t.batteries}</option>
+            <option value="pumps">{t.pumps}</option>
             <option value="mounting">{t.mounting}</option>
             <option value="protection">{t.protection}</option>
             <option value="combiner">{t.combiner}</option>

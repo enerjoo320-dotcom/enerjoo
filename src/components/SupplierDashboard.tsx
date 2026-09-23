@@ -118,6 +118,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
     { id: 'panels', label: t.panels },
     { id: 'inverters', label: t.inverters },
     { id: 'batteries', label: t.batteries },
+    { id: 'pumps', label: t.pumps },
     { id: 'mounting', label: t.mounting },
     { id: 'protection', label: t.protection },
     { id: 'combiner', label: t.combiner },
