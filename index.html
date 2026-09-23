@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ar" dir="rtl" translate="no" class="notranslate">
 
 <head>
@@ -131,34 +131,6 @@
       originalConsoleWarn.apply(console, args);
     };
   </script>
-</head>
-
-<body class="notranslate" translate="no">
-  <div id="root" class="notranslate" translate="no"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
-
-</html>
-
-) {
-return;
-}
-originalConsoleError.apply(console, args);
-};
-
-const originalConsoleWarn = console.warn;
-console.warn = function (...args) {
-const argStr = args.map(arg => String(arg)).join(' ');
-if (
-argStr.toLowerCase().includes('websocket') ||
-argStr.toLowerCase().includes('web socket') ||
-argStr.toLowerCase().includes('socket closed')
-) {
-return;
-}
-originalConsoleWarn.apply(console, args);
-};
-</script>
 </head>
 
 <body class="notranslate" translate="no">
