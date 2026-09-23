@@ -27,7 +27,8 @@ const VALID_VIEWS: ViewType[] = [
   'supplier-dashboard',
   'profile',
   'wishlist',
-  'calculator'
+  'calculator',
+  'products'
 ];
 
 /**
@@ -63,8 +64,8 @@ export function parseUrlToNavState(pathname: string, search: string): AppNavStat
     };
   }
 
-  // 2. Products listing: /products or with category query
-  if (cleanPath === '/products' || params.has('category')) {
+  // 2. Products listing / Energy market: /products or /market or /bourse or with category query
+  if (cleanPath === '/products' || cleanPath === '/market' || cleanPath === '/bourse' || params.has('category')) {
     const category = (params.get('category') as Category) || 'all';
     const supplier = params.get('supplier') || null;
     return {

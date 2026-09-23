@@ -107,6 +107,12 @@ export default function App() {
       };
       window.history.replaceState(canonicalState, '', window.location.pathname + window.location.search);
     }
+    if (initialNav.section === 'products' && !initialNav.productId) {
+      setTimeout(() => {
+        const el = document.getElementById('products-section');
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    }
   }, [initialNav]);
 
   // Synchronize pending product once products are fetched from Firestore
@@ -121,10 +127,66 @@ export default function App() {
 
   // Navigation handlers with clean History API pushState
   const navigateToView = (newView: ViewType) => {
-    if (view === newView && !selectedProduct) {
-      if (newView === 'home') {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (newView === 'products') {
+      setSelectedProduct(null);
+      setPendingProductId(null);
+      setView('home');
+      setHomeSection('products');
+
+      const el = document.getElementById('products-section');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        setTimeout(() => {
+          const elRetry = document.getElementById('products-section');
+          if (elRetry) elRetry.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
       }
+
+      if (!isHandlingPopState.current) {
+        const currentStep = window.history.state?.step ?? historyStepRef.current;
+        const nextStep = currentStep + 1;
+        historyStepRef.current = nextStep;
+
+        const nextState: AppNavState = {
+          view: 'home',
+          section: 'products',
+          productId: null,
+          category: activeFilters.category,
+          supplierFilterId,
+          step: nextStep
+        };
+        window.history.pushState(nextState, '', navStateToUrl(nextState));
+      }
+      return;
+    }
+
+    if (newView === 'home') {
+      setSelectedProduct(null);
+      setPendingProductId(null);
+      setView('home');
+      setHomeSection('home');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      if (!isHandlingPopState.current) {
+        const currentStep = window.history.state?.step ?? historyStepRef.current;
+        const nextStep = currentStep + 1;
+        historyStepRef.current = nextStep;
+
+        const nextState: AppNavState = {
+          view: 'home',
+          section: 'home',
+          productId: null,
+          category: 'all',
+          supplierFilterId: null,
+          step: nextStep
+        };
+        window.history.pushState(nextState, '', '/');
+      }
+      return;
+    }
+
+    if (view === newView && !selectedProduct) {
       return;
     }
 
@@ -139,10 +201,8 @@ export default function App() {
 
       const nextState: AppNavState = {
         view: newView,
-        section: newView === 'home' ? 'home' : undefined,
+        section: undefined,
         productId: null,
-        category: newView === 'home' ? activeFilters.category : undefined,
-        supplierFilterId: newView === 'home' ? supplierFilterId : null,
         step: nextStep
       };
       window.history.pushState(nextState, '', navStateToUrl(nextState));
@@ -502,6 +562,7 @@ export default function App() {
   const renderContent = () => {
     switch (view) {
       case 'home':
+      case 'products':
         if (selectedProduct) {
           return (
             <ProductDetail 
@@ -570,17 +631,19 @@ export default function App() {
                </motion.div>
              )}
 
-            <FilterBar 
-              lang={lang} 
-              activeFilter={activeFilters} 
-              setFilter={handleFilterChange} 
-              searchTerm={searchTerm} 
-              setSearchTerm={setSearchTerm} 
-              useAiSearch={useAiSearch}
-              setUseAiSearch={setUseAiSearch}
-              supplierFilterId={supplierFilterId}
-              onClearSupplierFilter={() => handleFilterSupplier(null)}
-            />
+            <div id="products-section" className="scroll-mt-20">
+              <FilterBar 
+                lang={lang} 
+                activeFilter={activeFilters} 
+                setFilter={handleFilterChange} 
+                searchTerm={searchTerm} 
+                setSearchTerm={setSearchTerm} 
+                useAiSearch={useAiSearch}
+                setUseAiSearch={setUseAiSearch}
+                supplierFilterId={supplierFilterId}
+                onClearSupplierFilter={() => handleFilterSupplier(null)}
+              />
+            </div>
             {isAiSearching && (
               <div className="flex items-center gap-2 mb-4 text-solar-blue font-black text-xs animate-pulse">
                 <Sparkles size={14} />
@@ -1052,7 +1115,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <BottomNav currentView={view} setView={navigateToView} lang={lang} user={user} />
+      <BottomNav currentView={view} currentSection={homeSection} setView={navigateToView} lang={lang} user={user} />
     </div>
   );
 }

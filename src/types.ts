@@ -202,7 +202,8 @@ export type ViewType =
   | 'profile'
   | 'wishlist'
   | 'detail'
-  | 'calculator';
+  | 'calculator'
+  | 'products';
 
 export interface Filters {
   category: Category;

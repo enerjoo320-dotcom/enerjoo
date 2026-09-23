@@ -1,17 +1,18 @@
 import React from 'react';
-import { Home, PlusCircle, ArrowLeftRight, User, LogIn, LayoutDashboard, Heart, Calculator, Package } from 'lucide-react';
+import { Home, PlusCircle, ArrowLeftRight, User, LogIn, LayoutDashboard, Heart, TrendingUp, Package } from 'lucide-react';
 import { translations } from '../translations';
 import { User as UserType, ViewType } from '../types';
 import { motion } from 'motion/react';
 
 interface BottomNavProps {
   currentView: ViewType;
+  currentSection?: 'home' | 'products';
   setView: (view: ViewType) => void;
   lang: 'ar' | 'en';
   user: UserType | null;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang, user }) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ currentView, currentSection = 'home', setView, lang, user }) => {
   const t = translations[lang];
   const isAr = lang === 'ar';
   const isSupplier = user?.type === 'supplier';
@@ -20,7 +21,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang
   const navItems: { id: ViewType; icon: React.ReactNode; label: string; show: boolean }[] = [
     { id: 'home', icon: <Home size={20} strokeWidth={2.5} />, label: t.home, show: true },
     { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: !isAdmin },
-    { id: 'calculator', icon: <Calculator size={20} strokeWidth={2.5} />, label: t.solarCalculator || 'Calculator', show: !isSupplier },
+    { id: 'products', icon: <TrendingUp size={20} strokeWidth={2.5} />, label: isAr ? 'بورصة الطاقة' : (t.energyMarket || 'Energy Market'), show: !isSupplier },
     // For suppliers and admin: show products dashboard
     isSupplier || isAdmin
       ? {
@@ -56,7 +57,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, setView, lang
     >
       <div className="flex justify-around items-center px-1 max-w-lg mx-auto h-14">
         {navItems.filter(item => item.show).map(item => {
-          const isActive = currentView === item.id;
+          const isActive = item.id === 'products'
+            ? (currentView === 'home' && currentSection === 'products')
+            : item.id === 'home'
+              ? (currentView === 'home' && currentSection !== 'products')
+              : currentView === item.id;
           return (
             <button 
               key={item.id} 
