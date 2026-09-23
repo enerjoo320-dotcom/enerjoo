@@ -1,6 +1,6 @@
 {
-  "name": "Enerjoo | المتجر اللانهائي للطاقة",
-  "description": "المتجر اللانهائي للطاقة  اكتشف منتجات وحلول الطاقة الشمسية والأنظمة الذكية من مكان واحد.",
+  "name": "Enerjoo | عالم الطاقة بين يديك",
+  "description": "عالم الطاقة بين يديك - اكتشف منتجات وحلول الطاقة الشمسية والأنظمة الذكية من مكان واحد.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

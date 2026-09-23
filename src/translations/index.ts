@@ -1,6 +1,6 @@
 export const translations = {
   en: {
-    appName: "Enerjoo | The Infinite Energy Store",
+    appName: "Enerjoo | The World of Energy in Your Hands",
     home: "Home",
     compare: "Compare",
     compareProducts: "Compare Products",
@@ -193,7 +193,7 @@ export const translations = {
     egyptianNumberNote: "Accepts Egyptian mobile numbers starting with 010, 011, 012, or 015"
   },
   ar: {
-    appName: "Enerjoo | المتجر اللانهائي للطاقة",
+    appName: "Enerjoo | عالم الطاقة بين يديك",
     home: "الرئيسية",
     compare: "مقارنة",
     compareProducts: "مقارنة المنتجات",
