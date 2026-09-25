@@ -352,6 +352,9 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // Security: Disable X-Powered-By fingerprinting header
+  app.disable("x-powered-by");
+
   // Process safety guards to prevent unexpected container exits
   process.on("uncaughtException", (err) => {
     console.error("Uncaught exception in server:", err);
@@ -360,19 +363,23 @@ async function startServer() {
     console.error("Unhandled rejection at:", promise, "reason:", reason);
   });
 
-  // Comprehensive CORS configuration to prevent iframe cross-origin errors in the sandboxed dev environment
+  // Defensive HTTP Security Headers
   app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
     res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,Content-Type,Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
     next();
   });
 
-  app.use(express.json());
+  // Defensive request body limits to mitigate Denial of Service (DoS) attacks
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
   // API Health Check (accessible on /api/health, /health, and /_health)
   app.get(["/health", "/api/health", "/_health"], (req, res) => {
@@ -396,10 +403,14 @@ async function startServer() {
   // from dropping technical columns (vmp_v, imp_a, dimensions_mm, weight_kg, notes, product_type)
   app.put("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
+    if (!productId || typeof productId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(productId)) {
+      return res.status(400).json({ success: false, error: "Invalid productId format" });
+    }
+
     try {
       let existing: any = {};
       try {
-        const getRes = await fetch(`${CF_WORKER_API}/products/${productId}`);
+        const getRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`);
         if (getRes.ok) {
           const getData = await getRes.json();
           if (getData && getData.product) existing = getData.product;
@@ -416,7 +427,7 @@ async function startServer() {
       };
 
       // Atomic recreate to ensure all columns in D1 are populated
-      await fetch(`${CF_WORKER_API}/products/${productId}`, { method: "DELETE" });
+      await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, { method: "DELETE" });
       const postRes = await fetch(`${CF_WORKER_API}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -432,7 +443,7 @@ async function startServer() {
       console.error(`Error in custom PUT /api/products/${productId}:`, err);
       // Fallback to standard proxy
       try {
-        const fallbackRes = await fetch(`${CF_WORKER_API}/products/${productId}`, {
+        const fallbackRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(req.body)
@@ -486,10 +497,24 @@ async function startServer() {
   app.post("/api/energy-exchange", async (req, res) => {
     try {
       const { brand, pricePerWatt, prices, adminEmail } = req.body;
-      if (brand && typeof pricePerWatt === "number" && pricePerWatt > 0) {
-        memoryExchangePrices[brand] = parseFloat(pricePerWatt.toFixed(2));
-      } else if (prices && typeof prices === "object") {
-        memoryExchangePrices = { ...memoryExchangePrices, ...prices };
+
+      // Defensive validation for exchange updates
+      if (brand) {
+        if (typeof brand !== "string" || brand.length > 60 || !/^[a-zA-Z0-9\s\-.]+$/.test(brand)) {
+          return res.status(400).json({ success: false, error: "Invalid brand name format" });
+        }
+        if (typeof pricePerWatt !== "number" || !Number.isFinite(pricePerWatt) || pricePerWatt <= 0 || pricePerWatt > 200) {
+          return res.status(400).json({ success: false, error: "Invalid pricePerWatt. Must be a valid positive number between 0 and 200." });
+        }
+        memoryExchangePrices[brand.trim()] = parseFloat(pricePerWatt.toFixed(2));
+      } else if (prices && typeof prices === "object" && !Array.isArray(prices)) {
+        for (const [k, v] of Object.entries(prices)) {
+          if (typeof k === "string" && k.length <= 60 && /^[a-zA-Z0-9\s\-.]+$/.test(k) && typeof v === "number" && Number.isFinite(v) && v > 0 && v <= 200) {
+            memoryExchangePrices[k.trim()] = parseFloat(v.toFixed(2));
+          }
+        }
+      } else {
+        return res.status(400).json({ success: false, error: "Missing valid brand or prices object" });
       }
 
       // Persist to file asynchronously
@@ -544,10 +569,18 @@ async function startServer() {
 
     try {
       const { action, sessionId, chatInput } = req.body;
+
+      if (chatInput && (typeof chatInput !== "string" || chatInput.length > 5000)) {
+        return res.status(400).json({ error: "chatInput exceeds maximum allowed size" });
+      }
+      if (sessionId && (typeof sessionId !== "string" || sessionId.length > 128)) {
+        return res.status(400).json({ error: "Invalid sessionId format" });
+      }
+
       const payload = {
         action: action || "sendMessage",
-        sessionId: sessionId,
-        chatInput: chatInput
+        sessionId: sessionId || "default-session",
+        chatInput: chatInput || ""
       };
 
       // Call the production n8n webhook URL
@@ -599,6 +632,13 @@ async function startServer() {
   app.post("/api/semantic-search", async (req, res) => {
     try {
       const { query, products, isAr } = req.body;
+
+      if (!query || typeof query !== "string" || query.length > 500) {
+        return res.status(400).json({ error: "Invalid query. Must be a string under 500 characters." });
+      }
+      if (!Array.isArray(products) || products.length > 300) {
+        return res.status(400).json({ error: "Invalid products array" });
+      }
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -695,6 +735,19 @@ async function startServer() {
     try {
       const { stationPower, landArea, loadDetails, products, lang } = req.body;
       const isAr = lang === 'ar';
+
+      if (typeof stationPower !== "number" || !Number.isFinite(stationPower) || stationPower < 0 || stationPower > 50000) {
+        return res.status(400).json({ error: "Invalid stationPower value" });
+      }
+      if (typeof landArea !== "number" || !Number.isFinite(landArea) || landArea < 0 || landArea > 5000000) {
+        return res.status(400).json({ error: "Invalid landArea value" });
+      }
+      if (loadDetails && (typeof loadDetails !== "string" || loadDetails.length > 2000)) {
+        return res.status(400).json({ error: "loadDetails exceeds maximum allowed size" });
+      }
+      if (!Array.isArray(products) || products.length > 300) {
+        return res.status(400).json({ error: "Invalid products array" });
+      }
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -822,6 +875,10 @@ async function startServer() {
     try {
       const { messages, lang, systemType, consumptionMethod, billAmount, kwhMonthly, pumpHp, cityChoice, systemDetails } = req.body;
       const isAr = lang === 'ar';
+
+      if (messages && (!Array.isArray(messages) || messages.length > 50)) {
+        return res.status(400).json({ error: "Invalid messages format or excessive message count" });
+      }
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {

@@ -7,24 +7,28 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Reuseable safe helpers
+    // Secure authentication & authorization helpers
     function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isAuthenticated() {
       return request.auth != null;
     }
 
     function isAdmin() {
       return request.auth != null && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin') ||
         (request.auth.token.keys().contains('email') && (
           request.auth.token.email.matches('(?i)^enerjoo365@.*') ||
           request.auth.token.email.matches('(?i)^enerjoo320@.*') ||
           request.auth.token.email == 'eng.faressnasser@gmail.com'
-        ))
+        )) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin')
+      );
+    }
+
+    function isSupplier() {
+      return request.auth != null && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type in ['supplier', 'admin'])
       );
     }
 
@@ -42,27 +46,39 @@ service cloud.firestore {
 
     // 1. PRODUCTS COLLECTION SECURITY
     match /products/{productId} {
-      // Anyone can read products in the public catalog
+      // Public catalog read access
       allow read, list: if true;
 
-      // Only registered, authenticated users (suppliers, admins) can create, update, or delete products
-      allow create: if (isSignedIn() || true) 
+      // Only authenticated suppliers and admins can create products with valid payload
+      allow create: if isSignedIn() && (isSupplier() || isAdmin())
         && incoming().name is string 
         && incoming().name.size() > 0 
         && incoming().name.size() <= 200;
-        
-      allow update, delete: if isSignedIn() || true;
 
-      // 4. REVIEWS SUBCOLLECTION SECURITY
+      // Only product owner or admin can update
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (resource.data.keys().contains('supplierId') && resource.data.supplierId == request.auth.uid) ||
+        (resource.data.keys().contains('userId') && resource.data.userId == request.auth.uid)
+      );
+
+      // Only product owner or admin can delete
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        (resource.data.keys().contains('supplierId') && resource.data.supplierId == request.auth.uid) ||
+        (resource.data.keys().contains('userId') && resource.data.userId == request.auth.uid)
+      );
+
+      // REVIEWS SUBCOLLECTION SECURITY
       match /reviews/{reviewId} {
         // Anyone can read product reviews
         allow read, list: if true;
 
-        // Only authenticated users can manage reviews under their owner ID
-        allow create: if (isSignedIn() || (incoming().userId is string && incoming().userId.matches('^mock_.*')))
+        // Authenticated users can create reviews under their own identity
+        allow create: if isSignedIn()
           && isValidId(productId)
           && isValidId(reviewId)
-          && (request.auth != null ? incoming().userId == request.auth.uid : true)
+          && incoming().userId == request.auth.uid
           && incoming().userName is string
           && incoming().userName.size() > 0
           && incoming().userName.size() <= 100
@@ -72,65 +88,72 @@ service cloud.firestore {
           && incoming().comment is string
           && incoming().comment.size() <= 1000;
 
-        allow update: if (isSignedIn() || (incoming().userId is string && incoming().userId.matches('^mock_.*')))
+        allow update: if isSignedIn()
           && isValidId(productId)
           && isValidId(reviewId)
-          && (request.auth != null ? incoming().userId == request.auth.uid : true)
-          && incoming().userName is string
-          && incoming().userName.size() > 0
-          && incoming().userName.size() <= 100
+          && (resource.data.userId == request.auth.uid || isAdmin())
+          && incoming().userId == resource.data.userId
           && incoming().rating is number
           && incoming().rating >= 1
           && incoming().rating <= 5
           && incoming().comment is string
           && incoming().comment.size() <= 1000;
 
-        allow delete: if isSignedIn() || (existing().userId is string && existing().userId.matches('^mock_.*'));
+        allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       }
     }
 
     // 2. USERS COLLECTION SECURITY
     match /users/{userId} {
-      // Anyone can read supplier profiles. Other profiles should restrict to owner.
-      allow read: if true;
-      allow list: if true; // to support public supplier directory listings
+      // Public read access for supplier directory, profiles, ratings
+      allow read, list: if true;
 
-      // Safe helper to check if a user is an Admin
-      function isAdminUser() {
-        return isSignedIn() && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin' ||
-          (request.auth.token.keys().contains('email') && (
-            request.auth.token.email.matches('(?i)^enerjoo365@.*')
-          ))
-        );
-      }
+      // Users can only create their own document or admins can create
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
 
-      // Users can create/update their own profile, and Admins can update any profile (e.g. for verification/approvals).
-      // Also, support mock/sandbox operations when unauthenticated.
-      allow create, update: if (isSignedIn() && (request.auth.uid == userId || isAdminUser())) 
-        || (!isSignedIn());
+      // Users can update their own profile, but cannot self-escalate role to admin
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (request.auth.uid == userId && (
+          !incoming().diff(resource.data).affectedKeys().hasAny(['type']) ||
+          resource.data.type == incoming().type
+        ))
+      );
       
-      // Admins/Super-users (or standard authenticated user deleting their own profile)
-      allow delete: if (isSignedIn() && (request.auth.uid == userId || isAdminUser())) 
-        || (!isSignedIn());
+      // Users can delete their own profile or admins can delete
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
 
     // 3. QUOTATIONS COLLECTION SECURITY (AI Sizing Leads & Quotations)
     match /quotations/{quotationId} {
-      // Quotations must be submittable by anyone, including unauthenticated guest visitors
+      // Guests or users can submit quotation requests with strict field validation
       allow create: if ((incoming().keys().contains('customerName') && incoming().customerName is string && incoming().customerName.size() >= 2 && incoming().customerName.size() <= 150) ||
                         (incoming().keys().contains('name') && incoming().name is string && incoming().name.size() >= 2 && incoming().name.size() <= 150))
         && incoming().phone is string
         && incoming().phone.size() >= 7
         && incoming().phone.size() <= 30;
 
-      // Only authenticated users (suppliers, administrators, owners) can list or read leads
-      allow read, list, update, delete: if isSignedIn() || true;
+      // Leads cannot be read by anonymous scrapers; must be signed in (suppliers/admins)
+      allow read, list: if isSignedIn();
+
+      // Only admins or the relevant requester/supplier can update or delete
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.keys().contains('userId') && resource.data.userId == request.auth.uid) ||
+        (resource.data.keys().contains('customerId') && resource.data.customerId == request.auth.uid) ||
+        (resource.data.keys().contains('supplierId') && resource.data.supplierId == request.auth.uid)
+      );
+
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.keys().contains('userId') && resource.data.userId == request.auth.uid) ||
+        (resource.data.keys().contains('customerId') && resource.data.customerId == request.auth.uid)
+      );
     }
 
     // 4. SOLAR REQUESTS COLLECTION SECURITY (Customer Solar Calculations & Requests)
     match /solarRequests/{requestId} {
-      // Valid request creation by authenticated customer or guest
+      // Valid request creation by customer or guest
       allow create: if incoming().customerName is string 
         && incoming().customerName.size() >= 2 
         && incoming().customerName.size() <= 150
@@ -140,36 +163,44 @@ service cloud.firestore {
         && incoming().systemType in ['on-grid', 'off-grid', 'hybrid', 'pump']
         && incoming().tier in ['budget', 'recommended', 'premium'];
 
-      // Reading, updating and listing requests (owner customer, admins, or sandbox)
-      allow read, list: if isSignedIn() || true;
+      // Reading requests restricted to signed-in users (suppliers/admins/owners)
+      allow read, list: if isSignedIn();
       
-      allow update: if isSignedIn() || true;
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.keys().contains('customerId') && resource.data.customerId == request.auth.uid) ||
+        (resource.data.keys().contains('userId') && resource.data.userId == request.auth.uid)
+      );
       
-      allow delete: if isSignedIn() || true;
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.keys().contains('customerId') && resource.data.customerId == request.auth.uid) ||
+        (resource.data.keys().contains('userId') && resource.data.userId == request.auth.uid)
+      );
     }
+
     // 5. CUSTOMERS COLLECTION SECURITY (Phone Auth Customers)
     match /customers/{userId} {
-      allow read: if isAuthenticated() &&
-        (request.auth.uid == userId || isAdmin());
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
 
-      allow create: if isAuthenticated() &&
+      allow create: if isSignedIn() &&
         request.auth.uid == userId &&
-        request.resource.data.uid == userId;
+        incoming().uid == userId;
 
-      allow update: if isAuthenticated() &&
+      allow update: if isSignedIn() &&
         request.auth.uid == userId &&
-        request.resource.data.uid == resource.data.uid;
+        incoming().uid == resource.data.uid;
 
       allow delete: if isAdmin();
     }
 
     // 6. ENERGY EXCHANGE (بورصة الطاقة) COLLECTION
     match /energyExchange/{docId} {
-      // Anyone can read solar panel energy exchange prices
+      // Anyone can view the current exchange prices
       allow read, list: if true;
 
-      // Authorized administrators (or sandbox/dev mode) can modify the Energy Exchange prices
-      allow write: if isAdmin() || true;
+      // ONLY authorized administrators can modify Energy Exchange prices
+      allow write: if isAdmin();
     }
   }
 }
