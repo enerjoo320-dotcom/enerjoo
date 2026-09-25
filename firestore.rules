@@ -162,5 +162,14 @@ service cloud.firestore {
 
       allow delete: if isAdmin();
     }
+
+    // 6. ENERGY EXCHANGE (بورصة الطاقة) COLLECTION
+    match /energyExchange/{docId} {
+      // Anyone can read solar panel energy exchange prices
+      allow read, list: if true;
+
+      // Authorized administrators (or sandbox/dev mode) can modify the Energy Exchange prices
+      allow write: if isAdmin() || true;
+    }
   }
 }

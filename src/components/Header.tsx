@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, LogIn, LogOut, PlusCircle, Users, Globe, Package } from 'lucide-react';
+import { Heart, LogIn, LogOut, PlusCircle, Users, Globe, Package, TrendingUp } from 'lucide-react';
 import { translations } from '../translations';
 import { User, ViewType } from '../types';
 
@@ -43,6 +43,17 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Energy Exchange Button */}
+          <button 
+            type="button"
+            onClick={() => setView('exchange')}
+            className="flex items-center gap-1.5 text-solar-dark hover:text-solar-blue transition font-black text-xs bg-solar-gold/15 hover:bg-solar-gold/25 border border-solar-gold/40 px-2.5 sm:px-3 py-1.5 rounded-full cursor-pointer active:scale-95 shadow-sm"
+            title={isAr ? 'بورصة الطاقة - أسعار الوات للألواح الشمسية' : 'Energy Exchange - Solar Panel Prices'}
+          >
+            <TrendingUp size={14} className="text-solar-blue shrink-0" />
+            <span className="font-black text-[11px] sm:text-xs">{isAr ? 'بورصة الطاقة' : (t.energyMarket || 'Energy Market')}</span>
+          </button>
+
           {/* Language Switcher */}
           <button 
             type="button"

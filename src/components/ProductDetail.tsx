@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare, Building2, Info, Cpu, Battery, Activity, FileText, Trash2, AlertTriangle, Loader2, X } from 'lucide-react';
 import { Product, ProductReview, Supplier } from '../types';
 import { translations } from '../translations';
@@ -51,6 +51,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const isOwner = user?.uid === product.supplierId || user?.type === 'admin';
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Always ensure the product details page opens and renders from the top
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+    const raf = requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [product.id]);
 
   const handleConfirmDelete = async () => {
     if (!onDelete) return;
@@ -147,7 +160,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   const getMainSpecs = () => {
     const common = [
-      { label: t.price, value: `${product.price.toLocaleString()} ${t.egp}`, icon: <CheckCircle2 className="text-solar-blue" /> },
+      { 
+        label: t.price, 
+        value: `${product.price.toLocaleString()} ${t.egp}${product.category === 'panels' && product.pricePerWatt ? ` (${product.pricePerWatt.toFixed(2)} ${isAr ? 'ج.م/وات' : 'EGP/W'})` : ''}`, 
+        icon: <CheckCircle2 className="text-solar-blue" /> 
+      },
       { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> },
     ];
 
@@ -1238,9 +1255,16 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       >
         <div className="flex flex-col min-w-0 flex-1">
           <span className="text-[10px] font-bold text-solar-muted leading-tight">{t.price}</span>
-          <span className="text-base sm:text-lg font-black text-solar-blue truncate">
-            {product.price.toLocaleString()} <span className="text-[11px] font-bold">{t.egp}</span>
-          </span>
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <span className="text-base sm:text-lg font-black text-solar-blue truncate">
+              {product.price.toLocaleString()} <span className="text-[11px] font-bold">{t.egp}</span>
+            </span>
+            {product.category === 'panels' && product.pricePerWatt && (
+              <span className="text-[10px] font-bold text-solar-muted bg-solar-light px-1.5 py-0.5 rounded border border-solar-border/70 notranslate">
+                {product.pricePerWatt.toFixed(2)} {isAr ? 'ج.م/وات' : 'EGP/W'}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button 

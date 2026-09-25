@@ -302,9 +302,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="flex items-center justify-between border-t border-solar-border/60 pt-2.5">
           <div className="flex flex-col">
             <span translate="no" className="text-[10px] text-solar-muted font-bold leading-none mb-0.5 notranslate">{t.from}</span>
-            <span translate="no" className="text-solar-blue font-black text-lg sm:text-xl leading-tight notranslate">
-              {product.price.toLocaleString()} <span className="text-xs font-bold notranslate">{t.egp}</span>
-            </span>
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              <span translate="no" className="text-solar-blue font-black text-lg sm:text-xl leading-tight notranslate">
+                {product.price.toLocaleString()} <span className="text-xs font-bold notranslate">{t.egp}</span>
+              </span>
+              {product.category === 'panels' && product.pricePerWatt && (
+                <span translate="no" className="text-[10px] font-black text-solar-muted bg-solar-light px-1.5 py-0.5 rounded border border-solar-border/70 notranslate leading-none">
+                  {product.pricePerWatt.toFixed(2)} <span className="text-[9px]">{isAr ? 'ج.م/وات' : 'EGP/W'}</span>
+                </span>
+              )}
+            </div>
           </div>
           <div translate="no" className="flex items-center gap-1 text-[10px] text-solar-muted font-bold opacity-70 notranslate">
             <Zap size={11} />

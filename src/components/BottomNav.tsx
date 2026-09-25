@@ -21,7 +21,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, currentSectio
   const navItems: { id: ViewType; icon: React.ReactNode; label: string; show: boolean }[] = [
     { id: 'home', icon: <Home size={20} strokeWidth={2.5} />, label: t.home, show: true },
     { id: 'compare', icon: <ArrowLeftRight size={20} strokeWidth={2.5} />, label: t.compare, show: !isAdmin },
-    { id: 'products', icon: <TrendingUp size={20} strokeWidth={2.5} />, label: isAr ? 'بورصة الطاقة' : (t.energyMarket || 'Energy Market'), show: !isSupplier },
+    { id: 'exchange', icon: <TrendingUp size={20} strokeWidth={2.5} />, label: isAr ? 'بورصة الطاقة' : (t.energyMarket || 'Energy Market'), show: true },
     // For suppliers and admin: show products dashboard
     isSupplier || isAdmin
       ? {
@@ -57,11 +57,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, currentSectio
     >
       <div className="flex justify-around items-center px-1 max-w-lg mx-auto h-14">
         {navItems.filter(item => item.show).map(item => {
-          const isActive = item.id === 'products'
-            ? (currentView === 'home' && currentSection === 'products')
-            : item.id === 'home'
-              ? (currentView === 'home' && currentSection !== 'products')
-              : currentView === item.id;
+          const isActive = item.id === 'home'
+            ? (currentView === 'home' && currentSection !== 'products')
+            : currentView === item.id;
           return (
             <button 
               key={item.id} 

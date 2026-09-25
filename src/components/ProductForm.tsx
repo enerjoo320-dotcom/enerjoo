@@ -700,7 +700,14 @@ export const ProductForm: React.FC<{
 
         {fields.includes('price') && (
           <div className="space-y-1.5 text-left">
-            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.price}</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.price}</label>
+              {formData.category === 'panels' && (
+                <span className="text-[10px] font-black text-solar-blue bg-solar-blue/10 px-2 py-0.5 rounded-full">
+                  {isAr ? 'مرتبط ببورصة الطاقة' : 'Linked to Energy Exchange'}
+                </span>
+              )}
+            </div>
             <input 
               type="number" 
               inputMode="numeric"
@@ -709,6 +716,11 @@ export const ProductForm: React.FC<{
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
+            {formData.category === 'panels' && (
+              <p className="text-[10px] text-solar-muted font-bold">
+                {isAr ? 'يتم احتساب السعر المباشر تلقائياً: القدرة (وات) × سعر الوات المعتمد للماركة في البورصة.' : 'Calculated automatically: Power (W) × Brand Price Per Watt in the Energy Exchange.'}
+              </p>
+            )}
           </div>
         )}
 

@@ -57,6 +57,32 @@ export interface Product {
   suppliers: Supplier[];
   description?: string;
   notes?: string;
+  pricePerWatt?: number;
+  exchangeBrand?: string;
+}
+
+export const SOLAR_PANEL_BRANDS = [
+  'Jinko',
+  'LONGi Solar',
+  'AIKO',
+  'Trina Solar',
+  'JA Solar',
+  'Risen',
+  'GCL',
+  'Suntech',
+  'Astronergy',
+  'Gokin',
+  'Quantum Solar',
+  'Ulica Solar',
+  'ZNShine Solar'
+] as const;
+
+export type SolarPanelBrand = (typeof SOLAR_PANEL_BRANDS)[number];
+
+export interface EnergyExchangePrices {
+  prices: Record<string, number>;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface ProductReview {
@@ -204,7 +230,8 @@ export type ViewType =
   | 'wishlist'
   | 'detail'
   | 'calculator'
-  | 'products';
+  | 'products'
+  | 'exchange';
 
 export interface Filters {
   category: Category;

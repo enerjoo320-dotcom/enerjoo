@@ -28,7 +28,8 @@ const VALID_VIEWS: ViewType[] = [
   'profile',
   'wishlist',
   'calculator',
-  'products'
+  'products',
+  'exchange'
 ];
 
 /**
@@ -64,8 +65,18 @@ export function parseUrlToNavState(pathname: string, search: string): AppNavStat
     };
   }
 
-  // 2. Products listing / Energy market: /products or /market or /bourse or with category query
-  if (cleanPath === '/products' || cleanPath === '/market' || cleanPath === '/bourse' || params.has('category')) {
+  // 2. Energy Exchange: /exchange or /market or /bourse
+  if (cleanPath === '/exchange' || cleanPath === '/market' || cleanPath === '/bourse') {
+    return {
+      view: 'exchange',
+      section: undefined,
+      productId: null,
+      step: 1
+    };
+  }
+
+  // 3. Products listing: /products or with category query
+  if (cleanPath === '/products' || params.has('category')) {
     const category = (params.get('category') as Category) || 'all';
     const supplier = params.get('supplier') || null;
     return {

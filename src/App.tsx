@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Sparkles, ShieldCheck, LogIn, ChevronLeft, ChevronRight, Sun, Zap, Battery, Wrench, Calculator, AlertTriangle, X, Loader2 } from 'lucide-react';
+import { Sparkles, ShieldCheck, LogIn, ChevronLeft, ChevronRight, Sun, Zap, Battery, Wrench, Calculator, AlertTriangle, X, Loader2, TrendingUp } from 'lucide-react';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
 import { ProductCard } from './components/ProductCard';
@@ -21,6 +21,7 @@ import { SolarCalculator } from './components/SolarCalculator';
 import { ProfileView } from './components/ProfileView';
 import { AdminSolarRequests } from './components/AdminSolarRequests';
 import { CustomerRequestsView } from './components/CustomerRequestsView';
+import { EnergyExchange } from './components/EnergyExchange';
 import EnerjooAIChat from './components/EnerjooAIChat';
 import { useAuth } from './context/AuthContext';
 import { 
@@ -32,6 +33,11 @@ import {
   deleteProduct,
   toggleSupplierVerification
 } from './services/firestoreService';
+import { 
+  getInitialExchangePrices, 
+  subscribeToEnergyExchange, 
+  applySolarPanelPricingToProducts 
+} from './services/energyExchangeService';
 import { performSemanticSearch, SemanticSearchResult } from './services/geminiService';
 import { calculateRelevanceScore, hybridSort } from './utils/searchUtils';
 import { getSupplierDisplayName, getSupplierAvatarInitial } from './utils/supplierUtils';
@@ -59,7 +65,13 @@ export default function App() {
 
   const [view, setView] = useState<ViewType>(initialNav.view);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [exchangePrices, setExchangePrices] = useState<Record<string, number>>(getInitialExchangePrices);
+  const [rawProducts, setRawProducts] = useState<Product[]>([]);
+  const setProducts = setRawProducts;
+  const products = useMemo(() => {
+    return applySolarPanelPricingToProducts(rawProducts, exchangePrices);
+  }, [rawProducts, exchangePrices]);
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [pendingProductId, setPendingProductId] = useState<string | number | null>(initialNav.productId || null);
@@ -107,7 +119,11 @@ export default function App() {
       };
       window.history.replaceState(canonicalState, '', window.location.pathname + window.location.search);
     }
-    if (initialNav.section === 'products' && !initialNav.productId) {
+    if (initialNav.productId) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    } else if (initialNav.section === 'products') {
       setTimeout(() => {
         const el = document.getElementById('products-section');
         if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -121,6 +137,9 @@ export default function App() {
       const found = products.find(p => p.id.toString() === pendingProductId.toString());
       if (found) {
         setSelectedProduct(found);
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
       }
     }
   }, [pendingProductId, products]);
@@ -212,6 +231,11 @@ export default function App() {
   const navigateToProduct = (product: Product, fromCustomView?: ViewType) => {
     setSelectedProduct(product);
     setPendingProductId(String(product.id));
+
+    // Immediately scroll to the top of the page when opening product details
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
 
     if (!isHandlingPopState.current) {
       const currentStep = window.history.state?.step ?? historyStepRef.current;
@@ -333,6 +357,9 @@ export default function App() {
           const found = products.find(p => p.id.toString() === pId);
           if (found) {
             setSelectedProduct(found);
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+            if (document.documentElement) document.documentElement.scrollTop = 0;
+            if (document.body) document.body.scrollTop = 0;
           }
         } else {
           setSelectedProduct(null);
@@ -381,14 +408,41 @@ export default function App() {
   }, [lang]);
 
   useEffect(() => {
-    // Setup real-time listeners for products and suppliers
+    // Setup real-time listeners for products, suppliers and energy exchange
     const unsubProducts = subscribeToProducts(setProducts);
     const unsubSuppliers = subscribeToSuppliers(setSuppliers);
+    const unsubExchange = subscribeToEnergyExchange(setExchangePrices);
     return () => {
       unsubProducts();
       unsubSuppliers();
+      unsubExchange();
     };
   }, []);
+
+  // Synchronize selected product if exchange price updates in real time
+  useEffect(() => {
+    if (selectedProduct && products.length > 0) {
+      const updated = products.find(p => p.id.toString() === selectedProduct.id.toString());
+      if (updated && (updated.price !== selectedProduct.price || updated.pricePerWatt !== selectedProduct.pricePerWatt)) {
+        setSelectedProduct(updated);
+      }
+    }
+  }, [products]);
+
+  // Always scroll to top whenever any product details page is opened or switches
+  useEffect(() => {
+    if (selectedProduct) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+      const raf = requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [selectedProduct?.id]);
 
   // Handle Semantic Search Debounce
   useEffect(() => {
@@ -630,6 +684,41 @@ export default function App() {
                  </button>
                </motion.div>
              )}
+
+            {/* Live Energy Exchange Banner (بورصة الطاقة) */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-r from-solar-dark via-[#032b5e] to-solar-dark text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-solar-border/60 flex flex-col sm:flex-row items-center justify-between gap-4"
+            >
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className="w-10 h-10 rounded-xl bg-solar-gold/20 flex items-center justify-center shrink-0 text-solar-gold border border-solar-gold/40">
+                  <TrendingUp size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <h3 className="font-black text-sm sm:text-base">
+                      {isAr ? 'بورصة الطاقة المركزية | أسعار الوات للألواح' : 'Energy Exchange | Solar Panel Watt Pricing'}
+                    </h3>
+                  </div>
+                  <p className="text-[11px] sm:text-xs text-white/80 mt-0.5">
+                    {isAr 
+                      ? `جينكو ${(exchangePrices['Jinko'] ?? 12).toFixed(2)} ج.م | لونجي ${(exchangePrices['LONGi Solar'] ?? 12.2).toFixed(2)} ج.م | أيكو ${(exchangePrices['AIKO'] ?? 12.5).toFixed(2)} ج.م | ترينا ${(exchangePrices['Trina Solar'] ?? 11.9).toFixed(2)} ج.م`
+                      : `Jinko ${(exchangePrices['Jinko'] ?? 12).toFixed(2)} EGP | LONGi ${(exchangePrices['LONGi Solar'] ?? 12.2).toFixed(2)} EGP | AIKO ${(exchangePrices['AIKO'] ?? 12.5).toFixed(2)} EGP | Trina ${(exchangePrices['Trina Solar'] ?? 11.9).toFixed(2)} EGP`}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => navigateToView('exchange')}
+                className="w-full sm:w-auto bg-solar-gold hover:bg-amber-400 text-solar-dark font-black text-xs px-5 py-2.5 rounded-xl transition duration-200 flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer shrink-0"
+              >
+                <TrendingUp size={15} />
+                <span>{isAr ? (user?.type === 'admin' ? 'إدارة وتعديل أسعار البورصة' : 'عرض جدول البورصة بالكامل') : (user?.type === 'admin' ? 'Manage Exchange Prices' : 'View Full Exchange')}</span>
+              </button>
+            </motion.div>
 
             <div id="products-section" className="scroll-mt-20">
               <FilterBar 
@@ -883,6 +972,23 @@ export default function App() {
               </div>
             )}
           </div>
+        );
+      case 'exchange':
+        return (
+          <EnergyExchange 
+            lang={lang} 
+            user={user} 
+            prices={exchangePrices} 
+            onNavigateToBrandProducts={(brandName) => {
+              setActiveFilters({ category: 'panels', sort: 'power' });
+              setSearchTerm(brandName);
+              navigateToView('home');
+              setTimeout(() => {
+                const el = document.getElementById('products-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }, 200);
+            }} 
+          />
         );
       case 'compare':
         return <CompareView products={compareList} lang={lang} onBack={() => navigateBack('home')} onRemove={(id) => setCompareList(l => l.filter(p => p.id !== id))} />;

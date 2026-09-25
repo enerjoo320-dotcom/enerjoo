@@ -350,7 +350,7 @@ Browse listed catalog products or submit an RFQ to receive competitive bids from
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Process safety guards to prevent unexpected container exits
   process.on("uncaughtException", (err) => {
@@ -442,6 +442,73 @@ async function startServer() {
       } catch (fallbackErr: any) {
         res.status(500).json({ success: false, error: fallbackErr?.message || "Failed to update product" });
       }
+    }
+  });
+
+  // Centralized Solar Panel Energy Exchange Endpoints
+  const EXCHANGE_FILE = path.join(process.cwd(), "energy-exchange.json");
+  let memoryExchangePrices: Record<string, number> = {
+    'Jinko': 12.00,
+    'LONGi Solar': 12.20,
+    'AIKO': 12.50,
+    'Trina Solar': 11.90,
+    'JA Solar': 11.95,
+    'Risen': 11.80,
+    'GCL': 11.75,
+    'Suntech': 11.85,
+    'Astronergy': 11.90,
+    'Gokin': 11.70,
+    'Quantum Solar': 11.80,
+    'Ulica Solar': 11.75,
+    'ZNShine Solar': 11.80,
+  };
+
+  try {
+    const fs = await import("fs");
+    if (fs.existsSync(EXCHANGE_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(EXCHANGE_FILE, "utf-8"));
+      if (saved && typeof saved === "object") {
+        memoryExchangePrices = { ...memoryExchangePrices, ...saved };
+      }
+    }
+  } catch (e) {
+    console.warn("Could not load initial energy-exchange.json:", e);
+  }
+
+  app.get("/api/energy-exchange", (req, res) => {
+    res.json({
+      success: true,
+      prices: memoryExchangePrices,
+      updatedAt: new Date().toISOString()
+    });
+  });
+
+  app.post("/api/energy-exchange", async (req, res) => {
+    try {
+      const { brand, pricePerWatt, prices, adminEmail } = req.body;
+      if (brand && typeof pricePerWatt === "number" && pricePerWatt > 0) {
+        memoryExchangePrices[brand] = parseFloat(pricePerWatt.toFixed(2));
+      } else if (prices && typeof prices === "object") {
+        memoryExchangePrices = { ...memoryExchangePrices, ...prices };
+      }
+
+      // Persist to file asynchronously
+      try {
+        const fs = await import("fs");
+        fs.writeFileSync(EXCHANGE_FILE, JSON.stringify(memoryExchangePrices, null, 2), "utf-8");
+      } catch (saveErr) {
+        console.warn("Could not save to energy-exchange.json:", saveErr);
+      }
+
+      res.json({
+        success: true,
+        prices: memoryExchangePrices,
+        updatedAt: new Date().toISOString(),
+        updatedBy: adminEmail || "admin"
+      });
+    } catch (err: any) {
+      console.error("Error in POST /api/energy-exchange:", err);
+      res.status(500).json({ success: false, error: err?.message || "Failed to update exchange prices" });
     }
   });
 

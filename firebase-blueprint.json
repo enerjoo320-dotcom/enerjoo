@@ -119,12 +119,35 @@
         "createdAt": { "type": "object", "format": "timestamp", "description": "Server timestamp of review creation" }
       },
       "required": ["userId", "userName", "rating", "createdAt"]
+    },
+    "EnergyExchange": {
+      "title": "EnergyExchange",
+      "description": "Centralized solar panel price per watt for approved solar panel brands.",
+      "type": "object",
+      "properties": {
+        "prices": {
+          "type": "object",
+          "description": "Map of solar panel brand names to price per watt in EGP/W"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last price update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Email or ID of admin who updated the price"
+        }
+      }
     }
   },
   "firestore": {
     "products/{productId}": {
       "schema": "Product",
       "description": "Collection of solar products in the Egyptian catalog."
+    },
+    "energyExchange/{docId}": {
+      "schema": "EnergyExchange",
+      "description": "Centralized solar panel prices per watt managed by administrators."
     },
     "users/{userId}": {
       "schema": "User",
