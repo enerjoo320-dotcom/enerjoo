@@ -30,7 +30,7 @@ interface ProductDetailProps {
 }
 
 export const ProductDetail: React.FC<ProductDetailProps> = ({ 
-  product, 
+  product: initialProduct, 
   allProducts, 
   suppliers,
   lang, 
@@ -44,6 +44,13 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   onEdit,
   onDelete
 }) => {
+  // Always resolve the latest product instance from allProducts to ensure Energy Exchange price updates reflect immediately
+  const product = useMemo(() => {
+    if (!allProducts || allProducts.length === 0) return initialProduct;
+    const found = allProducts.find(p => p.id?.toString() === initialProduct.id?.toString());
+    return found || initialProduct;
+  }, [allProducts, initialProduct]);
+
   const { user } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
@@ -774,6 +781,36 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               <span>{t.supplier}: <strong className="font-black">{primarySupplierDisplayName}</strong></span>
             </button>
           </div>
+          {/* Prominent Price & Energy Exchange Rate Card */}
+          <div className="mt-4 pt-4 border-t border-solar-border/60 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col">
+              <span className="text-[11px] font-black text-solar-muted uppercase tracking-wider mb-0.5">
+                {product.category === 'panels' && product.pricePerWatt ? (isAr ? 'السعر وفقاً لبورصة الطاقة اليوم' : 'Price based on Energy Exchange') : t.price}
+              </span>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-solar-blue">
+                  {product.price.toLocaleString()} <span className="text-sm font-bold">{t.egp}</span>
+                </span>
+                {product.category === 'panels' && product.pricePerWatt && (
+                  <span className="text-xs font-black text-solar-blue bg-solar-blue/10 px-2.5 py-1 rounded-lg border border-solar-blue/20 notranslate">
+                    {product.pricePerWatt.toFixed(2)} {isAr ? 'ج.م / وات' : 'EGP/W'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {product.category === 'panels' && product.power && product.power > 0 && (
+              <div className="bg-solar-light/80 px-3.5 py-2 rounded-xl border border-solar-border/60 text-right">
+                <span className="text-[10px] font-bold text-solar-muted block">
+                  {isAr ? 'قدرة اللوح المعتمدة' : 'Panel Power'}
+                </span>
+                <span className="text-xs sm:text-sm font-black text-solar-text">
+                  {product.power} {t.watt}
+                </span>
+              </div>
+            )}
+          </div>
+
           {reviews.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-solar-border/40 text-solar-muted text-xs font-bold leading-none w-full max-w-full box-border">
               <div className="flex items-center text-amber-500">

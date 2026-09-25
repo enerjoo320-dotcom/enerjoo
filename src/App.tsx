@@ -618,9 +618,10 @@ export default function App() {
       case 'home':
       case 'products':
         if (selectedProduct) {
+          const currentSelectedProduct = products.find(p => p.id?.toString() === selectedProduct.id?.toString()) || selectedProduct;
           return (
             <ProductDetail 
-              product={selectedProduct} 
+              product={currentSelectedProduct} 
               allProducts={products}
               suppliers={suppliers}
               lang={lang} 

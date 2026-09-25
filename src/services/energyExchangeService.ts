@@ -100,11 +100,20 @@ export function applySolarPanelPricing(
 
   const calculatedPrice = Math.round(wattage * pricePerWatt);
 
+  // Synchronize supplier entries so that supplier cards in ProductDetail reflect the updated exchange price
+  const updatedSuppliers = (product.suppliers && product.suppliers.length > 0)
+    ? product.suppliers.map(s => ({
+        ...s,
+        price: calculatedPrice
+      }))
+    : product.suppliers;
+
   return {
     ...product,
     price: calculatedPrice,
     pricePerWatt,
-    exchangeBrand: matchedBrand
+    exchangeBrand: matchedBrand,
+    suppliers: updatedSuppliers
   };
 }
 
