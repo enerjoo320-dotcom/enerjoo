@@ -683,42 +683,7 @@ export default function App() {
                    <span>{isAr ? 'ابدأ تصميم محطتك والحساب الذكي' : 'Start Sizing & Smart AI Calculation'}</span>
                  </button>
                </motion.div>
-             )}
-
-            {/* Live Energy Exchange Banner (بورصة الطاقة) */}
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-gradient-to-r from-solar-dark via-[#032b5e] to-solar-dark text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-solar-border/60 flex flex-col sm:flex-row items-center justify-between gap-4"
-            >
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <div className="w-10 h-10 rounded-xl bg-solar-gold/20 flex items-center justify-center shrink-0 text-solar-gold border border-solar-gold/40">
-                  <TrendingUp size={20} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <h3 className="font-black text-sm sm:text-base">
-                      {isAr ? 'بورصة الطاقة المركزية | أسعار الوات للألواح' : 'Energy Exchange | Solar Panel Watt Pricing'}
-                    </h3>
-                  </div>
-                  <p className="text-[11px] sm:text-xs text-white/80 mt-0.5">
-                    {isAr 
-                      ? `جينكو ${(exchangePrices['Jinko'] ?? 12).toFixed(2)} ج.م | لونجي ${(exchangePrices['LONGi Solar'] ?? 12.2).toFixed(2)} ج.م | أيكو ${(exchangePrices['AIKO'] ?? 12.5).toFixed(2)} ج.م | ترينا ${(exchangePrices['Trina Solar'] ?? 11.9).toFixed(2)} ج.م`
-                      : `Jinko ${(exchangePrices['Jinko'] ?? 12).toFixed(2)} EGP | LONGi ${(exchangePrices['LONGi Solar'] ?? 12.2).toFixed(2)} EGP | AIKO ${(exchangePrices['AIKO'] ?? 12.5).toFixed(2)} EGP | Trina ${(exchangePrices['Trina Solar'] ?? 11.9).toFixed(2)} EGP`}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => navigateToView('exchange')}
-                className="w-full sm:w-auto bg-solar-gold hover:bg-amber-400 text-solar-dark font-black text-xs px-5 py-2.5 rounded-xl transition duration-200 flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer shrink-0"
-              >
-                <TrendingUp size={15} />
-                <span>{isAr ? (user?.type === 'admin' ? 'إدارة وتعديل أسعار البورصة' : 'عرض جدول البورصة بالكامل') : (user?.type === 'admin' ? 'Manage Exchange Prices' : 'View Full Exchange')}</span>
-              </button>
-            </motion.div>
+              )}
 
             <div id="products-section" className="scroll-mt-20">
               <FilterBar 
