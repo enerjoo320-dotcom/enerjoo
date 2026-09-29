@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, LogIn, LogOut, PlusCircle, Users, Globe, Package, TrendingUp } from 'lucide-react';
+import { Heart, LogIn, LogOut, PlusCircle, Users, Globe, Package, TrendingUp, Sparkles } from 'lucide-react';
 import { translations } from '../translations';
 import { User, ViewType } from '../types';
 
@@ -9,9 +9,10 @@ interface HeaderProps {
   user: User | null;
   onLogout: () => void;
   setView: (view: ViewType) => void;
+  onOpenAiChat?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, setView }) => {
+export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, setView, onOpenAiChat }) => {
   const t = translations[lang];
   const isAr = lang === 'ar';
 
@@ -42,7 +43,21 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
           />
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
+          {/* AI Consultant Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenAiChat) onOpenAiChat();
+              else setView('calculator');
+            }}
+            className="flex items-center gap-1.5 text-blue-700 hover:text-blue-900 transition font-black text-xs bg-blue-50 hover:bg-blue-100/90 border border-blue-200/80 px-2.5 sm:px-3 py-1.5 rounded-full cursor-pointer active:scale-95 shadow-xs"
+            title={isAr ? 'المستشار الذكي للطاقة الشمسية' : 'AI Solar Consultant'}
+          >
+            <Sparkles size={14} className="text-blue-600 shrink-0 animate-pulse" />
+            <span className="font-black text-[11px] sm:text-xs">{isAr ? 'المستشار الذكي' : 'AI Advisor'}</span>
+          </button>
+
           {/* Energy Exchange Button */}
           <button 
             type="button"

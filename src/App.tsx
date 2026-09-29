@@ -1049,7 +1049,14 @@ export default function App() {
       dir={isAr ? 'rtl' : 'ltr'}
     >
       {view !== 'login' && view !== 'register' && (
-        <Header lang={lang} setLang={setLang} user={user} onLogout={logout} setView={navigateToView} />
+        <Header 
+          lang={lang} 
+          setLang={setLang} 
+          user={user} 
+          onLogout={logout} 
+          setView={navigateToView} 
+          onOpenAiChat={() => setIsAiChatOpen(true)} 
+        />
       )}
       
       {user && (
@@ -1121,7 +1128,7 @@ export default function App() {
         lang={lang} 
         isOpen={isAiChatOpen} 
         onClose={() => setIsAiChatOpen(false)} 
-        showFloatingTrigger={false} 
+        showFloatingTrigger={true} 
       />
 
       {/* Product Deletion Confirmation Modal */}

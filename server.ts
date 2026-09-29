@@ -231,8 +231,13 @@ function parseSizingInPrompt(text: string) {
   };
 }
 
-function fallbackSolarChat(messages: any[], isAr: boolean, body: any = {}) {
-  const lastMsg = (messages[messages.length - 1]?.text || "").toLowerCase();
+function fallbackSolarChat(messages: any[] = [], isAr: boolean = true, body: any = {}, exchangePrices?: Record<string, number>) {
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const rawLastMsg = safeMessages.length > 0 
+    ? (safeMessages[safeMessages.length - 1]?.text || safeMessages[safeMessages.length - 1]?.content || "") 
+    : "";
+  const directText = body?.message || body?.chatInput || body?.query || body?.prompt || "";
+  const lastMsg = (rawLastMsg || directText || "").toLowerCase();
   const { systemType, consumptionMethod, billAmount, kwhMonthly, pumpHp, systemDetails } = body;
 
   const parsed = parseSizingInPrompt(lastMsg);
@@ -320,6 +325,40 @@ Browse listed catalog products or submit an RFQ to receive competitive bids from
     }
   }
 
+  // Energy exchange rate queries
+  if (lastMsg.includes("جينكو") || lastMsg.includes("jinko")) {
+    const p = exchangePrices?.['Jinko'] ?? 12.0;
+    return isAr 
+      ? `ألواح جينكو (Jinko Solar) متوفرة بنماذج Tiger Pro / Neo عالية الكفاءة (N-type). سعر الوات اليوم في بورصة الطاقة: **${p} ج.م / وات**.\nعلى سبيل المثال: اللوح بقدرة 585 وات يسجل تقريباً **${Math.round(585 * p).toLocaleString()} ج.م**.`
+      : `Jinko Solar panels are currently priced at **${p} EGP / Watt** on Enerjoo Energy Exchange. A 585W module is approx **${Math.round(585 * p).toLocaleString()} EGP**.`;
+  }
+  if (lastMsg.includes("لونجي") || lastMsg.includes("لونغي") || lastMsg.includes("longi")) {
+    const p = exchangePrices?.['LONGi Solar'] ?? 12.2;
+    return isAr 
+      ? `ألواح لونجي (LONGi Solar) متوفرة بنماذج Hi-MO 6 وHi-MO X6 الرائدة. سعر الوات اليوم في بورصة الطاقة: **${p} ج.م / وات**.\nعلى سبيل المثال: اللوح بقدرة 620 وات يسجل تقريباً **${Math.round(620 * p).toLocaleString()} ج.م**.`
+      : `LONGi Solar Hi-MO panels trade at **${p} EGP / Watt** on Enerjoo Energy Exchange. A 620W module is approx **${Math.round(620 * p).toLocaleString()} EGP**.`;
+  }
+  if (lastMsg.includes("ترينا") || lastMsg.includes("trina")) {
+    const p = exchangePrices?.['Trina Solar'] ?? 11.9;
+    return isAr 
+      ? `ألواح ترينا سولار (Trina Solar) متوفرة بنماذج Vertex N. سعر الوات اليوم في بورصة الطاقة: **${p} ج.م / وات**.`
+      : `Trina Solar Vertex series panels trade at **${p} EGP / Watt** on Enerjoo Energy Exchange.`;
+  }
+  if (lastMsg.includes("ايكو") || lastMsg.includes("آيكو") || lastMsg.includes("aiko")) {
+    const p = exchangePrices?.['AIKO'] ?? 12.5;
+    return isAr 
+      ? `ألواح آيكو (AIKO) متوفرة بتقنية ABC وتصنف من بين الأعلى كفاءة عالمياً (+23%). سعر الوات اليوم في بورصة الطاقة: **${p} ج.م / وات**.`
+      : `AIKO ABC panels trade at **${p} EGP / Watt** on Enerjoo Energy Exchange.`;
+  }
+  if (lastMsg.includes("بورصة") || lastMsg.includes("سعر الوات") || (lastMsg.includes("سعر") && (lastMsg.includes("لوح") || lastMsg.includes("ألواح")))) {
+    if (exchangePrices && Object.keys(exchangePrices).length > 0) {
+      const topList = Object.entries(exchangePrices).slice(0, 6).map(([b, rate]) => `• ${b}: **${rate} ج.م / وات**`).join('\n');
+      return isAr 
+        ? `أسعار بورصة الطاقة اليوم في منصة Enerjoo (سعر الوات للألواح الشمسية):\n${topList}\n\n💡 يمكنك مراجعة شاشة "بورصة الطاقة" في المنصة لمتابعة التحديثات اليومية اللحظية وحساب تكلفة الألواح مباشرة!`
+        : `Today's Enerjoo Solar Energy Exchange rates (EGP / Watt):\n${topList}\n\nCheck the Energy Exchange tab for live real-time prices!`;
+    }
+  }
+
   if (isAr) {
     if (lastMsg.includes("لوح") || lastMsg.includes("ألواح") || lastMsg.includes("انواع")) {
       return `أهلاً بك! يمكنك تصفح قسم الألواح الشمسية في المتجر لمعرفة الموديلات والقدرات والأسعار المتاحة حالياً من الموردين المعتمدين والمقارنة بينها بكل سهولة.`;
@@ -396,7 +435,10 @@ async function startServer() {
     "/api/solar-requests*",
     "/api/quotations*",
     "/api/quotation-items*",
-    "/api/reviews*"
+    "/api/reviews*",
+    "/api/files*",
+    "/api/categories*",
+    "/api/brands*"
   ];
 
   // Specialized PUT handler for /api/products/:productId to prevent Cloudflare Worker
@@ -584,46 +626,66 @@ async function startServer() {
       };
 
       // Call the production n8n webhook URL
-      let n8nRes = await fetch(N8N_PROD_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      let n8nRes: Response | null = null;
+      try {
+        n8nRes = await fetch(N8N_PROD_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-      // If the workflow is currently running in test mode on the n8n canvas, attempt fallback to the test URL (with 3s timeout)
-      if (n8nRes.status === 404) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const testRes = await fetch(N8N_TEST_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          if (testRes.ok) {
-            n8nRes = testRes;
+        // If the workflow is currently running in test mode on the n8n canvas, attempt fallback to the test URL (with 3s timeout)
+        if (n8nRes.status === 404) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            const testRes = await fetch(N8N_TEST_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            if (testRes.ok) {
+              n8nRes = testRes;
+            }
+          } catch {
+            // Ignore and continue
           }
+        }
+      } catch (fetchErr) {
+        console.warn("Direct fetch to n8n webhook failed:", fetchErr);
+      }
+
+      if (n8nRes && n8nRes.ok) {
+        const responseText = await n8nRes.text();
+        try {
+          const json = JSON.parse(responseText);
+          return res.status(n8nRes.status).json(json);
         } catch {
-          // Ignore and continue with production response
+          return res.status(n8nRes.status).send(responseText);
         }
       }
 
-      const status = n8nRes.status;
-      const responseText = await n8nRes.text();
-
-      try {
-        const json = JSON.parse(responseText);
-        return res.status(status).json(json);
-      } catch {
-        return res.status(status).send(responseText);
-      }
+      // If n8n agent webhook is inactive or returned 404/error, seamlessly answer via built-in solar advisor
+      console.warn("n8n agent offline or unavailable, generating smart solar advisor response.");
+      const advisorReply = fallbackSolarChat([], true, { message: chatInput }, memoryExchangePrices);
+      return res.json({
+        output: advisorReply,
+        text: advisorReply,
+        message: advisorReply,
+        reply: advisorReply,
+        fallback: true
+      });
     } catch (error: any) {
       console.error("Error proxying request to n8n webhook:", error);
-      return res.status(500).json({
-        error: "Failed to connect to n8n AI agent",
-        message: error?.message || "Internal server error"
+      const advisorReply = fallbackSolarChat([], true, { message: req.body?.chatInput || "" }, memoryExchangePrices);
+      return res.json({
+        output: advisorReply,
+        text: advisorReply,
+        message: advisorReply,
+        reply: advisorReply,
+        fallback: true
       });
     }
   });
@@ -631,13 +693,11 @@ async function startServer() {
   // Server-side Semantic Search proxy
   app.post("/api/semantic-search", async (req, res) => {
     try {
-      const { query, products, isAr } = req.body;
+      const { query, isAr } = req.body;
+      const products = Array.isArray(req.body.products) ? req.body.products : [];
 
       if (!query || typeof query !== "string" || query.length > 500) {
         return res.status(400).json({ error: "Invalid query. Must be a string under 500 characters." });
-      }
-      if (!Array.isArray(products) || products.length > 300) {
-        return res.status(400).json({ error: "Invalid products array" });
       }
       
       const apiKey = process.env.GEMINI_API_KEY;
@@ -733,20 +793,35 @@ async function startServer() {
   // Solar Calculator API
   app.post("/api/solar-calculate", async (req, res) => {
     try {
-      const { stationPower, landArea, loadDetails, products, lang } = req.body;
-      const isAr = lang === 'ar';
+      let stationPower = Number(req.body.stationPower);
+      let landArea = Number(req.body.landArea);
+      const { loadDetails, lang, monthlyBillEgp, billAmount, kwhMonthly } = req.body;
+      const products = Array.isArray(req.body.products) ? req.body.products : [];
+      const isAr = lang !== 'en';
 
-      if (typeof stationPower !== "number" || !Number.isFinite(stationPower) || stationPower < 0 || stationPower > 50000) {
-        return res.status(400).json({ error: "Invalid stationPower value" });
+      if (!Number.isFinite(stationPower) || stationPower <= 0) {
+        const bill = Number(monthlyBillEgp || billAmount);
+        if (Number.isFinite(bill) && bill > 0) {
+          stationPower = Math.max(1.5, bill / 450);
+        } else {
+          const kwh = Number(kwhMonthly);
+          if (Number.isFinite(kwh) && kwh > 0) {
+            stationPower = Math.max(1.5, (kwh / 30) / (5.3 * 0.75));
+          } else {
+            stationPower = 5;
+          }
+        }
       }
-      if (typeof landArea !== "number" || !Number.isFinite(landArea) || landArea < 0 || landArea > 5000000) {
-        return res.status(400).json({ error: "Invalid landArea value" });
+
+      if (!Number.isFinite(landArea) || landArea <= 0) {
+        landArea = parseFloat((stationPower * 7).toFixed(1));
       }
+
+      stationPower = Math.min(50000, Math.max(0.5, stationPower));
+      landArea = Math.min(5000000, Math.max(1, landArea));
+
       if (loadDetails && (typeof loadDetails !== "string" || loadDetails.length > 2000)) {
         return res.status(400).json({ error: "loadDetails exceeds maximum allowed size" });
-      }
-      if (!Array.isArray(products) || products.length > 300) {
-        return res.status(400).json({ error: "Invalid products array" });
       }
       
       const apiKey = process.env.GEMINI_API_KEY;
@@ -860,8 +935,11 @@ async function startServer() {
     } catch (err: any) {
       console.log("Solar calculation model status update: utilizing efficient local calculator fallback.");
       try {
-        const { stationPower, landArea, loadDetails, products, lang } = req.body;
-        const isAr = lang === 'ar';
+        let stationPower = Number(req.body?.stationPower) || 5;
+        let landArea = Number(req.body?.landArea) || parseFloat((stationPower * 7).toFixed(1));
+        const { loadDetails, lang } = req.body || {};
+        const products = Array.isArray(req.body?.products) ? req.body.products : [];
+        const isAr = lang !== 'en';
         const fallbackResults = fallbackSolarSizing(stationPower, landArea, loadDetails, products, isAr);
         res.json(fallbackResults);
       } catch (innerErr: any) {
@@ -873,100 +951,117 @@ async function startServer() {
   // Solar Chat Advisor API
   app.post("/api/solar-chat", async (req, res) => {
     try {
-      const { messages, lang, systemType, consumptionMethod, billAmount, kwhMonthly, pumpHp, cityChoice, systemDetails } = req.body;
-      const isAr = lang === 'ar';
+      const { messages, lang, systemType, consumptionMethod, billAmount, kwhMonthly, pumpHp, cityChoice, systemDetails } = req.body || {};
+      const isAr = lang !== 'en';
 
       if (messages && (!Array.isArray(messages) || messages.length > 50)) {
         return res.status(400).json({ error: "Invalid messages format or excessive message count" });
       }
+
+      const safeMessages = Array.isArray(messages) ? messages : [];
+      const userText = safeMessages.length > 0 
+        ? (safeMessages[safeMessages.length - 1]?.text || safeMessages[safeMessages.length - 1]?.content || "") 
+        : (req.body?.message || req.body?.chatInput || req.body?.prompt || "");
+
+      const parsed = parseSizingInPrompt(userText);
+      const updatedSizing = {
+        bill: parsed.bill,
+        kwh: parsed.kwh,
+        pumpHp: parsed.pumpHp,
+        systemType: parsed.systemType,
+        cityChoice: parsed.cityChoice
+      };
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         console.warn("GEMINI_API_KEY is not defined, utilizing intelligent solar consultant fallback.");
-        const lastText = messages && messages.length > 0 ? (messages[messages.length - 1]?.text || "") : "";
-        const parsed = parseSizingInPrompt(lastText);
-        const reply = fallbackSolarChat(messages, isAr, req.body);
+        const reply = fallbackSolarChat(safeMessages, isAr, { ...req.body, message: userText }, memoryExchangePrices);
         return res.json({ 
           reply,
-          updatedSizing: {
-            bill: parsed.bill,
-            kwh: parsed.kwh,
-            pumpHp: parsed.pumpHp,
-            systemType: parsed.systemType,
-            cityChoice: parsed.cityChoice
-          }
+          updatedSizing
         });
       }
 
-      const ai = new GoogleGenAI({ 
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
+      try {
+        const ai = new GoogleGenAI({ 
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
+
+        const contextParts: string[] = [];
+        if (systemType || cityChoice || systemDetails || pumpHp) {
+          contextParts.push("System details provided by user:");
+          if (systemType) contextParts.push(`- System type: ${systemType}`);
+          if (cityChoice) contextParts.push(`- Location/City: ${cityChoice}`);
+          if (pumpHp) contextParts.push(`- Water pump power: ${pumpHp} HP`);
+          if (billAmount) contextParts.push(`- Monthly electricity bill: ${billAmount} EGP`);
+          if (kwhMonthly) contextParts.push(`- Monthly consumption: ${kwhMonthly} kWh`);
+          if (systemDetails) {
+            contextParts.push(`- System capacity: ${systemDetails.panelPowerTotalKw || 0} kW`);
+            contextParts.push(`- Required panels count: ${systemDetails.panelQty || 0}`);
+            contextParts.push(`- Storage batteries count: ${systemDetails.batteryQty || 0}`);
           }
         }
-      });
 
-      const contextParts: string[] = [];
-      if (systemType || cityChoice || systemDetails || pumpHp) {
-        contextParts.push("System details provided by user:");
-        if (systemType) contextParts.push(`- System type: ${systemType}`);
-        if (cityChoice) contextParts.push(`- Location/City: ${cityChoice}`);
-        if (pumpHp) contextParts.push(`- Water pump power: ${pumpHp} HP`);
-        if (billAmount) contextParts.push(`- Monthly electricity bill: ${billAmount} EGP`);
-        if (kwhMonthly) contextParts.push(`- Monthly consumption: ${kwhMonthly} kWh`);
-        if (systemDetails) {
-          contextParts.push(`- System capacity: ${systemDetails.panelPowerTotalKw || 0} kW`);
-          contextParts.push(`- Required panels count: ${systemDetails.panelQty || 0}`);
-          contextParts.push(`- Storage batteries count: ${systemDetails.batteryQty || 0}`);
+        const systemInstruction = [
+          'You are an expert, friendly solar energy consultant for the "Enerjoo" solar energy platform in Egypt.',
+          'Your goal is to answer client questions with simplified, warm Arabic (or English if prompted) explanations.',
+          contextParts.join('\n'),
+          'Guidelines:',
+          '1. Explain technical terms simply.',
+          '2. Guide users to interact with the interactive sizing tools and request certified installation quotes.',
+          '3. Focus on verified equipment available on the platform and practical Egyptian solar guidelines.'
+        ].filter(Boolean).join('\n\n');
+
+        // Format messages safely for @google/genai SDK
+        const contents = safeMessages.map((m: any) => ({
+          role: m.sender === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.text || m.content || '' }]
+        }));
+
+        if (contents.length === 0) {
+          contents.push({
+            role: 'user',
+            parts: [{ text: userText || (isAr ? 'مرحباً، أود استشارة حول حلول الطاقة الشمسية' : 'Hello, I need solar consultation') }]
+          });
         }
+
+        const response = await ai.models.generateContent({
+          model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+          contents,
+          config: {
+            systemInstruction,
+          }
+        });
+
+        const reply = response.text || fallbackSolarChat(safeMessages, isAr, { ...req.body, message: userText }, memoryExchangePrices);
+
+        return res.json({ 
+          reply,
+          updatedSizing
+        });
+      } catch (geminiErr: any) {
+        console.warn("Gemini generation notice, utilizing smart solar advisor fallback:", geminiErr?.message || geminiErr);
+        const reply = fallbackSolarChat(safeMessages, isAr, { ...req.body, message: userText }, memoryExchangePrices);
+        return res.json({ 
+          reply,
+          updatedSizing
+        });
       }
-
-      const systemInstruction = [
-        'You are an expert, friendly solar energy consultant for the "Enerjoo" solar energy platform in Egypt.',
-        'Your goal is to answer client questions with simplified, warm Arabic (or English if prompted) explanations.',
-        contextParts.join('\n'),
-        'Guidelines:',
-        '1. Explain technical terms simply.',
-        '2. Guide users to interact with the interactive sizing tools and request certified installation quotes.',
-        '3. Focus on verified equipment available on the platform and practical Egyptian solar guidelines.'
-      ].filter(Boolean).join('\n\n');
-
-      // Format messages safely for @google/genai SDK
-      const contents = (messages || []).map((m: any) => ({
-        role: m.sender === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.text || '' }]
-      }));
-
-      const response = await ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-        contents,
-        config: {
-          systemInstruction,
-        }
-      });
-
-      const lastText = messages && messages.length > 0 ? (messages[messages.length - 1]?.text || "") : "";
-      const parsed = parseSizingInPrompt(lastText);
-
-      res.json({ 
-        reply: response.text,
-        updatedSizing: {
-          bill: parsed.bill,
-          kwh: parsed.kwh,
-          pumpHp: parsed.pumpHp,
-          systemType: parsed.systemType,
-          cityChoice: parsed.cityChoice
-        }
-      });
     } catch (err: any) {
       console.log("Solar chat model status update: utilizing efficient local advisor fallback.");
       try {
-        const { messages, lang } = req.body;
-        const isAr = lang === 'ar';
-        const lastText = messages && messages.length > 0 ? (messages[messages.length - 1]?.text || "") : "";
-        const parsed = parseSizingInPrompt(lastText);
-        const reply = fallbackSolarChat(messages, isAr, req.body);
+        const safeMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+        const isAr = req.body?.lang !== 'en';
+        const userText = safeMessages.length > 0 
+          ? (safeMessages[safeMessages.length - 1]?.text || safeMessages[safeMessages.length - 1]?.content || "") 
+          : (req.body?.message || req.body?.chatInput || req.body?.prompt || "");
+        const parsed = parseSizingInPrompt(userText);
+        const reply = fallbackSolarChat(safeMessages, isAr, { ...req.body, message: userText }, memoryExchangePrices);
         res.json({ 
           reply,
           updatedSizing: {
@@ -981,6 +1076,14 @@ async function startServer() {
         res.status(500).json({ error: innerErr.message || "Failed to get response" });
       }
     }
+  });
+
+  // Ensure all unhandled /api/* routes return JSON 404 instead of falling through to Vite index.html
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `Endpoint ${req.originalUrl} not found`
+    });
   });
 
   // Ensure all unhandled errors on API routes return JSON instead of HTML

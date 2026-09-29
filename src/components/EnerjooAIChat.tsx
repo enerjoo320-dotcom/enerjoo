@@ -183,10 +183,10 @@ export default function EnerjooAIChat({
         chatInput: text
       };
 
-      // Send request: Call n8n webhook directly (works on custom domains & Vercel with CORS), fallback to proxy if needed
+      // Send request: Use server-side proxy which handles CORS, session routing, and instant solar fallback
       let response: Response;
       try {
-        response = await fetch(N8N_WEBHOOK_URL, {
+        response = await fetch('/api/n8n-chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -194,10 +194,10 @@ export default function EnerjooAIChat({
           },
           body: JSON.stringify(payload)
         });
-      } catch (directErr) {
-        // Fallback to server proxy if direct browser fetch hits a client network/CORS issue
+      } catch (proxyErr) {
+        // Fallback to direct webhook if proxy is unreachable
         try {
-          response = await fetch('/api/n8n-chat', {
+          response = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -206,7 +206,7 @@ export default function EnerjooAIChat({
             body: JSON.stringify(payload)
           });
         } catch {
-          throw directErr;
+          throw proxyErr;
         }
       }
 
