@@ -1097,6 +1097,25 @@ async function startServer() {
     }
   });
 
+  // Explicit high-priority handlers for core SEO and brand assets
+  app.get("/favicon.ico", (req, res) => {
+    res.setHeader("Content-Type", "image/x-icon");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(path.join(process.cwd(), "public", "favicon.ico"));
+  });
+
+  app.get("/favicon.png", (req, res) => {
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(path.join(process.cwd(), "public", "favicon.png"));
+  });
+
+  app.get("/og-image.jpg", (req, res) => {
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(path.join(process.cwd(), "public", "og-image.jpg"));
+  });
+
   // Static assets from public directory
   app.use(express.static(path.join(process.cwd(), "public")));
 

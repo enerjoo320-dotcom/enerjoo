@@ -423,41 +423,6 @@ export default function EnerjooAIChat({
 
   return (
     <>
-      {/* 
-        Optional Native Enerjoo AI Assistant Floating Trigger
-        - Only rendered if showFloatingTrigger is explicitly true
-      */}
-      {showFloatingTrigger && !isOpen && (
-        <button
-          id="enerjoo-ai-trigger-btn"
-          type="button"
-          onClick={handleOpen}
-          aria-label="مساعد Enerjoo AI"
-          className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-3 md:px-5 md:py-3.5 rounded-full shadow-2xl hover:shadow-blue-500/30 flex items-center gap-2.5 transition-all transform hover:scale-105 active:scale-95 border-2 border-white/25 backdrop-blur-md cursor-pointer group select-none"
-          title="⚡ مساعد Enerjoo AI"
-        >
-          {/* Animated Glowing Icon */}
-          <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-white/20 text-white shrink-0">
-            <Zap className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse" />
-            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-blue-600 rounded-full" />
-          </div>
-
-          <div className="flex flex-col text-right" dir="rtl">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs md:text-sm font-black tracking-wide leading-tight">
-                ⚡ مساعد Enerjoo AI
-              </span>
-              <span className="text-[10px] bg-white/20 text-white/95 px-1.5 py-0.5 rounded-full font-bold hidden sm:inline-block">
-                مباشر
-              </span>
-            </div>
-            <span className="text-[10px] text-blue-100 font-bold leading-tight">
-              اسأل واستشر فوراً
-            </span>
-          </div>
-        </button>
-      )}
-
       {/* Backdrop for mobile to easily close modal when tapping outside */}
       {isOpen && (
         <div 

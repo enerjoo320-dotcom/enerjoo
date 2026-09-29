@@ -1128,7 +1128,7 @@ export default function App() {
         lang={lang} 
         isOpen={isAiChatOpen} 
         onClose={() => setIsAiChatOpen(false)} 
-        showFloatingTrigger={true} 
+        showFloatingTrigger={false} 
       />
 
       {/* Product Deletion Confirmation Modal */}
