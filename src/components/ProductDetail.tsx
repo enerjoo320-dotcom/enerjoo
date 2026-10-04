@@ -10,6 +10,7 @@ import { auth } from '../lib/firebase';
 import { getSupplierWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { formatDateOnly } from '../utils/dateUtils';
 import { getSupplierDisplayName, getSupplierAvatarInitial, isRawUidOrId } from '../utils/supplierUtils';
+import { classifyInverter } from '../utils/inverterClassification';
 
 const DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=800';
 
@@ -828,6 +829,131 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
             </div>
           )}
         </div>
+
+        {/* Inverter Classification & Structured Data Card (Single Source of Truth) */}
+        {product.category === 'inverters' && (() => {
+          const inv = classifyInverter(product);
+          return (
+            <div className="bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 border border-solar-blue/20 bg-linear-to-b from-solar-blue/[0.03] to-transparent shadow-sm w-full">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-solar-border/50 gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-solar-blue text-white flex items-center justify-center shrink-0 shadow-md shadow-solar-blue/20">
+                    <Cpu size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-xl font-black text-solar-text">
+                        {isAr ? 'تصنيف الإنفرتر المعتمد والبيانات المنظمة' : 'Certified Inverter Classification & Structured Specs'}
+                      </h3>
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-solar-blue/15 text-solar-blue border border-solar-blue/25">
+                        AI & n8n Ready
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-solar-muted mt-0.5">
+                      {isAr ? 'بيانات مهيكلة موحدة للموقع والذكاء الاصطناعي (Single Source of Truth)' : 'Single source of truth structured data for catalog & AI Agents'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`px-3 py-1 rounded-xl text-xs font-black shadow-xs ${
+                    inv.type === 'On-Grid' ? 'bg-emerald-600 text-white' :
+                    inv.type === 'Hybrid' ? 'bg-indigo-600 text-white' :
+                    inv.type === 'Off-Grid' ? 'bg-amber-600 text-white' :
+                    'bg-cyan-600 text-white'
+                  }`}>
+                    {inv.type}
+                  </span>
+                  <span className="bg-solar-blue/15 text-solar-blue px-3 py-1 rounded-xl text-xs font-black border border-solar-blue/20">
+                    {inv.phase === 'Three Phase' ? (isAr ? 'ثلاثي الطور (3-Phase)' : 'Three Phase') : (isAr ? 'أحادي الطور (1-Phase)' : 'Single Phase')}
+                  </span>
+                  <span className="bg-solar-bg text-solar-text border border-solar-border px-3 py-1 rounded-xl text-xs font-bold">
+                    {inv.power_range}
+                  </span>
+                </div>
+              </div>
+
+              {/* Grid of structured electrical specs */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-4">
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'القدرة الاسمية AC' : 'Rated AC Power'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {inv.rated_power_kw} kW
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'نطاق جهد MPPT' : 'MPPT Voltage Range'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {inv.mppt_voltage_range_v !== 'Unknown' ? `${inv.mppt_voltage_range_v}` : (isAr ? 'غير محدد' : 'Unknown')}
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'عدد أجهزة MPPT' : 'Number of MPPT'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {inv.mppt_count !== 'Unknown' ? `${inv.mppt_count} MPPT` : (isAr ? 'غير محدد' : 'Unknown')}
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'الكفاءة القصوى' : 'Maximum Efficiency'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {typeof inv.efficiency_percent === 'number' ? `${inv.efficiency_percent}%` : (isAr ? 'غير محدد' : 'Unknown')}
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'أقصى جهد دخل DC' : 'Max PV Input Voltage'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {inv.max_pv_voltage_v !== 'Unknown' ? `${inv.max_pv_voltage_v} V` : (isAr ? 'غير محدد' : 'Unknown')}
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'دعم البطاريات' : 'Battery Storage'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {inv.battery_support ? (isAr ? 'نعم (يدعم بطارية)' : 'Yes (Battery Supported)') : (isAr ? 'لا (متصل بالشبكة فقط)' : 'No (Grid-Tied Only)')}
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'جهد الشبكة والتردد' : 'AC Grid Voltage & Freq'}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
+                    {inv.ac_voltage_v !== 'Unknown' ? `${inv.ac_voltage_v}` : '380/400V'} ({inv.frequency_hz !== 'Unknown' ? inv.frequency_hz : '50/60Hz'})
+                  </span>
+                </div>
+
+                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
+                    {isAr ? 'تطبيقات الاستخدام' : 'Suitable Applications'}
+                  </span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {inv.application.map(app => (
+                      <span key={app} className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-solar-card border border-solar-border text-solar-text">
+                        {app}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 3. المواصفات الفنية والهندسية المعتمدة (Certified Technical & Engineering Specifications) */}
         <div className="bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 md:p-10 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">

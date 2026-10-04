@@ -3,12 +3,47 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
+import { classifyInverter } from "./src/utils/inverterClassification";
+import { parseInverterQuery, matchInverters } from "./src/utils/inverterMatching";
+import { 
+  INVERTER_MAIN_TYPES, 
+  INVERTER_PHASES, 
+  INVERTER_APPLICATIONS, 
+  INVERTER_POWER_RANGES,
+  StructuredInverter,
+  InverterQueryCriteria
+} from "./src/types/inverter";
 
 dotenv.config();
 
 // Fallback Helper Functions for High-Demand/Network Failures
 function fallbackSemanticSearch(query: string, products: any[], isAr: boolean) {
   const normalizedQuery = query.toLowerCase().trim();
+
+  // If searching for inverters, use the dedicated Inverter AI Matching Engine
+  const isInverterQuery = 
+    normalizedQuery.includes('انفرتر') || 
+    normalizedQuery.includes('inverter') || 
+    normalizedQuery.includes('محول') ||
+    normalizedQuery.includes('on-grid') ||
+    normalizedQuery.includes('off-grid') ||
+    normalizedQuery.includes('hybrid') ||
+    normalizedQuery.includes('هايبرد');
+
+  if (isInverterQuery) {
+    const inverterProducts = products.filter(p => (p.category || '').toLowerCase().includes('invert'));
+    if (inverterProducts.length > 0) {
+      const criteria = parseInverterQuery(normalizedQuery);
+      const structuredInverters = inverterProducts.map(classifyInverter);
+      const matched = matchInverters(structuredInverters, criteria);
+      return matched.map(m => ({
+        productId: m.product.id.toString(),
+        relevanceScore: parseFloat((m.score / 100).toFixed(2)),
+        matchReason: isAr ? m.recommendationReasonAr : m.recommendationReason
+      }));
+    }
+  }
+
   const results = products.map((p: any) => {
     const name = (isAr ? p.nameAr : p.name) || p.name || "";
     const brand = p.brand || "";
@@ -498,6 +533,225 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // ENERJOO INVERTER CLASSIFICATION & AI AGENT (n8n) SINGLE SOURCE OF TRUTH
+  // =========================================================================
+
+  /**
+   * Helper to fetch and classify all inverters from the primary database
+   */
+  async function fetchAllStructuredInverters(): Promise<StructuredInverter[]> {
+    try {
+      const getRes = await fetch(`${CF_WORKER_API}/products`);
+      if (!getRes.ok) return [];
+      const data = await getRes.json();
+      const rawProducts: any[] = data.products || [];
+      const rawInverters = rawProducts.filter((p: any) => 
+        (p.category || p.product_category || '').toLowerCase().includes('invert')
+      );
+      return rawInverters.map(classifyInverter);
+    } catch (err) {
+      console.error("Failed to fetch raw inverters from Cloudflare D1:", err);
+      return [];
+    }
+  }
+
+  /**
+   * OpenAPI / JSON Schema definition of StructuredInverter and matching tool
+   * for n8n HTTP Request Tool Node & LLM Agents
+   */
+  app.get("/api/v1/inverters/schema", (req, res) => {
+    res.json({
+      name: "enerjoo_inverter_catalog",
+      description: "Structured Inverter Database and AI Matching Tool for Enerjoo Egypt. Provides deterministic compatibility and real catalog lookup without hallucinations.",
+      inverter_types: INVERTER_MAIN_TYPES,
+      phases: INVERTER_PHASES,
+      applications: INVERTER_APPLICATIONS,
+      power_ranges: INVERTER_POWER_RANGES,
+      tool_signature: {
+        method: "POST",
+        endpoint: "/api/v1/inverters/match",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Customer natural language request in Arabic or English, e.g. 'عايز انفرتر 100 كيلو 3 فاز On-Grid لمصنع' or '10kW Hybrid 3-phase with battery'"
+            },
+            type: {
+              type: "string",
+              enum: INVERTER_MAIN_TYPES,
+              description: "Strict inverter type: 'On-Grid', 'Hybrid', 'Off-Grid', or 'Pump Inverter'. No microinverters."
+            },
+            rated_power_kw: {
+              type: "number",
+              description: "Exact nominal AC power in kW (e.g. 100, 15, 10, 5)."
+            },
+            phase: {
+              type: "string",
+              enum: INVERTER_PHASES,
+              description: "'Single Phase' or 'Three Phase'."
+            },
+            application: {
+              type: "string",
+              enum: INVERTER_APPLICATIONS,
+              description: "'Residential', 'Commercial', 'Industrial', 'Agricultural', or 'Solar Pumping'."
+            },
+            battery_required: {
+              type: "boolean",
+              description: "Whether the system requires energy storage battery support."
+            },
+            limit: {
+              type: "integer",
+              default: 5,
+              description: "Max number of ranked recommendations to return."
+            }
+          }
+        }
+      }
+    });
+  });
+
+  /**
+   * AI Matching Endpoint for n8n AI Agent and Enerjoo Solar Advisor
+   * Translates query or structured criteria into real catalog recommendations
+   */
+  app.post("/api/v1/inverters/match", async (req, res) => {
+    try {
+      const { query, limit = 5 } = req.body;
+      let criteria: InverterQueryCriteria = {};
+
+      if (query && typeof query === "string" && query.trim()) {
+        criteria = parseInverterQuery(query.trim());
+      }
+
+      // Explicit parameters override parsed query values
+      if (req.body.type && INVERTER_MAIN_TYPES.includes(req.body.type)) {
+        criteria.type = req.body.type;
+      }
+      if (req.body.rated_power_kw && !isNaN(Number(req.body.rated_power_kw))) {
+        criteria.rated_power_kw = Number(req.body.rated_power_kw);
+      }
+      if (req.body.phase && INVERTER_PHASES.includes(req.body.phase)) {
+        criteria.phase = req.body.phase;
+      }
+      if (req.body.application && INVERTER_APPLICATIONS.includes(req.body.application)) {
+        criteria.application = req.body.application;
+      }
+      if (typeof req.body.battery_required === "boolean") {
+        criteria.battery_required = req.body.battery_required;
+      }
+
+      const allInverters = await fetchAllStructuredInverters();
+      const matchResults = matchInverters(allInverters, criteria);
+
+      const maxLimit = Math.min(Math.max(1, Number(limit) || 5), 25);
+      const topMatches = matchResults.slice(0, maxLimit);
+
+      res.json({
+        success: true,
+        criteria,
+        total_catalog_inverters: allInverters.length,
+        compatible_count: matchResults.filter(m => m.isCompatible).length,
+        results_count: topMatches.length,
+        top_matches: topMatches
+      });
+    } catch (err: any) {
+      console.error("Error in /api/v1/inverters/match:", err);
+      res.status(500).json({ success: false, error: err?.message || "Internal matching error" });
+    }
+  });
+
+  /**
+   * Get single structured inverter by ID
+   */
+  app.get("/api/v1/inverters/:productId", async (req, res) => {
+    const { productId } = req.params;
+    try {
+      const getRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`);
+      if (!getRes.ok) {
+        return res.status(404).json({ success: false, error: "Inverter not found" });
+      }
+      const data = await getRes.json();
+      if (!data || !data.product) {
+        return res.status(404).json({ success: false, error: "Inverter not found" });
+      }
+      const structured = classifyInverter(data.product);
+      res.json({ success: true, inverter: structured });
+    } catch (err: any) {
+      console.error(`Error in /api/v1/inverters/${productId}:`, err);
+      res.status(500).json({ success: false, error: err?.message || "Server error" });
+    }
+  });
+
+  /**
+   * List all structured inverters with filtering support
+   * Single Source of Truth for Website Filters & External AI
+   */
+  app.get("/api/v1/inverters", async (req, res) => {
+    try {
+      const allInverters = await fetchAllStructuredInverters();
+      const { 
+        type, 
+        phase, 
+        application, 
+        power_range, 
+        min_power, 
+        max_power, 
+        battery_support, 
+        brand, 
+        search 
+      } = req.query;
+
+      let filtered = allInverters;
+
+      if (type && type !== "all") {
+        filtered = filtered.filter(i => i.type.toLowerCase() === String(type).toLowerCase());
+      }
+      if (phase && phase !== "all") {
+        filtered = filtered.filter(i => i.phase.toLowerCase() === String(phase).toLowerCase());
+      }
+      if (application && application !== "all") {
+        filtered = filtered.filter(i => i.application.some(a => a.toLowerCase() === String(application).toLowerCase()));
+      }
+      if (power_range && power_range !== "all") {
+        filtered = filtered.filter(i => i.power_range === String(power_range));
+      }
+      if (min_power && !isNaN(Number(min_power))) {
+        filtered = filtered.filter(i => i.rated_power_kw >= Number(min_power));
+      }
+      if (max_power && !isNaN(Number(max_power))) {
+        filtered = filtered.filter(i => i.rated_power_kw <= Number(max_power));
+      }
+      if (battery_support !== undefined && battery_support !== "all") {
+        const boolVal = String(battery_support) === "true";
+        filtered = filtered.filter(i => i.battery_support === boolVal);
+      }
+      if (brand && brand !== "all") {
+        filtered = filtered.filter(i => i.brand.toLowerCase().includes(String(brand).toLowerCase()));
+      }
+      if (search && typeof search === "string" && search.trim()) {
+        const s = search.toLowerCase().trim();
+        filtered = filtered.filter(i => 
+          i.name.toLowerCase().includes(s) ||
+          i.model.toLowerCase().includes(s) ||
+          i.brand.toLowerCase().includes(s) ||
+          (i.notes && i.notes.toLowerCase().includes(s))
+        );
+      }
+
+      res.json({
+        success: true,
+        count: filtered.length,
+        total_in_catalog: allInverters.length,
+        inverters: filtered
+      });
+    } catch (err: any) {
+      console.error("Error in /api/v1/inverters:", err);
+      res.status(500).json({ success: false, error: err?.message || "Server error" });
+    }
+  });
+
   // Centralized Solar Panel Energy Exchange Endpoints
   const EXCHANGE_FILE = path.join(process.cwd(), "energy-exchange.json");
   let memoryExchangePrices: Record<string, number> = {
@@ -720,26 +974,46 @@ async function startServer() {
         }
       });
 
-      const productContext = products.map((p: any) => ({
-        id: p.id,
-        name: isAr ? p.nameAr : p.name,
-        brand: p.brand,
-        category: p.category,
-        power: p.power,
-        efficiency: p.efficiency,
-        price: p.price,
-        specs: p.specs || {}
-      }));
+      const productContext = products.map((p: any) => {
+        if ((p.category || '').toLowerCase().includes('invert')) {
+          const structured = classifyInverter(p);
+          return {
+            id: p.id,
+            name: isAr ? p.nameAr : p.name,
+            brand: p.brand,
+            category: 'Inverter',
+            inverter_type: structured.type,
+            phase: structured.phase,
+            rated_power_kw: structured.rated_power_kw,
+            application: structured.application,
+            battery_support: structured.battery_support,
+            efficiency_percent: structured.efficiency_percent,
+            price: p.price,
+            availability: structured.availability
+          };
+        }
+        return {
+          id: p.id,
+          name: isAr ? p.nameAr : p.name,
+          brand: p.brand,
+          category: p.category,
+          power: p.power,
+          efficiency: p.efficiency,
+          price: p.price,
+          specs: p.specs || {}
+        };
+      });
 
       const systemInstruction = [
         "You are an expert solar energy consultant assistant for 'enerjoo', a solar product comparison platform in Egypt.",
         "Your task is to perform high-precision semantic search on solar products.",
         "",
-        "CRITICAL SEARCH CAPABILITIES:",
-        "1. Technical Specs: Understand power (W/kW), efficiency (%), voltage (V), and current (A).",
-        "2. Intent Mapping: If a user asks for home system, prioritize batteries and hybrid inverters. If farm, prioritize high-power panels and pumps.",
-        "3. Unit Conversions: Understand that '5k' or '5000' refers to 5000W or 5kW.",
-        "4. Synonyms in Arabic and English for panels, inverters, batteries, structures, and cables.",
+        "CRITICAL SEARCH CAPABILITIES & INVERTER DISCIPLINE:",
+        "1. Inverters: Types are strictly: On-Grid, Hybrid, Off-Grid, Pump Inverter. Phases: Single Phase, Three Phase.",
+        "2. STRICT NO-HALLUCINATION RULE: Never invent specs. Never assume battery support if false. Never assume MPPT.",
+        "3. Ranking Priority: Correct Type -> Power Proximity -> Phase -> Battery Support -> Application -> Efficiency -> Price.",
+        "4. Technical Specs: Understand power (W/kW), efficiency (%), voltage (V), and current (A).",
+        "5. Unit Conversions: Understand that '5k' or '5000' refers to 5000W or 5kW.",
         "",
         "EVALUATION CRITERIA:",
         "- High Relevance (0.8-1.0): Product exactly matches spec.",
@@ -1112,8 +1386,20 @@ async function startServer() {
 
   app.get("/og-image.jpg", (req, res) => {
     res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=604800");
     res.sendFile(path.join(process.cwd(), "public", "og-image.jpg"));
+  });
+
+  app.get(["/brand-thumbnail.png"], (req, res) => {
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=604800");
+    res.sendFile(path.join(process.cwd(), "public", "brand-thumbnail.png"));
+  });
+
+  app.get(["/brand-thumbnail.jpg", "/site-thumbnail.jpg", "/og-image-square.jpg"], (req, res) => {
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400, s-maxage=604800");
+    res.sendFile(path.join(process.cwd(), "public", "brand-thumbnail.jpg"));
   });
 
   // Static assets from public directory

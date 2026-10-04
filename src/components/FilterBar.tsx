@@ -1,6 +1,13 @@
 import React from 'react';
-import { Search, Sparkles, X, User } from 'lucide-react';
+import { Search, Sparkles, X, User, Zap, Battery, Cpu, Layers } from 'lucide-react';
 import { Category, Filters } from '../types';
+import { 
+  InverterFilterCriteria, 
+  INVERTER_MAIN_TYPES, 
+  INVERTER_PHASES, 
+  INVERTER_POWER_RANGES, 
+  INVERTER_APPLICATIONS 
+} from '../types/inverter';
 import { translations } from '../translations';
 
 interface FilterBarProps {
@@ -13,11 +20,13 @@ interface FilterBarProps {
   setUseAiSearch: (val: boolean) => void;
   supplierFilterId?: string | number | null;
   onClearSupplierFilter?: () => void;
+  inverterFilters?: InverterFilterCriteria;
+  setInverterFilters?: (filters: InverterFilterCriteria) => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({ 
   lang, activeFilter, setFilter, searchTerm, setSearchTerm, useAiSearch, setUseAiSearch,
-  supplierFilterId, onClearSupplierFilter
+  supplierFilterId, onClearSupplierFilter, inverterFilters, setInverterFilters
 }) => {
   const t = translations[lang];
   const isAr = lang === 'ar';
@@ -91,6 +100,143 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </button>
         ))}
       </div>
+
+      {/* Dedicated Structured Inverter Classification Filter Bar */}
+      {activeFilter.category === 'inverters' && inverterFilters && setInverterFilters && (
+        <div className="bg-solar-card border border-solar-border/80 rounded-2xl p-3.5 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cpu size={15} className="text-solar-blue" />
+              <span className="text-xs font-black text-solar-text">
+                {isAr ? 'تصنيف محولات الطاقة (Inverter Classification)' : 'Inverter Classification & Specs'}
+              </span>
+            </div>
+            {(inverterFilters.type !== 'all' || inverterFilters.phase !== 'all' || inverterFilters.powerRange !== 'all' || inverterFilters.application !== 'all' || inverterFilters.batterySupport !== 'all') && (
+              <button
+                onClick={() => setInverterFilters({
+                  type: 'all',
+                  phase: 'all',
+                  powerRange: 'all',
+                  application: 'all',
+                  batterySupport: 'all'
+                })}
+                className="text-[11px] font-bold text-solar-blue hover:underline flex items-center gap-1"
+              >
+                <X size={12} />
+                {isAr ? 'إعادة ضبط تصنيف الإنفرتر' : 'Reset Inverter Filters'}
+              </button>
+            )}
+          </div>
+
+          {/* 1. Inverter Main Type Pills (Strict: On-Grid, Hybrid, Off-Grid, Pump Inverter) */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-black text-solar-muted uppercase tracking-wider block">
+              {isAr ? 'نوع الإنفرتر الأساسي (Main Type)' : 'Inverter Main Type'}
+            </span>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide -mx-0.5 px-0.5">
+              <button
+                onClick={() => setInverterFilters({ ...inverterFilters, type: 'all' })}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${inverterFilters.type === 'all' ? 'bg-solar-blue text-white shadow-xs' : 'bg-solar-bg text-solar-muted hover:text-solar-text border border-solar-border'}`}
+              >
+                {isAr ? 'جميع الأنواع' : 'All Types'}
+              </button>
+              {INVERTER_MAIN_TYPES.map((tType) => (
+                <button
+                  key={tType}
+                  onClick={() => setInverterFilters({ ...inverterFilters, type: tType })}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all shrink-0 ${inverterFilters.type === tType ? 'bg-solar-blue text-white shadow-sm ring-2 ring-solar-blue/20' : 'bg-solar-bg text-solar-muted hover:text-solar-text border border-solar-border'}`}
+                >
+                  {tType === 'On-Grid' ? (isAr ? 'On-Grid (متصل بالشبكة)' : 'On-Grid') :
+                   tType === 'Hybrid' ? (isAr ? 'Hybrid (هجين/مختلط)' : 'Hybrid') :
+                   tType === 'Off-Grid' ? (isAr ? 'Off-Grid (منفصل عن الشبكة)' : 'Off-Grid') :
+                   (isAr ? 'Pump Inverter (طلمبات ري)' : 'Pump Inverter')}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 2. Secondary Structured Spec Selectors: Phase, Power Range, Battery, Application */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-solar-border/40">
+            {/* Phase */}
+            <div>
+              <label className="text-[10px] font-black text-solar-muted uppercase tracking-wider block mb-1">
+                {isAr ? 'الطور (Phase)' : 'Phase'}
+              </label>
+              <select
+                value={inverterFilters.phase || 'all'}
+                onChange={(e) => setInverterFilters({ ...inverterFilters, phase: e.target.value as any })}
+                className="w-full bg-solar-bg border border-solar-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-solar-text outline-none focus:border-solar-blue"
+              >
+                <option value="all">{isAr ? 'جميع الأطوار' : 'All Phases'}</option>
+                <option value="Single Phase">{isAr ? 'Single Phase (سنجل فاز)' : 'Single Phase'}</option>
+                <option value="Three Phase">{isAr ? 'Three Phase (3 فاز)' : 'Three Phase'}</option>
+              </select>
+            </div>
+
+            {/* Power Range Helper */}
+            <div>
+              <label className="text-[10px] font-black text-solar-muted uppercase tracking-wider block mb-1">
+                {isAr ? 'نطاق القدرة (Power Range)' : 'Power Range'}
+              </label>
+              <select
+                value={inverterFilters.powerRange || 'all'}
+                onChange={(e) => setInverterFilters({ ...inverterFilters, powerRange: e.target.value as any })}
+                className="w-full bg-solar-bg border border-solar-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-solar-text outline-none focus:border-solar-blue"
+              >
+                <option value="all">{isAr ? 'جميع القدرات' : 'All Power Ranges'}</option>
+                {INVERTER_POWER_RANGES.map(pr => (
+                  <option key={pr} value={pr}>{pr}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Battery Support */}
+            <div>
+              <label className="text-[10px] font-black text-solar-muted uppercase tracking-wider block mb-1">
+                {isAr ? 'دعم البطارية (Battery)' : 'Battery Support'}
+              </label>
+              <select
+                value={inverterFilters.batterySupport === undefined ? 'all' : String(inverterFilters.batterySupport)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setInverterFilters({ 
+                    ...inverterFilters, 
+                    batterySupport: val === 'all' ? 'all' : val === 'true' 
+                  });
+                }}
+                className="w-full bg-solar-bg border border-solar-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-solar-text outline-none focus:border-solar-blue"
+              >
+                <option value="all">{isAr ? 'الكل (مع وبدون)' : 'All (With/Without)'}</option>
+                <option value="true">{isAr ? 'يدعم بطارية (Battery Supported)' : 'With Battery Support'}</option>
+                <option value="false">{isAr ? 'بدون بطارية (No Battery Required)' : 'Without Battery'}</option>
+              </select>
+            </div>
+
+            {/* Application */}
+            <div>
+              <label className="text-[10px] font-black text-solar-muted uppercase tracking-wider block mb-1">
+                {isAr ? 'مجال الاستخدام (Application)' : 'Application'}
+              </label>
+              <select
+                value={inverterFilters.application || 'all'}
+                onChange={(e) => setInverterFilters({ ...inverterFilters, application: e.target.value as any })}
+                className="w-full bg-solar-bg border border-solar-border rounded-xl px-2.5 py-1.5 text-xs font-bold text-solar-text outline-none focus:border-solar-blue"
+              >
+                <option value="all">{isAr ? 'جميع الاستخدامات' : 'All Applications'}</option>
+                {INVERTER_APPLICATIONS.map(app => (
+                  <option key={app} value={app}>
+                    {app === 'Residential' ? (isAr ? 'سكني (Residential)' : 'Residential') :
+                     app === 'Commercial' ? (isAr ? 'تجاري (Commercial)' : 'Commercial') :
+                     app === 'Industrial' ? (isAr ? 'صناعي (Industrial)' : 'Industrial') :
+                     app === 'Agricultural' ? (isAr ? 'زراعي (Agricultural)' : 'Agricultural') :
+                     (isAr ? 'طلمبات شمسية (Solar Pumping)' : 'Solar Pumping')}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between pt-1">
         <div className="flex items-center gap-2">

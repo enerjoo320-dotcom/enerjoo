@@ -15,6 +15,9 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Product, Supplier, Category, DimensionUnit, ProductReview, SolarRequest, SolarRequestStatus, Customer, Quotation, QuotationStatus } from '../types';
+import { classifyInverter } from '../utils/inverterClassification';
+import { parseInverterQuery, matchInverters } from '../utils/inverterMatching';
+import { StructuredInverter, InverterQueryCriteria, InverterMatchResult } from '../types/inverter';
 import { normalizeEgyptianPhone } from '../utils/phoneUtils';
 import { formatDateOnly } from '../utils/dateUtils';
 import { isRawUidOrId } from '../utils/supplierUtils';
@@ -632,6 +635,41 @@ export const getProductById = async (productId: string | number): Promise<Produc
     console.error(`Failed to get product ${productId} from Cloudflare D1:`, error);
     return null;
   }
+};
+
+/**
+ * Fetch all inverters classified into the standardized StructuredInverter contract.
+ * Single Source of Truth for frontend views, comparisons and calculators.
+ */
+export const getStructuredInverters = async (): Promise<StructuredInverter[]> => {
+  try {
+    const allProds = await getProducts();
+    const inverterProds = allProds.filter(p => p.category === 'inverters');
+    return inverterProds.map(classifyInverter);
+  } catch (error) {
+    console.error('Failed to get structured inverters:', error);
+    return [];
+  }
+};
+
+/**
+ * Fetch single structured inverter by ID
+ */
+export const getStructuredInverterById = async (productId: string | number): Promise<StructuredInverter | null> => {
+  const prod = await getProductById(productId);
+  if (!prod || prod.category !== 'inverters') return null;
+  return classifyInverter(prod);
+};
+
+/**
+ * Match inverters against customer criteria using the 10-step AI recommendation logic
+ */
+export const matchCatalogInverters = async (
+  criteriaOrQuery: string | InverterQueryCriteria
+): Promise<InverterMatchResult[]> => {
+  const inverters = await getStructuredInverters();
+  const criteria = typeof criteriaOrQuery === 'string' ? parseInverterQuery(criteriaOrQuery) : criteriaOrQuery;
+  return matchInverters(inverters, criteria);
 };
 
 /**

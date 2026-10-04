@@ -38,6 +38,8 @@ import {
   subscribeToEnergyExchange, 
   applySolarPanelPricingToProducts 
 } from './services/energyExchangeService';
+import { InverterFilterCriteria } from './types/inverter';
+import { classifyInverter } from './utils/inverterClassification';
 import { performSemanticSearch, SemanticSearchResult } from './services/geminiService';
 import { calculateRelevanceScore, hybridSort } from './utils/searchUtils';
 import { getSupplierDisplayName, getSupplierAvatarInitial } from './utils/supplierUtils';
@@ -96,6 +98,13 @@ export default function App() {
   });
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
     minPower: '', maxPower: '', minPrice: '', maxPrice: '', minEfficiency: '', brand: 'all'
+  });
+  const [inverterFilters, setInverterFilters] = useState<InverterFilterCriteria>({
+    type: 'all',
+    phase: 'all',
+    powerRange: 'all',
+    application: 'all',
+    batterySupport: 'all'
   });
   
   // Supplier/Admin Management States
@@ -481,6 +490,29 @@ export default function App() {
       items = items.filter(p => p.category === activeFilters.category);
     }
 
+    // Structured Inverter Classification Filter (Single Source of Truth)
+    if (activeFilters.category === 'inverters') {
+      items = items.filter(p => {
+        const inv = classifyInverter(p);
+        if (inverterFilters.type && inverterFilters.type !== 'all' && inv.type !== inverterFilters.type) {
+          return false;
+        }
+        if (inverterFilters.phase && inverterFilters.phase !== 'all' && inv.phase !== inverterFilters.phase) {
+          return false;
+        }
+        if (inverterFilters.powerRange && inverterFilters.powerRange !== 'all' && inv.power_range !== inverterFilters.powerRange) {
+          return false;
+        }
+        if (inverterFilters.batterySupport !== undefined && inverterFilters.batterySupport !== 'all') {
+          if (inv.battery_support !== inverterFilters.batterySupport) return false;
+        }
+        if (inverterFilters.application && inverterFilters.application !== 'all') {
+          if (!inv.application.includes(inverterFilters.application)) return false;
+        }
+        return true;
+      });
+    }
+
     // Advanced Filters (Power, Price, Efficiency, Brand)
     items = items.filter(p => {
       const matchesPower = (!advancedFilters.minPower || p.power >= parseInt(advancedFilters.minPower)) &&
@@ -523,7 +555,7 @@ export default function App() {
     });
 
     return items;
-  }, [products, searchTerm, activeFilters, advancedFilters, isAr, useAiSearch, semanticResults, supplierFilterId]);
+  }, [products, searchTerm, activeFilters, advancedFilters, inverterFilters, isAr, useAiSearch, semanticResults, supplierFilterId]);
 
   const toggleCompare = (product: Product) => {
     setCompareList(prev => {
@@ -697,6 +729,8 @@ export default function App() {
                 setUseAiSearch={setUseAiSearch}
                 supplierFilterId={supplierFilterId}
                 onClearSupplierFilter={() => handleFilterSupplier(null)}
+                inverterFilters={inverterFilters}
+                setInverterFilters={setInverterFilters}
               />
             </div>
             {isAiSearching && (

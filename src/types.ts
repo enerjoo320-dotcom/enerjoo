@@ -1,3 +1,5 @@
+export * from './types/inverter';
+
 export type Category = 
   | 'all' 
   | 'panels' 

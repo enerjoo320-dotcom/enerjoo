@@ -5,6 +5,7 @@ import { uploadProductImage } from '../services/uploadService';
 import { autoCompressImage, formatFileSize, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
 import { Product } from '../types';
 import { parseDimensionsString } from '../services/firestoreService';
+import { classifyInverterType, classifyInverterPhase } from '../utils/inverterClassification';
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
@@ -260,6 +261,10 @@ const extractInitialFormData = (data?: Product | null) => {
     quantity: (specs.quantity || '').toString(),
     color: (specs.color || '').toString(),
     status: (data.status || 'available') as 'available' | 'limited' | 'out_of_stock',
+    phase: (specs.phase || (data as any).phase || (category === 'inverters' ? classifyInverterPhase(data) : 'Three Phase')).toString(),
+    batterySupport: specs.batterySupport !== undefined ? Boolean(specs.batterySupport) : (category === 'inverters' ? (finalType === 'Hybrid' || finalType === 'Off-Grid') : false),
+    mpptCount: (specs.mpptCount || specs.numberOfMppt || (data as any).mppt_count || '').toString(),
+    maxPvVoltage: (specs.maxPvVoltage || (data as any).max_pv_open_circuit_voltage_v || '').toString(),
     dimLength,
     dimWidth,
     dimThickness,
@@ -575,6 +580,10 @@ export const ProductForm: React.FC<{
           type: formData.type,
           productType: formData.type,
           technology: formData.type,
+          phase: formData.category === 'inverters' ? formData.phase : undefined,
+          batterySupport: formData.category === 'inverters' ? formData.batterySupport : undefined,
+          mpptCount: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount) : undefined,
+          maxPvVoltage: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage) : undefined,
           voltage: formData.voltage,
           vmpV: formData.category === 'panels' ? formData.voltage : undefined,
           nominalVoltage: formData.voltage,
@@ -796,17 +805,83 @@ export const ProductForm: React.FC<{
         )}
 
         {fields.includes('type') && (
-          <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.type}</label>
-            <input 
-              type="text" 
-              value={formData.type}
-              onChange={e => setFormData(p => ({...p, type: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="Monocrystalline / Hybrid / Gel"
-              required
-            />
-          </div>
+          formData.category === 'inverters' ? (
+            <div className="col-span-full bg-solar-card border border-solar-blue/20 rounded-2xl p-4 space-y-3.5 shadow-xs">
+              <div className="flex items-center gap-2">
+                <Zap size={16} className="text-solar-blue" />
+                <span className="text-xs font-black text-solar-text">
+                  {isAr ? 'تصنيف الإنفرتر المعتمد (Inverter Classification)' : 'Inverter Classification & Phase'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Main Inverter Type */}
+                <div className="space-y-1 text-left">
+                  <label className="text-[10px] font-black text-solar-muted uppercase ml-1">
+                    {isAr ? 'نوع الإنفرتر الأساسي' : 'Inverter Main Type'}
+                  </label>
+                  <select
+                    value={formData.type || 'On-Grid'}
+                    onChange={e => {
+                      const newType = e.target.value;
+                      setFormData(p => ({
+                        ...p,
+                        type: newType,
+                        batterySupport: newType === 'Hybrid' || newType === 'Off-Grid'
+                      }));
+                    }}
+                    className="w-full bg-solar-bg border border-solar-border rounded-xl px-3 py-2.5 text-xs font-black text-solar-text outline-none focus:border-solar-blue"
+                  >
+                    <option value="On-Grid">On-Grid (متصل بالشبكة)</option>
+                    <option value="Hybrid">Hybrid (هايبرد / هجين)</option>
+                    <option value="Off-Grid">Off-Grid (منفصل عن الشبكة)</option>
+                    <option value="Pump Inverter">Pump Inverter (طلمبات ري)</option>
+                  </select>
+                </div>
+
+                {/* 2. Phase */}
+                <div className="space-y-1 text-left">
+                  <label className="text-[10px] font-black text-solar-muted uppercase ml-1">
+                    {isAr ? 'الطور (Phase)' : 'Phase'}
+                  </label>
+                  <select
+                    value={formData.phase || 'Three Phase'}
+                    onChange={e => setFormData(p => ({ ...p, phase: e.target.value }))}
+                    className="w-full bg-solar-bg border border-solar-border rounded-xl px-3 py-2.5 text-xs font-black text-solar-text outline-none focus:border-solar-blue"
+                  >
+                    <option value="Three Phase">Three Phase (3 فاز)</option>
+                    <option value="Single Phase">Single Phase (1 فاز)</option>
+                  </select>
+                </div>
+
+                {/* 3. Battery Support */}
+                <div className="space-y-1 text-left">
+                  <label className="text-[10px] font-black text-solar-muted uppercase ml-1">
+                    {isAr ? 'دعم البطاريات' : 'Battery Storage'}
+                  </label>
+                  <select
+                    value={formData.batterySupport ? 'true' : 'false'}
+                    onChange={e => setFormData(p => ({ ...p, batterySupport: e.target.value === 'true' }))}
+                    className="w-full bg-solar-bg border border-solar-border rounded-xl px-3 py-2.5 text-xs font-black text-solar-text outline-none focus:border-solar-blue"
+                  >
+                    <option value="false">{isAr ? 'لا (بدون بطارية - On-Grid)' : 'No (Grid-tied)'}</option>
+                    <option value="true">{isAr ? 'نعم (يدعم بنك بطاريات)' : 'Yes (Battery Ready)'}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 text-left">
+              <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.type}</label>
+              <input 
+                type="text" 
+                value={formData.type}
+                onChange={e => setFormData(p => ({...p, type: e.target.value}))}
+                className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+                placeholder="Monocrystalline / Hybrid / Gel"
+                required
+              />
+            </div>
+          )
         )}
 
         {fields.includes('mppt') && (

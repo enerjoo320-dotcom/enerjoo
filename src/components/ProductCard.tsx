@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Power, Zap, Shield, ArrowLeftRight, ShieldCheck, Grid, MapPin, Edit, Heart, Sparkles, Building2, Trash2 } from 'lucide-react';
+import { Power, Zap, Shield, ArrowLeftRight, ShieldCheck, Grid, MapPin, Edit, Heart, Sparkles, Building2, Trash2, Cpu, Battery as BatteryIcon } from 'lucide-react';
 import { Product } from '../types';
+import { classifyInverter } from '../utils/inverterClassification';
 import { translations } from '../translations';
 import { motion, useMotionValue, useTransform } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -88,28 +89,45 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     }
     
     if (product.category === 'inverters') {
-      const pKw = specsObj.powerKw 
-        ? String(specsObj.powerKw)
-        : (specsObj.ratedPowerKw ? `${specsObj.ratedPowerKw}kW` : (product.power ? `${product.power >= 1000 ? product.power / 1000 : product.power}${product.power >= 1000 ? 'kW' : 'W'}` : ''));
-      
-      const effVal = product.efficiency ? `${product.efficiency}%` : (specsObj.peakEfficiency ? `${specsObj.peakEfficiency}%` : '');
+      const inv = classifyInverter(product);
       const specs = [];
-      if (pKw) {
-        specs.push({ label: t.powerKw, value: pKw, icon: <Power size={14} /> });
+      
+      // 1. Rated AC Power
+      specs.push({
+        label: isAr ? 'القدرة المقدرة' : 'Rated Power',
+        value: `${inv.rated_power_kw} kW`,
+        icon: <Power size={14} className="text-solar-blue" />
+      });
+
+      // 2. Phase
+      specs.push({
+        label: isAr ? 'الطور' : 'Phase',
+        value: inv.phase === 'Three Phase' ? (isAr ? '3 فاز' : '3-Phase') : (isAr ? '1 فاز' : '1-Phase'),
+        icon: <Cpu size={14} className="text-solar-blue" />
+      });
+
+      // 3. Battery Support or Efficiency
+      if (inv.battery_support) {
+        specs.push({
+          label: isAr ? 'دعم البطاريات' : 'Battery Storage',
+          value: isAr ? 'يدعم بطارية' : 'Battery Supported',
+          icon: <BatteryIcon size={14} className="text-emerald-500" />
+        });
+      } else if (typeof inv.efficiency_percent === 'number') {
+        specs.push({
+          label: t.efficiency,
+          value: `${inv.efficiency_percent}%`,
+          icon: <Zap size={14} className="text-solar-warning" />
+        });
+      } else {
+        specs.push({
+          label: isAr ? 'التصنيف' : 'Type',
+          value: inv.type,
+          icon: <Grid size={14} />
+        });
       }
-      if (effVal) {
-        specs.push({ label: t.efficiency, value: effVal, icon: <Zap size={14} /> });
-      }
-      const voltVal = specsObj.voltage || specsObj.acVoltageV;
-      if (voltVal) {
-        const v = String(voltVal);
-        specs.push({ label: t.voltage, value: /v|فولت/i.test(v) ? v : `${v}V`, icon: <Zap size={14} /> });
-      }
-      while (specs.length < 3) {
-        specs.push(...common);
-        break;
-      }
-      return specs.slice(0, 3);
+
+      return specs;
     }
 
     if (product.category === 'batteries') {
@@ -187,7 +205,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         onClick={onClick}
         className="relative z-10 bg-solar-card rounded-[26px] sm:rounded-3xl p-3.5 sm:p-4 border border-solar-border shadow-xs hover:shadow-xl hover:shadow-solar-blue/5 transition-all cursor-pointer select-none"
       >
-        <div className="relative aspect-[16/10] sm:aspect-video rounded-2xl overflow-hidden mb-3.5 bg-solar-bg">
+        <div className="relative aspect-[16/10] sm:aspect-video rounded-2xl overflow-hidden mb-3.5 bg-solar-bg" data-nosnippet>
           <img 
             src={product.image || DEFAULT_PRODUCT_IMAGE} 
             onError={(e) => {
@@ -195,6 +213,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             }}
             referrerPolicy="no-referrer" 
             loading="lazy"
+            data-nosnippet
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none" 
             alt={isAr ? product.nameAr || product.name : product.name} 
           />
@@ -227,6 +246,24 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               <span translate="no" className="bg-solar-blue/90 backdrop-blur-md text-white text-[10px] font-black px-2.5 py-1 rounded-lg pointer-events-auto shadow-xs tracking-wide uppercase notranslate">
                 {product.brand}
               </span>
+              {product.category === 'inverters' && (() => {
+                const inv = classifyInverter(product);
+                const typeColor = 
+                  inv.type === 'On-Grid' ? 'bg-emerald-600/95 text-white' :
+                  inv.type === 'Hybrid' ? 'bg-indigo-600/95 text-white' :
+                  inv.type === 'Off-Grid' ? 'bg-amber-600/95 text-white' :
+                  'bg-cyan-600/95 text-white';
+                return (
+                  <div className="flex flex-wrap gap-1 pointer-events-auto">
+                    <span className={`${typeColor} text-[9px] font-black px-2 py-0.5 rounded-md shadow-xs`}>
+                      {inv.type}
+                    </span>
+                    <span className="bg-slate-900/80 backdrop-blur-sm text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md shadow-xs">
+                      {inv.phase === 'Three Phase' ? (isAr ? '3 فاز' : '3-Phase') : (isAr ? '1 فاز' : '1-Phase')}
+                    </span>
+                  </div>
+                );
+              })()}
               {isVerified && (
                 <span translate="no" className="bg-solar-success text-white text-[9px] font-black px-2 py-0.5 rounded-lg pointer-events-auto shadow-xs flex items-center gap-1 notranslate">
                   <ShieldCheck size={11} />
