@@ -61,6 +61,8 @@ export interface Product {
   notes?: string;
   pricePerWatt?: number;
   exchangeBrand?: string;
+  max_pv_open_circuit_voltage_v?: number;
+  mppt_count?: number;
 }
 
 export const SOLAR_PANEL_BRANDS = [

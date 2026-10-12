@@ -285,6 +285,9 @@ function mapD1ProductToProduct(d1Item: any): Product {
     maxContinuousDischargeCurrentA: d1Item.max_continuous_discharge_current_a ?? parsedSpecs.maxContinuousDischargeCurrentA,
     cycleLife: d1Item.cycle_life ?? parsedSpecs.cycleLife,
     maxPvOpenCircuitVoltageV: d1Item.max_pv_open_circuit_voltage_v ?? parsedSpecs.maxPvOpenCircuitVoltageV,
+    maxPvVoltage: d1Item.max_pv_open_circuit_voltage_v ?? parsedSpecs.maxPvVoltage ?? parsedSpecs.maxPvOpenCircuitVoltageV,
+    mpptCount: d1Item.mppt_count ?? parsedSpecs.mpptCount ?? parsedSpecs.numberOfMppt,
+    numberOfMppt: d1Item.mppt_count ?? parsedSpecs.numberOfMppt ?? parsedSpecs.mpptCount,
     maxPvArrayPowerW: d1Item.max_pv_array_power_w ?? parsedSpecs.maxPvArrayPowerW,
     pvMpptVoltageRangeV: d1Item.pv_mppt_voltage_range_v || parsedSpecs.pvMpptVoltageRangeV || parsedSpecs.mppt || '',
     mppt: d1Item.pv_mppt_voltage_range_v || parsedSpecs.mppt || parsedSpecs.pvMpptVoltageRangeV || '',
@@ -461,7 +464,9 @@ function mapD1ProductToProduct(d1Item: any): Product {
     supplierId,
     datasheetUrl,
     specs,
-    suppliers
+    suppliers,
+    max_pv_open_circuit_voltage_v: d1Item.max_pv_open_circuit_voltage_v !== undefined && d1Item.max_pv_open_circuit_voltage_v !== null && d1Item.max_pv_open_circuit_voltage_v !== '' ? Number(d1Item.max_pv_open_circuit_voltage_v) : undefined,
+    mppt_count: d1Item.mppt_count !== undefined && d1Item.mppt_count !== null && d1Item.mppt_count !== '' ? Number(d1Item.mppt_count) : undefined
   };
 }
 
@@ -590,6 +595,12 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
     if (product.specs.technology) {
       payload.technology = product.specs.technology;
     }
+    if (product.specs.maxPvVoltage || product.specs.maxPvOpenCircuitVoltageV || (product as any).max_pv_open_circuit_voltage_v) {
+      payload.max_pv_open_circuit_voltage_v = Number(product.specs.maxPvVoltage || product.specs.maxPvOpenCircuitVoltageV || (product as any).max_pv_open_circuit_voltage_v);
+    }
+    if (product.specs.mpptCount || product.specs.numberOfMppt || (product as any).mppt_count) {
+      payload.mppt_count = Number(product.specs.mpptCount || product.specs.numberOfMppt || (product as any).mppt_count);
+    }
     if (product.specs.description || product.specs.notes) {
       payload.notes = product.specs.description || product.specs.notes;
     }
@@ -644,7 +655,7 @@ export const getProductById = async (productId: string | number): Promise<Produc
 export const getStructuredInverters = async (): Promise<StructuredInverter[]> => {
   try {
     const allProds = await getProducts();
-    const inverterProds = allProds.filter(p => p.category === 'inverters');
+    const inverterProds = allProds.filter(p => (p.category || '').toLowerCase().includes('invert'));
     return inverterProds.map(classifyInverter);
   } catch (error) {
     console.error('Failed to get structured inverters:', error);
@@ -657,7 +668,7 @@ export const getStructuredInverters = async (): Promise<StructuredInverter[]> =>
  */
 export const getStructuredInverterById = async (productId: string | number): Promise<StructuredInverter | null> => {
   const prod = await getProductById(productId);
-  if (!prod || prod.category !== 'inverters') return null;
+  if (!prod || !(prod.category || '').toLowerCase().includes('invert')) return null;
   return classifyInverter(prod);
 };
 

@@ -4,7 +4,14 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { classifyInverter } from "./src/utils/inverterClassification";
-import { parseInverterQuery, matchInverters } from "./src/utils/inverterMatching";
+import { 
+  parseInverterQuery, 
+  matchInverters,
+  buildInverterComparisonTable,
+  buildAgentInverterRecommendation
+} from "./src/utils/inverterMatching";
+import { processConversationalChat } from "./src/utils/enerjooConversationalAgent";
+import { runEnerjooSolarConsultant } from "./src/utils/enerjooSolarConsultant";
 import { 
   INVERTER_MAIN_TYPES, 
   INVERTER_PHASES, 
@@ -563,58 +570,87 @@ async function startServer() {
   app.get("/api/v1/inverters/schema", (req, res) => {
     res.json({
       name: "enerjoo_inverter_catalog",
-      description: "Structured Inverter Database and AI Matching Tool for Enerjoo Egypt. Provides deterministic compatibility and real catalog lookup without hallucinations.",
+      description: "Structured Inverter Database and AI Sales Recommendation Agent for Enerjoo Egypt. Real catalog Single Source of Truth with strict deterministic filtering, comparison matrix, best match, alternatives, best value, and zero hallucinations.",
+      catalog_source: "Enerjoo Cloudflare D1 Catalog",
       inverter_types: INVERTER_MAIN_TYPES,
       phases: INVERTER_PHASES,
       applications: INVERTER_APPLICATIONS,
       power_ranges: INVERTER_POWER_RANGES,
-      tool_signature: {
-        method: "POST",
-        endpoint: "/api/v1/inverters/match",
-        parameters: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "Customer natural language request in Arabic or English, e.g. 'عايز انفرتر 100 كيلو 3 فاز On-Grid لمصنع' or '10kW Hybrid 3-phase with battery'"
-            },
-            type: {
-              type: "string",
-              enum: INVERTER_MAIN_TYPES,
-              description: "Strict inverter type: 'On-Grid', 'Hybrid', 'Off-Grid', or 'Pump Inverter'. No microinverters."
-            },
-            rated_power_kw: {
-              type: "number",
-              description: "Exact nominal AC power in kW (e.g. 100, 15, 10, 5)."
-            },
-            phase: {
-              type: "string",
-              enum: INVERTER_PHASES,
-              description: "'Single Phase' or 'Three Phase'."
-            },
-            application: {
-              type: "string",
-              enum: INVERTER_APPLICATIONS,
-              description: "'Residential', 'Commercial', 'Industrial', 'Agricultural', or 'Solar Pumping'."
-            },
-            battery_required: {
-              type: "boolean",
-              description: "Whether the system requires energy storage battery support."
-            },
-            limit: {
-              type: "integer",
-              default: 5,
-              description: "Max number of ranked recommendations to return."
+      endpoints: {
+        match_and_recommend: {
+          method: "POST",
+          endpoint: "/api/v1/inverters/match",
+          description: "Full AI sales & product recommendation engine. Returns Best Match, Alternative, Best Value, Comparison Table, and Arabic conversational pitch.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "Customer natural language request in Arabic or English, e.g. 'عايز انفرتر 100 كيلو 3 فاز On-Grid لمصنع' or 'عايز Hybrid 10 كيلو للبيت مع بطارية'"
+              },
+              type: {
+                type: "string",
+                enum: INVERTER_MAIN_TYPES,
+                description: "Strict inverter type: 'On-Grid', 'Hybrid', 'Off-Grid', or 'Pump Inverter'. No microinverters."
+              },
+              rated_power_kw: {
+                type: "number",
+                description: "Exact nominal AC power in kW (e.g. 100, 50, 15, 10, 5)."
+              },
+              phase: {
+                type: "string",
+                enum: INVERTER_PHASES,
+                description: "'Single Phase' or 'Three Phase'."
+              },
+              application: {
+                type: "string",
+                enum: INVERTER_APPLICATIONS,
+                description: "'Residential', 'Commercial', 'Industrial', 'Agricultural', or 'Solar Pumping'."
+              },
+              battery_required: {
+                type: "boolean",
+                description: "Whether the system requires energy storage battery support."
+              },
+              limit: {
+                type: "integer",
+                default: 5,
+                description: "Max number of ranked recommendations to return."
+              }
             }
           }
+        },
+        compare: {
+          method: "POST",
+          endpoint: "/api/v1/inverters/compare",
+          description: "Compare 2 or 3 inverters from catalog side by side on power, phase, efficiency, MPPT, price, and battery support.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_ids: {
+                type: "array",
+                items: { type: "string" },
+                description: "List of real Enerjoo product IDs to compare (e.g. ['PROD-1790087344818-P6QHP', 'PROD-1790086478120-XPQMN'])"
+              },
+              query: {
+                type: "string",
+                description: "Comparison query in natural language, e.g. 'إيه الفرق بين Huawei 100kW و Huawei 50kW؟'"
+              }
+            }
+          }
+        },
+        list_all: {
+          method: "GET",
+          endpoint: "/api/v1/inverters",
+          description: "List and filter all structured inverters from Enerjoo catalog."
         }
       }
     });
   });
 
   /**
-   * AI Matching Endpoint for n8n AI Agent and Enerjoo Solar Advisor
-   * Translates query or structured criteria into real catalog recommendations
+   * AI Sales & Matching Endpoint for n8n AI Agent and Enerjoo Solar Advisor
+   * Translates customer natural language or structured criteria into verified catalog recommendations
+   * Flow: Understand -> Search -> Filter -> Compare -> Differentiate -> Rank -> Recommend -> Explain -> Real IDs
    */
   app.post("/api/v1/inverters/match", async (req, res) => {
     try {
@@ -643,22 +679,151 @@ async function startServer() {
       }
 
       const allInverters = await fetchAllStructuredInverters();
-      const matchResults = matchInverters(allInverters, criteria);
+      const agentRec = buildAgentInverterRecommendation(allInverters, criteria, query);
 
       const maxLimit = Math.min(Math.max(1, Number(limit) || 5), 25);
-      const topMatches = matchResults.slice(0, maxLimit);
+      const topMatches = agentRec.all_compatible_matches.slice(0, maxLimit);
 
       res.json({
         success: true,
+        catalog_source: "Enerjoo",
         criteria,
+        exact_match_found: agentRec.exact_match_found,
+        summary_ar: agentRec.summary_ar,
+        summary_en: agentRec.summary_en,
+        best_match: agentRec.best_match,
+        alternative: agentRec.alternative,
+        best_value: agentRec.best_value,
+        comparison_table: agentRec.comparison_table,
+        comparison_analysis_ar: agentRec.comparison_analysis_ar,
+        comparison_analysis_en: agentRec.comparison_analysis_en,
+        conversational_response_ar: agentRec.conversational_response_ar,
+        conversational_response_en: agentRec.conversational_response_en,
         total_catalog_inverters: allInverters.length,
-        compatible_count: matchResults.filter(m => m.isCompatible).length,
+        compatible_count: agentRec.all_compatible_count,
         results_count: topMatches.length,
-        top_matches: topMatches
+        top_matches: topMatches,
+        closest_alternatives: agentRec.closest_alternatives
       });
     } catch (err: any) {
       console.error("Error in /api/v1/inverters/match:", err);
       res.status(500).json({ success: false, error: err?.message || "Internal matching error" });
+    }
+  });
+
+  /**
+   * Dedicated Conversational Agent Endpoint for n8n AI Agent and Website
+   */
+  app.post("/api/v1/agent/recommend", async (req, res) => {
+    try {
+      const { query, prompt, chatInput } = req.body;
+      const userText = (query || prompt || chatInput || "").trim();
+
+      const criteria = parseInverterQuery(userText);
+      if (req.body.type && INVERTER_MAIN_TYPES.includes(req.body.type)) {
+        criteria.type = req.body.type;
+      }
+      if (req.body.rated_power_kw && !isNaN(Number(req.body.rated_power_kw))) {
+        criteria.rated_power_kw = Number(req.body.rated_power_kw);
+      }
+      if (req.body.phase && INVERTER_PHASES.includes(req.body.phase)) {
+        criteria.phase = req.body.phase;
+      }
+      if (req.body.application && INVERTER_APPLICATIONS.includes(req.body.application)) {
+        criteria.application = req.body.application;
+      }
+      if (typeof req.body.battery_required === "boolean") {
+        criteria.battery_required = req.body.battery_required;
+      }
+
+      const allInverters = await fetchAllStructuredInverters();
+      const agentRec = buildAgentInverterRecommendation(allInverters, criteria, userText);
+
+      res.json(agentRec);
+    } catch (err: any) {
+      console.error("Error in /api/v1/agent/recommend:", err);
+      res.status(500).json({ success: false, error: err?.message || "Recommendation error" });
+    }
+  });
+
+  /**
+   * Dedicated Inverter Comparison Endpoint
+   * Compares 2 or 3 inverters from catalog by product_id or search query
+   */
+  app.post("/api/v1/inverters/compare", async (req, res) => {
+    try {
+      const { product_ids, query } = req.body;
+      const allInverters = await fetchAllStructuredInverters();
+      let selectedInverters: StructuredInverter[] = [];
+
+      if (Array.isArray(product_ids) && product_ids.length > 0) {
+        selectedInverters = allInverters.filter(i => product_ids.map(String).includes(String(i.id)));
+      } else if (query && typeof query === "string") {
+        const q = query.toLowerCase();
+        // Match inverters mentioned in query
+        selectedInverters = allInverters.filter(i => {
+          const matchTerms = [
+            i.model.toLowerCase(),
+            i.brand.toLowerCase(),
+            `${i.rated_power_kw}kw`,
+            `${i.rated_power_kw} kw`,
+            `${i.rated_power_kw} كيلو`
+          ];
+          return matchTerms.some(term => q.includes(term));
+        }).slice(0, 3);
+      }
+
+      if (selectedInverters.length < 2) {
+        // Fallback: pick the first 2 or 3 available inverters if insufficient specified
+        selectedInverters = allInverters.slice(0, 2);
+      }
+
+      const table = buildInverterComparisonTable(
+        selectedInverters[0], 
+        selectedInverters[1], 
+        selectedInverters[2]
+      );
+
+      // Generate differentiator explanation
+      const diffs: string[] = [];
+      const invA = selectedInverters[0];
+      const invB = selectedInverters[1];
+
+      if (invA.rated_power_kw !== invB.rated_power_kw) {
+        const diffP = invA.rated_power_kw - invB.rated_power_kw;
+        diffs.push(`القدرة: ${invA.brand} ${invA.model} (${invA.rated_power_kw} kW) ${diffP > 0 ? 'أعلى' : 'أقل'} من ${invB.brand} ${invB.model} (${invB.rated_power_kw} kW) بفارق ${Math.abs(diffP)} kW.`);
+      }
+      if (typeof invA.efficiency_percent === 'number' && typeof invB.efficiency_percent === 'number') {
+        const diffE = (invA.efficiency_percent - invB.efficiency_percent).toFixed(1);
+        diffs.push(`الكفاءة: ${invA.model} بكفاءة (${invA.efficiency_percent}%) مقابل (${invB.efficiency_percent}%) لـ ${invB.model} (فارق ${diffE}%).`);
+      }
+      if (invA.phase !== invB.phase) {
+        diffs.push(`الطور: ${invA.model} يدعم (${invA.phase}) بينما ${invB.model} يدعم (${invB.phase}).`);
+      }
+      if (invA.price > 0 && invB.price > 0) {
+        const diffPrice = invA.price - invB.price;
+        diffs.push(`السعر: فارق السعر بينهما حوالي ${Math.abs(diffPrice).toLocaleString('ar-EG')} ج.م (${diffPrice < 0 ? invA.model + ' أوفر' : invB.model + ' أوفر'}).`);
+      }
+
+      res.json({
+        success: true,
+        catalog_source: "Enerjoo",
+        products_compared: selectedInverters.map(i => ({
+          product_id: i.id,
+          brand: i.brand,
+          model: i.model,
+          rated_power_kw: i.rated_power_kw,
+          price: i.price,
+          availability: i.availability,
+          product_url: `/product/${i.id}`
+        })),
+        comparison_table: table,
+        differentiator_analysis_ar: diffs.join(' • '),
+        differentiator_analysis_en: diffs.join(' • ')
+      });
+    } catch (err: any) {
+      console.error("Error in /api/v1/inverters/compare:", err);
+      res.status(500).json({ success: false, error: err?.message || "Comparison error" });
     }
   });
 
@@ -858,6 +1023,42 @@ async function startServer() {
     }
   });
 
+  // Cloudflare Worker AI Chat Endpoint (/chat & /api/chat)
+  app.post(["/chat", "/api/chat"], async (req, res) => {
+    try {
+      const { message, history, sessionId, selectedProductIds } = req.body;
+      const userText = typeof message === "string" ? message.trim() : "";
+
+      const cfPayload: Record<string, any> = {
+        message: userText,
+        history: Array.isArray(history) ? history : []
+      };
+
+      if (sessionId && typeof sessionId === "string" && sessionId.trim()) {
+        cfPayload.sessionId = sessionId.trim();
+      }
+
+      if (Array.isArray(selectedProductIds) && selectedProductIds.length > 0) {
+        cfPayload.selectedProductIds = selectedProductIds;
+      }
+
+      const cfRes = await fetch("https://curly-resonance-da30.enerjoo320.workers.dev/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cfPayload)
+      });
+
+      const data = await cfRes.json();
+      return res.status(cfRes.status).json(data);
+    } catch (err: any) {
+      console.error("Error connecting to Cloudflare Worker chat:", err);
+      return res.status(502).json({
+        ok: false,
+        error: "Failed to connect to Cloudflare Worker chat"
+      });
+    }
+  });
+
   // Production n8n AI Agent Proxy (bypasses browser CORS & iframe origin restrictions)
   app.post("/api/n8n-chat", async (req, res) => {
     const N8N_PROD_URL = "https://enerjoo.app.n8n.cloud/webhook/798b6fd0-317b-47fc-9def-7fcf9dd04509/chat";
@@ -921,26 +1122,68 @@ async function startServer() {
         }
       }
 
-      // If n8n agent webhook is inactive or returned 404/error, seamlessly answer via built-in solar advisor
-      console.warn("n8n agent offline or unavailable, generating smart solar advisor response.");
-      const advisorReply = fallbackSolarChat([], true, { message: chatInput }, memoryExchangePrices);
-      return res.json({
-        output: advisorReply,
-        text: advisorReply,
-        message: advisorReply,
-        reply: advisorReply,
-        fallback: true
-      });
+      // If n8n agent webhook is inactive or returned 404/error, seamlessly answer via Enerjoo Conversational Intelligence Engine
+      console.warn("n8n agent offline or unavailable, routing to Enerjoo Conversational Intelligence Engine.");
+      
+      try {
+        const allInverters = await fetchAllStructuredInverters();
+        const sId = sessionId || `session-${Date.now()}`;
+        const chatResult = await processConversationalChat(
+          sId, 
+          chatInput || '', 
+          allInverters, 
+          req.body?.lang || 'ar'
+        );
+        return res.json({
+          output: chatResult.reply,
+          text: chatResult.reply,
+          message: chatResult.reply,
+          reply: chatResult.reply,
+          recommendation: chatResult.recommendation || null,
+          intent: chatResult.intent,
+          fallback: false
+        });
+      } catch (convErr) {
+        console.error("Error in processConversationalChat for /api/n8n-chat:", convErr);
+        const advisorReply = fallbackSolarChat([], true, { message: chatInput }, memoryExchangePrices);
+        return res.json({
+          output: advisorReply,
+          text: advisorReply,
+          message: advisorReply,
+          reply: advisorReply,
+          fallback: true
+        });
+      }
     } catch (error: any) {
       console.error("Error proxying request to n8n webhook:", error);
-      const advisorReply = fallbackSolarChat([], true, { message: req.body?.chatInput || "" }, memoryExchangePrices);
-      return res.json({
-        output: advisorReply,
-        text: advisorReply,
-        message: advisorReply,
-        reply: advisorReply,
-        fallback: true
-      });
+      try {
+        const allInverters = await fetchAllStructuredInverters();
+        const sId = req.body?.sessionId || `session-${Date.now()}`;
+        const chatResult = await processConversationalChat(
+          sId, 
+          req.body?.chatInput || '', 
+          allInverters, 
+          req.body?.lang || 'ar'
+        );
+        return res.json({
+          output: chatResult.reply,
+          text: chatResult.reply,
+          message: chatResult.reply,
+          reply: chatResult.reply,
+          recommendation: chatResult.recommendation || null,
+          intent: chatResult.intent,
+          fallback: false
+        });
+      } catch (innerErr) {
+        const advisorReply = fallbackSolarChat([], true, { message: req.body?.chatInput || "" }, memoryExchangePrices);
+        return res.json({
+          output: advisorReply,
+          text: advisorReply,
+          message: advisorReply,
+          reply: advisorReply,
+          fallback: true
+        });
+      }
     }
   });
 
@@ -1245,6 +1488,26 @@ async function startServer() {
         systemType: parsed.systemType,
         cityChoice: parsed.cityChoice
       };
+
+      // Ground in Enerjoo Conversational Intelligence Engine (Intent Detection, Context, Catalog)
+      try {
+        const allInverters = await fetchAllStructuredInverters();
+        const sId = req.body?.sessionId || `solar-${Date.now()}`;
+        const chatResult = await processConversationalChat(
+          sId,
+          userText || '',
+          allInverters,
+          isAr ? 'ar' : 'en'
+        );
+        return res.json({
+          reply: chatResult.reply,
+          recommendation: chatResult.recommendation || null,
+          intent: chatResult.intent,
+          updatedSizing
+        });
+      } catch (convErr) {
+        console.error("Inverter recommendation error in solar-chat:", convErr);
+      }
       
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {

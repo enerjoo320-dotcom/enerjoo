@@ -153,6 +153,23 @@ export default function App() {
     }
   }, [pendingProductId, products]);
 
+  // Global listener for opening real catalog products from AI agent recommendations
+  useEffect(() => {
+    const handleOpenProduct = (e: any) => {
+      const pId = e.detail?.productId;
+      if (pId) {
+        setPendingProductId(String(pId));
+        const found = products.find(p => p.id.toString() === String(pId));
+        if (found) {
+          setSelectedProduct(found);
+          window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        }
+      }
+    };
+    window.addEventListener('open-product-details', handleOpenProduct);
+    return () => window.removeEventListener('open-product-details', handleOpenProduct);
+  }, [products]);
+
   // Navigation handlers with clean History API pushState
   const navigateToView = (newView: ViewType) => {
     if (newView === 'products') {
@@ -1157,12 +1174,13 @@ export default function App() {
         </div>
       </a>
 
-      {/* Enerjoo n8n AI Chatbot Integration */}
+      {/* Enerjoo AI Chatbot Integration */}
       <EnerjooAIChat 
         lang={lang} 
         isOpen={isAiChatOpen} 
         onClose={() => setIsAiChatOpen(false)} 
         showFloatingTrigger={false} 
+        activeProductId={selectedProduct?.id ? String(selectedProduct.id) : undefined}
       />
 
       {/* Product Deletion Confirmation Modal */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo } from 'react';
-import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare, Building2, Info, Cpu, Battery, Activity, FileText, Trash2, AlertTriangle, Loader2, X } from 'lucide-react';
+import { ArrowRight, Power, Ruler, Zap, Shield, ArrowLeftRight, CheckCircle2, Download, MapPin, Grid, Edit, Heart, Star, MessageSquare, Building2, Info, Cpu, Battery, Activity, FileText, Trash2, AlertTriangle, Loader2, X, ChevronDown, Sliders, Layers } from 'lucide-react';
 import { Product, ProductReview, Supplier } from '../types';
 import { translations } from '../translations';
 import { motion, AnimatePresence } from 'motion/react';
@@ -88,10 +88,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   };
 
   const [selectedImage, setSelectedImage] = useState<string>(product.image);
+  const [showAdvancedSpecs, setShowAdvancedSpecs] = useState(false);
 
   useEffect(() => {
     setSelectedImage(product.image);
-  }, [product.image]);
+    setShowAdvancedSpecs(false);
+  }, [product.image, product.id]);
 
   const [reviews, setReviews] = useState<ProductReview[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -830,220 +832,398 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           )}
         </div>
 
-        {/* Inverter Classification & Structured Data Card (Single Source of Truth) */}
+        {/* Inverter Classification Card (Redesigned: Compact, Clean & Elegant) */}
         {product.category === 'inverters' && (() => {
           const inv = classifyInverter(product);
+          const typeBadgeStyle = 
+            inv.type === 'On-Grid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+            inv.type === 'Hybrid' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
+            inv.type === 'Off-Grid' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+            'bg-cyan-50 text-cyan-700 border-cyan-200';
+
           return (
-            <div className="bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 border border-solar-blue/20 bg-linear-to-b from-solar-blue/[0.03] to-transparent shadow-sm w-full">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-solar-border/50 gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-solar-blue text-white flex items-center justify-center shrink-0 shadow-md shadow-solar-blue/20">
-                    <Cpu size={22} />
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-2xs w-full max-w-full box-border">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-solar-blue flex items-center justify-center shrink-0 border border-blue-100/80">
+                    <Cpu size={16} />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base sm:text-xl font-black text-solar-text">
-                        {isAr ? 'تصنيف الإنفرتر المعتمد والبيانات المنظمة' : 'Certified Inverter Classification & Structured Specs'}
-                      </h3>
-                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-solar-blue/15 text-solar-blue border border-solar-blue/25">
-                        AI & n8n Ready
-                      </span>
-                    </div>
-                    <p className="text-xs font-bold text-solar-muted mt-0.5">
-                      {isAr ? 'بيانات مهيكلة موحدة للموقع والذكاء الاصطناعي (Single Source of Truth)' : 'Single source of truth structured data for catalog & AI Agents'}
+                  <div className="min-w-0">
+                    <h3 className="text-xs sm:text-sm font-black text-slate-900 truncate">
+                      {isAr ? 'تصنيف الإنفرتر المعتمد' : 'Certified Inverter Classification'}
+                    </h3>
+                    <p className="text-[10px] sm:text-[11px] font-medium text-slate-500 truncate">
+                      {isAr ? 'وفق المعايير القياسية وكود الربط' : 'Standard verified technical classification'}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`px-3 py-1 rounded-xl text-xs font-black shadow-xs ${
-                    inv.type === 'On-Grid' ? 'bg-emerald-600 text-white' :
-                    inv.type === 'Hybrid' ? 'bg-indigo-600 text-white' :
-                    inv.type === 'Off-Grid' ? 'bg-amber-600 text-white' :
-                    'bg-cyan-600 text-white'
-                  }`}>
+                <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-black border shadow-2xs ${typeBadgeStyle}`}>
                     {inv.type}
                   </span>
-                  <span className="bg-solar-blue/15 text-solar-blue px-3 py-1 rounded-xl text-xs font-black border border-solar-blue/20">
-                    {inv.phase === 'Three Phase' ? (isAr ? 'ثلاثي الطور (3-Phase)' : 'Three Phase') : (isAr ? 'أحادي الطور (1-Phase)' : 'Single Phase')}
+                  <span className="bg-slate-50 text-slate-700 border border-slate-200/90 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold">
+                    {inv.phase === 'Three Phase' ? (isAr ? '3 فاز (ثلاثي الطور)' : '3-Phase') : (isAr ? '1 فاز (أحادي الطور)' : 'Single Phase')}
                   </span>
-                  <span className="bg-solar-bg text-solar-text border border-solar-border px-3 py-1 rounded-xl text-xs font-bold">
+                  <span className="bg-blue-50/70 text-solar-blue border border-blue-200/70 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold">
                     {inv.power_range}
                   </span>
                 </div>
               </div>
 
-              {/* Grid of structured electrical specs */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-4">
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'القدرة الاسمية AC' : 'Rated AC Power'}
+              {/* Sub-bar with target applications & battery status */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-slate-100 text-slate-600">
+                <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">
+                  {isAr ? 'مجال الاستخدام:' : 'Applications:'}
+                </span>
+                {inv.application.map(app => (
+                  <span key={app} className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200/70 text-slate-600">
+                    {app}
                   </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {inv.rated_power_kw} kW
+                ))}
+                {inv.battery_support ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700">
+                    <Battery size={11} />
+                    <span>{isAr ? 'يدعم بطاريات التخزين' : 'Battery Supported'}</span>
                   </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'نطاق جهد MPPT' : 'MPPT Voltage Range'}
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-slate-500">
+                    <CheckCircle2 size={11} className="text-emerald-500" />
+                    <span>{isAr ? 'متصل بالشبكة (توفير الفاتورة)' : 'Grid-Tied (Bill Reduction)'}</span>
                   </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {inv.mppt_voltage_range_v !== 'Unknown' ? `${inv.mppt_voltage_range_v}` : (isAr ? 'غير محدد' : 'Unknown')}
-                  </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'عدد أجهزة MPPT' : 'Number of MPPT'}
-                  </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {inv.mppt_count !== 'Unknown' ? `${inv.mppt_count} MPPT` : (isAr ? 'غير محدد' : 'Unknown')}
-                  </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'الكفاءة القصوى' : 'Maximum Efficiency'}
-                  </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {typeof inv.efficiency_percent === 'number' ? `${inv.efficiency_percent}%` : (isAr ? 'غير محدد' : 'Unknown')}
-                  </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'أقصى جهد دخل DC' : 'Max PV Input Voltage'}
-                  </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {inv.max_pv_voltage_v !== 'Unknown' ? `${inv.max_pv_voltage_v} V` : (isAr ? 'غير محدد' : 'Unknown')}
-                  </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'دعم البطاريات' : 'Battery Storage'}
-                  </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {inv.battery_support ? (isAr ? 'نعم (يدعم بطارية)' : 'Yes (Battery Supported)') : (isAr ? 'لا (متصل بالشبكة فقط)' : 'No (Grid-Tied Only)')}
-                  </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'جهد الشبكة والتردد' : 'AC Grid Voltage & Freq'}
-                  </span>
-                  <span className="text-sm sm:text-base font-black text-solar-text mt-0.5 block">
-                    {inv.ac_voltage_v !== 'Unknown' ? `${inv.ac_voltage_v}` : '380/400V'} ({inv.frequency_hz !== 'Unknown' ? inv.frequency_hz : '50/60Hz'})
-                  </span>
-                </div>
-
-                <div className="bg-solar-bg/80 border border-solar-border/60 rounded-xl p-3">
-                  <span className="text-[10px] font-bold text-solar-muted block uppercase">
-                    {isAr ? 'تطبيقات الاستخدام' : 'Suitable Applications'}
-                  </span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {inv.application.map(app => (
-                      <span key={app} className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-solar-card border border-solar-border text-solar-text">
-                        {app}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           );
         })()}
 
-        {/* 3. المواصفات الفنية والهندسية المعتمدة (Certified Technical & Engineering Specifications) */}
-        <div className="bg-solar-card rounded-2xl sm:rounded-[36px] p-5 sm:p-8 md:p-10 border border-solar-border shadow-sm w-full max-w-full box-border min-w-0">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 sm:pb-6 border-b border-solar-border/50 gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-solar-blue/10 text-solar-blue flex items-center justify-center shrink-0">
-                <Zap size={22} />
-              </div>
-              <div>
-                <h3 className="text-base sm:text-xl font-black text-solar-text flex items-center gap-2">
-                  <span>{isAr ? 'المواصفات الفنية والهندسية المعتمدة' : 'Certified Technical & Engineering Specifications'}</span>
-                </h3>
-                <p className="text-xs font-bold text-solar-muted mt-0.5">
-                  {isAr ? 'بيانات معتمدة من الكتالوج الرسمي وداتا شيت الشركة المصنعة' : 'Verified data from official manufacturer catalog and datasheet'}
-                </p>
-              </div>
-            </div>
+        {/* Technical & Engineering Specifications Section (Compact, Organized Grid) */}
+        {(() => {
+          const isInverter = product.category === 'inverters';
+          const inv = isInverter ? classifyInverter(product) : null;
+          const specsObj = product.specs || {};
 
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <span className="text-xs font-black text-solar-blue bg-solar-blue/10 px-3 py-1 rounded-full border border-solar-blue/20">
-                {detailedSpecs.length} {isAr ? 'مواصفة تقنية' : 'technical specs'}
-              </span>
-              {product.datasheetUrl && (
-                <button 
-                  onClick={handleDownloadDatasheet}
-                  className="bg-solar-blue hover:bg-solar-blue/90 text-white px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-sm active:scale-95"
-                >
-                  <Download size={14} />
-                  <span>{t.downloadPDF}</span>
-                </button>
-              )}
-            </div>
-          </div>
+          // For inverters: curated primary specifications (8-item compact grid)
+          const primaryInverterSpecs = inv ? [
+            {
+              key: 'power',
+              icon: <Power size={13} className="text-solar-blue" />,
+              label: isAr ? 'القدرة الاسمية' : 'Rated Power',
+              value: `${inv.rated_power_kw} kW`
+            },
+            {
+              key: 'efficiency',
+              icon: <Zap size={13} className="text-amber-500" />,
+              label: isAr ? 'الكفاءة القصوى' : 'Max Efficiency',
+              value: typeof inv.efficiency_percent === 'number' ? `${inv.efficiency_percent}%` : (product.efficiency ? `${product.efficiency}%` : (isAr ? 'غير محدد' : 'Unknown'))
+            },
+            {
+              key: 'mppt_count',
+              icon: <Cpu size={13} className="text-solar-blue" />,
+              label: isAr ? 'متتبعات MPPT' : 'MPPT Trackers',
+              value: inv.mppt_count !== 'Unknown' && inv.mppt_count ? `${inv.mppt_count} MPPT` : (isAr ? 'غير محدد' : 'Unknown')
+            },
+            {
+              key: 'voltage_range',
+              icon: <Activity size={13} className="text-purple-600" />,
+              label: isAr ? 'نطاق جهد MPPT' : 'MPPT Voltage',
+              value: inv.mppt_voltage_range_v !== 'Unknown' && inv.mppt_voltage_range_v ? `${inv.mppt_voltage_range_v}` : (isAr ? 'غير محدد' : 'Unknown')
+            },
+            {
+              key: 'phase',
+              icon: <Layers size={13} className="text-solar-blue" />,
+              label: isAr ? 'الطور الكهربائي' : 'Electrical Phase',
+              value: inv.phase === 'Three Phase' ? (isAr ? '3 فاز (ثلاثي الطور)' : '3-Phase') : (isAr ? '1 فاز (أحادي الطور)' : 'Single Phase')
+            },
+            {
+              key: 'grid_type',
+              icon: <Grid size={13} className="text-emerald-600" />,
+              label: isAr ? 'نوع النظام' : 'Grid Connection',
+              value: inv.type
+            },
+            {
+              key: 'warranty',
+              icon: <Shield size={13} className="text-emerald-600" />,
+              label: isAr ? 'الضمان المعتمد' : 'Warranty',
+              value: product.warranty ? `${product.warranty} ${t.years}` : (inv.warranty_years && inv.warranty_years !== 'Unknown' ? `${inv.warranty_years} ${t.years}` : (isAr ? 'معتمد' : 'Standard'))
+            },
+            {
+              key: 'max_pv_voltage',
+              icon: <Zap size={13} className="text-solar-blue" />,
+              label: isAr ? 'أقصى جهد دخل DC' : 'Max PV Voltage',
+              value: inv.max_pv_voltage_v && inv.max_pv_voltage_v !== 'Unknown' ? `${inv.max_pv_voltage_v} V` : (isAr ? 'غير محدد' : 'Unknown')
+            }
+          ] : [];
 
-          {/* Specifications Grid */}
-          {detailedSpecs.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-5 mt-6 w-full max-w-full box-border">
-              {detailedSpecs.map((spec) => (
-                <div 
-                  key={spec.key} 
-                  className="bg-white/70 hover:bg-white border border-solar-border/60 hover:border-solar-blue/40 rounded-2xl p-3.5 sm:p-4.5 transition-all shadow-xs flex items-center justify-between gap-3 min-w-0"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-xl bg-solar-bg flex items-center justify-center text-solar-blue shrink-0">
-                      {spec.icon || <Grid size={15} />}
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-[11px] font-black text-solar-muted uppercase tracking-wider block truncate">
-                        {spec.label}
+          // Advanced specifications organized in expandable categories
+          const advancedElectrical = inv ? [
+            inv.max_pv_power_kwp && inv.max_pv_power_kwp !== 'Unknown' ? { label: isAr ? 'أقصى قدرة ألواح PV' : 'Max PV Array Power', value: `${inv.max_pv_power_kwp} kWp` } : null,
+            inv.max_ac_power_kw && inv.max_ac_power_kw !== 'Unknown' ? { label: isAr ? 'أقصى قدرة AC' : 'Max AC Power', value: `${inv.max_ac_power_kw} kVA / kW` } : null,
+            inv.max_pv_current_a && inv.max_pv_current_a !== 'Unknown' ? { label: isAr ? 'أقصى تيار دخل DC' : 'Max PV Input Current', value: `${inv.max_pv_current_a} A` } : null,
+            inv.max_ac_output_current_a && inv.max_ac_output_current_a !== 'Unknown' ? { label: isAr ? 'أقصى تيار خرج AC' : 'Max AC Output Current', value: `${inv.max_ac_output_current_a} A` } : (specsObj.current ? { label: isAr ? 'أقصى تيار خرج AC' : 'Max AC Output Current', value: `${specsObj.current} A` } : null),
+            inv.ac_voltage_v && inv.ac_voltage_v !== 'Unknown' ? { label: isAr ? 'جهد الخرج AC الاسمي' : 'Nominal AC Voltage', value: `${inv.ac_voltage_v}` } : (specsObj.acVoltageV ? { label: isAr ? 'جهد الخرج AC' : 'AC Voltage', value: `${specsObj.acVoltageV}` } : null),
+            inv.frequency_hz && inv.frequency_hz !== 'Unknown' ? { label: isAr ? 'تردد الشبكة' : 'Grid Frequency', value: `${inv.frequency_hz}` } : (specsObj.frequencyHz ? { label: isAr ? 'تردد الشبكة' : 'Grid Frequency', value: `${specsObj.frequencyHz} Hz` } : null),
+            specsObj.waveform ? { label: isAr ? 'شكل الموجة' : 'Waveform', value: String(specsObj.waveform) } : null,
+          ].filter(Boolean) as Array<{ label: string; value: string }> : [];
+
+          const advancedBattery = (inv && inv.battery_support) ? [
+            inv.battery_voltage_v && inv.battery_voltage_v !== 'Unknown' ? { label: isAr ? 'جهد البطارية الاسمي' : 'Nominal Battery Voltage', value: `${inv.battery_voltage_v}` } : null,
+            inv.battery_type && inv.battery_type !== 'Unknown' ? { label: isAr ? 'نوع البطاريات المدعومة' : 'Compatible Battery Type', value: `${inv.battery_type}` } : null,
+            inv.battery_voltage_range && inv.battery_voltage_range !== 'Unknown' ? { label: isAr ? 'فئة جهد البطارية' : 'Battery Voltage Class', value: isAr ? (inv.battery_voltage_range === 'High Voltage' ? 'جهد عالي (HV)' : 'جهد منخفض (LV)') : inv.battery_voltage_range } : null,
+            inv.max_charging_current_a && inv.max_charging_current_a !== 'Unknown' ? { label: isAr ? 'أقصى تيار شحن' : 'Max Charging Current', value: `${inv.max_charging_current_a} A` } : null,
+            inv.max_discharging_current_a && inv.max_discharging_current_a !== 'Unknown' ? { label: isAr ? 'أقصى تيار تفريغ' : 'Max Discharging Current', value: `${inv.max_discharging_current_a} A` } : null,
+          ].filter(Boolean) as Array<{ label: string; value: string }> : [];
+
+          const advancedMechanical = inv ? [
+            specsObj.ipRating ? { label: isAr ? 'درجة الحماية' : 'Ingress Protection', value: String(specsObj.ipRating) } : null,
+            specsObj.dimensionsMm ? { label: isAr ? 'الأبعاد' : 'Dimensions', value: String(specsObj.dimensionsMm) } : (product.length && product.width ? { label: isAr ? 'الأبعاد' : 'Dimensions', value: `${product.length} × ${product.width}${product.thickness ? ` × ${product.thickness}` : ''} ${product.dimensionUnit || 'mm'}` } : null),
+            specsObj.weightKg || specsObj.weight ? { label: isAr ? 'الوزن الصافي' : 'Net Weight', value: `${specsObj.weightKg || specsObj.weight} kg` } : null,
+            specsObj.surgePowerW ? { label: isAr ? 'قدرة التحمل اللحظية' : 'Surge Power', value: `${specsObj.surgePowerW} W` } : null,
+            inv.motor_power_range && inv.motor_power_range !== 'Unknown' ? { label: isAr ? 'قدرة محرك الطلمبة' : 'Pump Motor Power', value: `${inv.motor_power_range}` } : null,
+            inv.motor_voltage_v && inv.motor_voltage_v !== 'Unknown' ? { label: isAr ? 'جهد محرك الطلمبة' : 'Pump Motor Voltage', value: `${inv.motor_voltage_v}` } : null,
+          ].filter(Boolean) as Array<{ label: string; value: string }> : [];
+
+          const totalAdvancedSpecs = advancedElectrical.length + advancedBattery.length + advancedMechanical.length;
+
+          // For non-inverter products: use detailedSpecs with primary vs advanced breakdown
+          const nonInverterPrimary = !isInverter ? detailedSpecs.slice(0, 8) : [];
+          const nonInverterAdvanced = !isInverter ? detailedSpecs.slice(8) : [];
+
+          return (
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/90 shadow-2xs w-full max-w-full box-border min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 sm:pb-4 border-b border-slate-100 gap-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-solar-blue flex items-center justify-center shrink-0 border border-blue-100/80">
+                    <Zap size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs sm:text-sm font-black text-slate-900 truncate">
+                      {isAr ? 'المواصفات الفنية والهندسية المعتمدة' : 'Certified Technical & Engineering Specifications'}
+                    </h3>
+                    <p className="text-[10px] sm:text-[11px] font-medium text-slate-500 truncate">
+                      {isAr ? 'بيانات معتمدة من الكتالوج الرسمي وداتا شيت الشركة المصنعة' : 'Verified data from official manufacturer catalog and datasheet'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-solar-blue bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200/60">
+                    {isInverter ? primaryInverterSpecs.length + totalAdvancedSpecs : detailedSpecs.length} {isAr ? 'مواصفة تقنية' : 'technical specs'}
+                  </span>
+                  {product.datasheetUrl && (
+                    <button 
+                      type="button"
+                      onClick={handleDownloadDatasheet}
+                      className="bg-solar-blue hover:bg-blue-600 text-white px-2.5 py-1 rounded-lg text-[11px] font-black transition flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer"
+                    >
+                      <Download size={13} />
+                      <span>{t.downloadPDF}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Compact Organized Grid (Primary Specifications) */}
+              {isInverter ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 mt-3.5 w-full box-border">
+                  {primaryInverterSpecs.map((spec) => (
+                    <div 
+                      key={spec.key} 
+                      className="bg-slate-50/60 hover:bg-slate-50 border border-slate-200/80 hover:border-solar-blue/40 rounded-xl p-2.5 sm:p-3 transition-colors flex flex-col justify-between min-w-0"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0 mb-1">
+                        <span className="shrink-0">{spec.icon}</span>
+                        <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 truncate block">
+                          {spec.label}
+                        </span>
+                      </div>
+                      <span className="text-xs sm:text-sm font-black text-slate-900 truncate block">
+                        {spec.value}
                       </span>
                     </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <span className="text-xs sm:text-sm font-black text-solar-text">
-                      {spec.value}
-                    </span>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-10 text-solar-muted text-sm font-bold">
-              {isAr ? 'جاري تحديث واستكمال المواصفات الفنية لهذا المنتج من الكتالوج المعتمد.' : 'Technical specifications for this product are currently being updated.'}
-            </div>
-          )}
+              ) : detailedSpecs.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-2.5 mt-3.5 w-full box-border">
+                  {nonInverterPrimary.map((spec) => (
+                    <div 
+                      key={spec.key} 
+                      className="bg-slate-50/60 hover:bg-slate-50 border border-slate-200/80 hover:border-solar-blue/40 rounded-xl p-2.5 sm:p-3 transition-colors flex flex-col justify-between min-w-0"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0 mb-1">
+                        <span className="shrink-0">{spec.icon || <Grid size={13} className="text-solar-blue" />}</span>
+                        <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 truncate block">
+                          {spec.label}
+                        </span>
+                      </div>
+                      <span className="text-xs sm:text-sm font-black text-slate-900 truncate block">
+                        {spec.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-slate-400 text-xs font-bold">
+                  {isAr ? 'جاري تحديث واستكمال المواصفات الفنية لهذا المنتج من الكتالوج المعتمد.' : 'Technical specifications for this product are currently being updated.'}
+                </div>
+              )}
 
-          {/* Datasheet Callout if available */}
-          {product.datasheetUrl && (
-            <div className="mt-6 sm:mt-8 p-4 sm:p-5 rounded-2xl bg-solar-blue/5 border border-solar-blue/20 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3 text-center sm:text-start">
-                <FileText className="text-solar-blue shrink-0 hidden sm:block" size={24} />
-                <div>
-                  <h4 className="text-xs sm:text-sm font-black text-solar-text">
-                    {isAr ? 'الداتا شيت الفنية الأصلية للمنتج (PDF)' : 'Original Product Technical Datasheet (PDF)'}
-                  </h4>
-                  <p className="text-[11px] font-medium text-solar-muted mt-0.5">
-                    {isAr ? 'يمكنك تنزيل ملف المواصفات الهندسية ومخططات التشغيل الرسمية' : 'Download official engineering specifications and technical diagrams'}
-                  </p>
+              {/* Expandable Advanced Specifications (Requirements 5) */}
+              {isInverter && totalAdvancedSpecs > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedSpecs(!showAdvancedSpecs)}
+                    className="w-full py-2 px-3 rounded-xl border border-slate-200/90 hover:border-solar-blue/40 bg-slate-50/50 hover:bg-slate-50 transition-all flex items-center justify-between text-start cursor-pointer active:scale-[0.99]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Sliders size={13} className="text-solar-blue shrink-0" />
+                      <span className="text-xs font-bold text-slate-800">
+                        {isAr ? 'المواصفات الفنية المتقدمة والتفصيلية' : 'Advanced Technical Specifications'}
+                      </span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-white border border-slate-200 text-slate-500">
+                        {totalAdvancedSpecs} {isAr ? 'مواصفة' : 'specs'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] font-bold text-solar-blue">
+                      <span>{showAdvancedSpecs ? (isAr ? 'إخفاء' : 'Collapse') : (isAr ? 'عرض المزيد' : 'Expand')}</span>
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${showAdvancedSpecs ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+
+                  {showAdvancedSpecs && (
+                    <div className="mt-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                      {/* Electrical & PV Specs */}
+                      {advancedElectrical.length > 0 && (
+                        <div className="p-3 rounded-xl bg-slate-50/50 border border-slate-200/70">
+                          <span className="text-[11px] font-black text-slate-700 block mb-2 flex items-center gap-1.5">
+                            <Zap size={12} className="text-solar-blue" />
+                            {isAr ? 'البيانات الكهربائية ودخل الطاقة الشمسية (DC/AC)' : 'Electrical & PV Array Specifications (DC/AC)'}
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {advancedElectrical.map((item, idx) => (
+                              <div key={idx} className="bg-white border border-slate-200/80 rounded-lg p-2 min-w-0">
+                                <span className="text-[10px] font-semibold text-slate-500 truncate block">{item.label}</span>
+                                <span className="text-xs font-bold text-slate-900 truncate block mt-0.5">{item.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Battery & Storage Specs */}
+                      {advancedBattery.length > 0 && (
+                        <div className="p-3 rounded-xl bg-slate-50/50 border border-slate-200/70">
+                          <span className="text-[11px] font-black text-slate-700 block mb-2 flex items-center gap-1.5">
+                            <Battery size={12} className="text-emerald-600" />
+                            {isAr ? 'نظام البطاريات والشحن والتخزين' : 'Battery Storage & Charging System'}
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {advancedBattery.map((item, idx) => (
+                              <div key={idx} className="bg-white border border-slate-200/80 rounded-lg p-2 min-w-0">
+                                <span className="text-[10px] font-semibold text-slate-500 truncate block">{item.label}</span>
+                                <span className="text-xs font-bold text-slate-900 truncate block mt-0.5">{item.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Mechanical & Protection Specs */}
+                      {advancedMechanical.length > 0 && (
+                        <div className="p-3 rounded-xl bg-slate-50/50 border border-slate-200/70">
+                          <span className="text-[11px] font-black text-slate-700 block mb-2 flex items-center gap-1.5">
+                            <Shield size={12} className="text-purple-600" />
+                            {isAr ? 'الحماية والمواصفات الميكانيكية' : 'Mechanical & Ingress Protection'}
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {advancedMechanical.map((item, idx) => (
+                              <div key={idx} className="bg-white border border-slate-200/80 rounded-lg p-2 min-w-0">
+                                <span className="text-[10px] font-semibold text-slate-500 truncate block">{item.label}</span>
+                                <span className="text-xs font-bold text-slate-900 truncate block mt-0.5">{item.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-              <button 
-                onClick={handleDownloadDatasheet}
-                className="bg-solar-blue text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-md hover:bg-solar-blue/90 transition flex items-center gap-2 shrink-0 active:scale-95"
-              >
-                <Download size={15} />
-                <span>{t.downloadPDF}</span>
-              </button>
+              )}
+
+              {/* Non-inverter Expandable Specs (if more than 8 specs) */}
+              {!isInverter && nonInverterAdvanced.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedSpecs(!showAdvancedSpecs)}
+                    className="w-full py-2 px-3 rounded-xl border border-slate-200/90 hover:border-solar-blue/40 bg-slate-50/50 hover:bg-slate-50 transition-all flex items-center justify-between text-start cursor-pointer active:scale-[0.99]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Sliders size={13} className="text-solar-blue shrink-0" />
+                      <span className="text-xs font-bold text-slate-800">
+                        {isAr ? 'مواصفات إضافية وتفصيلية' : 'Additional Detailed Specifications'}
+                      </span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-md bg-white border border-slate-200 text-slate-500">
+                        {nonInverterAdvanced.length} {isAr ? 'مواصفة' : 'specs'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] font-bold text-solar-blue">
+                      <span>{showAdvancedSpecs ? (isAr ? 'إخفاء' : 'Collapse') : (isAr ? 'عرض المزيد' : 'Expand')}</span>
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${showAdvancedSpecs ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+
+                  {showAdvancedSpecs && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-2.5 mt-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                      {nonInverterAdvanced.map((spec) => (
+                        <div 
+                          key={spec.key} 
+                          className="bg-white border border-slate-200/80 rounded-xl p-2.5 flex flex-col justify-between min-w-0"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0 mb-1">
+                            <span className="shrink-0">{spec.icon || <Grid size={13} className="text-solar-blue" />}</span>
+                            <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 truncate block">
+                              {spec.label}
+                            </span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-900 truncate block">
+                            {spec.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Datasheet Callout if available */}
+              {product.datasheetUrl && (
+                <div className="mt-4 p-3.5 sm:p-4 rounded-xl bg-blue-50/50 border border-blue-200/60 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 text-center sm:text-start">
+                    <FileText className="text-solar-blue shrink-0 hidden sm:block" size={20} />
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                        {isAr ? 'الداتا شيت الفنية الأصلية للمنتج (PDF)' : 'Original Technical Datasheet (PDF)'}
+                      </h4>
+                      <p className="text-[10px] sm:text-[11px] font-medium text-slate-500 mt-0.5">
+                        {isAr ? 'تنزيل ملف المواصفات الهندسية ومخططات التشغيل المعتمدة' : 'Download official engineering specifications and technical diagrams'}
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={handleDownloadDatasheet}
+                    className="bg-solar-blue hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow-2xs transition flex items-center gap-1.5 shrink-0 active:scale-95 cursor-pointer"
+                  >
+                    <Download size={14} />
+                    <span>{t.downloadPDF}</span>
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })()}
 
         {/* 4. وصف المنتج وتفاصيله (Product Description) */}
         {productDescription && (

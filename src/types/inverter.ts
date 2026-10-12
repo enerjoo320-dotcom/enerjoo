@@ -149,6 +149,8 @@ export interface InverterQueryCriteria {
   phase?: InverterPhase;
   application?: InverterApplication;
   battery_required?: boolean;
+  pv_power_kwp?: number;
+  intent?: 'best_match' | 'cheapest' | 'highest_efficiency' | 'compare' | 'recommend_three' | 'general';
   min_efficiency?: number;
   max_price?: number;
 }
@@ -172,4 +174,71 @@ export interface InverterMatchResult {
   };
   recommendationReason: string;
   recommendationReasonAr: string;
+  discrepancyAr?: string;
+  discrepancyEn?: string;
+}
+
+export interface InverterComparisonRow {
+  key: string;
+  label: string;
+  labelAr: string;
+  bestMatch: string | number;
+  alternative?: string | number;
+  bestValue?: string | number;
+}
+
+export interface InverterComparisonTable {
+  headers: string[];
+  headersAr: string[];
+  rows: InverterComparisonRow[];
+}
+
+export interface TierProductRecommendation {
+  tier: 'best_match' | 'alternative' | 'best_value' | 'closest_alternative';
+  tierLabel: string;
+  tierLabelAr: string;
+  product_id: string | number;
+  catalog_source: 'Enerjoo';
+  product_url: string;
+  brand: string;
+  model: string;
+  name: string;
+  nameAr?: string;
+  type: InverterType;
+  rated_power_kw: number;
+  phase: InverterPhase;
+  efficiency_percent: number | 'Unknown';
+  mppt_count: number | 'Unknown';
+  battery_support: boolean;
+  price: number;
+  availability: boolean;
+  image: string;
+  score: number;
+  why_chosen_ar: string;
+  why_chosen_en: string;
+  difference_ar?: string;
+  difference_en?: string;
+  discrepancy_ar?: string;
+  discrepancy_en?: string;
+  full_product: StructuredInverter;
+}
+
+export interface InverterAgentRecommendationResponse {
+  success: boolean;
+  catalog_source: 'Enerjoo';
+  exact_match_found: boolean;
+  criteria: InverterQueryCriteria;
+  summary_ar: string;
+  summary_en: string;
+  best_match: TierProductRecommendation | null;
+  alternative: TierProductRecommendation | null;
+  best_value: TierProductRecommendation | null;
+  comparison_table: InverterComparisonTable | null;
+  comparison_analysis_ar: string;
+  comparison_analysis_en: string;
+  all_compatible_count: number;
+  all_compatible_matches: InverterMatchResult[];
+  closest_alternatives?: TierProductRecommendation[];
+  conversational_response_ar: string;
+  conversational_response_en: string;
 }

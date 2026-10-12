@@ -5,7 +5,7 @@ import { uploadProductImage } from '../services/uploadService';
 import { autoCompressImage, formatFileSize, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
 import { Product } from '../types';
 import { parseDimensionsString } from '../services/firestoreService';
-import { classifyInverterType, classifyInverterPhase } from '../utils/inverterClassification';
+import { classifyInverterType, classifyInverterPhase, classifyInverter } from '../utils/inverterClassification';
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
@@ -263,8 +263,8 @@ const extractInitialFormData = (data?: Product | null) => {
     status: (data.status || 'available') as 'available' | 'limited' | 'out_of_stock',
     phase: (specs.phase || (data as any).phase || (category === 'inverters' ? classifyInverterPhase(data) : 'Three Phase')).toString(),
     batterySupport: specs.batterySupport !== undefined ? Boolean(specs.batterySupport) : (category === 'inverters' ? (finalType === 'Hybrid' || finalType === 'Off-Grid') : false),
-    mpptCount: (specs.mpptCount || specs.numberOfMppt || (data as any).mppt_count || '').toString(),
-    maxPvVoltage: (specs.maxPvVoltage || (data as any).max_pv_open_circuit_voltage_v || '').toString(),
+    mpptCount: (specs.mpptCount || specs.numberOfMppt || (data as any)?.mppt_count || (data && category === 'inverters' && classifyInverter(data).mppt_count !== 'Unknown' ? classifyInverter(data).mppt_count : '') || '').toString(),
+    maxPvVoltage: (specs.maxPvVoltage || specs.maxPvOpenCircuitVoltageV || (data as any)?.max_pv_open_circuit_voltage_v || (data && category === 'inverters' && classifyInverter(data).max_pv_voltage_v !== 'Unknown' ? classifyInverter(data).max_pv_voltage_v : '') || '').toString(),
     dimLength,
     dimWidth,
     dimThickness,
@@ -299,7 +299,7 @@ export const ProductForm: React.FC<{
       case 'panels':
         return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'weight'];
       case 'inverters':
-        return [...common, 'powerKw', 'efficiency', 'type', 'mppt', 'voltage', 'current', 'weight'];
+        return [...common, 'powerKw', 'efficiency', 'type', 'mppt', 'maxPvVoltage', 'mpptCount', 'voltage', 'current', 'weight'];
       case 'batteries':
         return [...common, 'capacity', 'voltage', 'type', 'weight'];
       case 'pumps':
@@ -568,6 +568,8 @@ export const ProductForm: React.FC<{
         status: formData.status as any,
         updatedAt: new Date().toISOString().split('T')[0],
         supplierId: initialData?.supplierId || user?.uid || '',
+        max_pv_open_circuit_voltage_v: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage, 10) : undefined,
+        mppt_count: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount, 10) : undefined,
         description: formData.description,
         notes: formData.description,
         specs: {
@@ -583,7 +585,9 @@ export const ProductForm: React.FC<{
           phase: formData.category === 'inverters' ? formData.phase : undefined,
           batterySupport: formData.category === 'inverters' ? formData.batterySupport : undefined,
           mpptCount: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount) : undefined,
+          numberOfMppt: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount) : undefined,
           maxPvVoltage: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage) : undefined,
+          maxPvOpenCircuitVoltageV: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage) : undefined,
           voltage: formData.voltage,
           vmpV: formData.category === 'panels' ? formData.voltage : undefined,
           nominalVoltage: formData.voltage,
@@ -896,6 +900,40 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, mppt: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder={t.mpptPlaceholder || (isAr ? "مثال: 160V - 950V أو 2 MPPT" : "e.g. 160V - 950V (2 MPPT)")}
+            />
+          </div>
+        )}
+
+        {fields.includes('maxPvVoltage') && (
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center gap-1">
+              <Zap size={13} className="text-solar-blue" />
+              <span>{t.maxPvVoltage || (isAr ? 'أقصى جهد دخل DC (فولت)' : 'Max PV Input Voltage (V)')}</span>
+            </label>
+            <input 
+              type="text" 
+              inputMode="numeric"
+              value={formData.maxPvVoltage}
+              onChange={e => setFormData(p => ({...p, maxPvVoltage: e.target.value}))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={t.maxPvVoltagePlaceholder || (isAr ? "مثال: 1100 أو 1000 أو 600" : "e.g. 1100, 1000, 600")}
+            />
+          </div>
+        )}
+
+        {fields.includes('mpptCount') && (
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center gap-1">
+              <Zap size={13} className="text-solar-blue" />
+              <span>{t.mpptCount || (isAr ? 'عدد متتبعات MPPT' : 'Number of MPPT Trackers')}</span>
+            </label>
+            <input 
+              type="text" 
+              inputMode="numeric"
+              value={formData.mpptCount}
+              onChange={e => setFormData(p => ({...p, mpptCount: e.target.value}))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={t.mpptCountPlaceholder || (isAr ? "مثال: 2 أو 4 أو 6" : "e.g. 2, 4, 6")}
             />
           </div>
         )}

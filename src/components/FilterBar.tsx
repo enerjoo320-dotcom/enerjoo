@@ -104,28 +104,38 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       {/* Dedicated Structured Inverter Classification Filter Bar */}
       {activeFilter.category === 'inverters' && inverterFilters && setInverterFilters && (
         <div className="bg-solar-card border border-solar-border/80 rounded-2xl p-3.5 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-1">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <Cpu size={15} className="text-solar-blue" />
               <span className="text-xs font-black text-solar-text">
                 {isAr ? 'تصنيف محولات الطاقة (Inverter Classification)' : 'Inverter Classification & Specs'}
               </span>
             </div>
-            {(inverterFilters.type !== 'all' || inverterFilters.phase !== 'all' || inverterFilters.powerRange !== 'all' || inverterFilters.application !== 'all' || inverterFilters.batterySupport !== 'all') && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setInverterFilters({
-                  type: 'all',
-                  phase: 'all',
-                  powerRange: 'all',
-                  application: 'all',
-                  batterySupport: 'all'
-                })}
-                className="text-[11px] font-bold text-solar-blue hover:underline flex items-center gap-1"
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-enerjoo-ai-chat'))}
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/80 px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95"
               >
-                <X size={12} />
-                {isAr ? 'إعادة ضبط تصنيف الإنفرتر' : 'Reset Inverter Filters'}
+                <Sparkles size={12} className="text-blue-600 animate-pulse" />
+                <span>{isAr ? 'مستشار Enerjoo AI لاختيار الإنفرتر' : 'Enerjoo AI Inverter Advisor'}</span>
               </button>
-            )}
+              {(inverterFilters.type !== 'all' || inverterFilters.phase !== 'all' || inverterFilters.powerRange !== 'all' || inverterFilters.application !== 'all' || inverterFilters.batterySupport !== 'all') && (
+                <button
+                  onClick={() => setInverterFilters({
+                    type: 'all',
+                    phase: 'all',
+                    powerRange: 'all',
+                    application: 'all',
+                    batterySupport: 'all'
+                  })}
+                  className="text-[11px] font-bold text-solar-blue hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <X size={12} />
+                  {isAr ? 'إعادة ضبط' : 'Reset'}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* 1. Inverter Main Type Pills (Strict: On-Grid, Hybrid, Off-Grid, Pump Inverter) */}

@@ -6,6 +6,8 @@
  * Database Binding: env.DB
  */
 
+import { runEnerjooSolarConsultant, RawCatalogProduct } from '../src/utils/enerjooSolarConsultant';
+
 export interface D1PreparedStatement {
   bind(...values: any[]): D1PreparedStatement;
   first<T = unknown>(colName?: string): Promise<T | null>;
@@ -22,6 +24,7 @@ export interface D1Database {
 
 export interface Env {
   DB: D1Database;
+  AI?: any;
 }
 
 // ============================================================================
@@ -109,18 +112,26 @@ export default {
 
     try {
       // ----------------------------------------------------------------------
-      // Root Health Endpoint (Preserved exactly)
+      // Root Health Endpoint (Preserved exactly + /health)
       // ----------------------------------------------------------------------
-      if (path === '' || path === '/') {
+      if (path === '' || path === '/' || path === '/health') {
         return successJson(
           {
-            service: 'Enerjoo API',
+            service: 'Enerjoo API & AI Advisor',
             database: 'D1',
+            ai: env.AI ? 'Workers AI' : 'Deterministic Consultant Engine',
             status: 'connected',
           },
           200,
           request
         );
+      }
+
+      // ----------------------------------------------------------------------
+      // /chat (Enerjoo Solar Sales & Engineering Consultant)
+      // ----------------------------------------------------------------------
+      if (path === '/chat') {
+        return await handleChat(request, env);
       }
 
       // ----------------------------------------------------------------------
@@ -187,6 +198,121 @@ export default {
     }
   },
 };
+
+// ============================================================================
+// 0. /chat Handler (Enerjoo Solar Sales & Engineering Consultant)
+// ============================================================================
+async function handleChat(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') {
+    return errorJson('Method not allowed for /chat. Use POST', 405, request);
+  }
+
+  let body: any = {};
+  try {
+    body = await request.json();
+  } catch {
+    return errorJson('Invalid JSON payload in request body', 400, request);
+  }
+
+  const rawMessage = (body.message || body.chatInput || '').trim();
+  const rawMessages: any[] = Array.isArray(body.messages) ? body.messages : [];
+
+  // Sanitize message turns and prevent system instruction injection
+  const safeMessages: Array<{ role: 'user' | 'assistant'; content: string }> = rawMessages
+    .filter(m => m && typeof m.content === 'string' && (m.role === 'user' || m.role === 'assistant'))
+    .slice(-8)
+    .map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+        .replace(/(?:ignore all previous instructions|system prompt|jailbreak|developer mode)/gi, '')
+        .slice(0, 1000)
+    }));
+
+  const userQuery = rawMessage || (safeMessages.length > 0 ? safeMessages[safeMessages.length - 1].content : '');
+
+  if (!userQuery) {
+    return errorJson('Message content is required', 400, request);
+  }
+
+  // Retrieve products from D1 database
+  let rawProducts: RawCatalogProduct[] = [];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT product_id, product_category, brand, model, product_type, technology,
+              power_w, rated_power_kw, price_egp, availability, efficiency_percent,
+              battery_voltage_v, pv_mppt_voltage_range_v, max_pv_open_circuit_voltage_v,
+              warranty_years, image_url, notes
+       FROM products
+       ORDER BY created_at DESC
+       LIMIT 100`
+    ).all<RawCatalogProduct>();
+    rawProducts = results || [];
+  } catch (dbErr) {
+    console.error('Failed to query products from D1:', dbErr);
+  }
+
+  // Run the Enerjoo Solar Consultant Engine
+  const consultantResult = await runEnerjooSolarConsultant({
+    message: userQuery,
+    messages: safeMessages.length > 0 ? safeMessages : [{ role: 'user', content: userQuery }],
+    sessionId: body.sessionId || 'session-default',
+    products: rawProducts
+  });
+
+  // If Cloudflare Workers AI is available in the environment, use it with grounded D1 context
+  if (env.AI && typeof env.AI.run === 'function') {
+    try {
+      const catalogSummary = consultantResult.products
+        .map(p => `- ${p.brand} ${p.model} | النوع: ${p.normalizedType} | القدرة: ${p.kw} kW | السعر: ${p.price} ج.م | التوافر: ${p.isAvailable ? 'متوفر' : 'غير متوفر'}`)
+        .join('\n');
+
+      const aiSystemPrompt = `أنت "البشمهندس أحمد"، كبير مهندسي المبيعات والاستشارات الفنية لشركة Enerjoo للطاقة الشمسية في مصر.
+أسلوبك:
+- تتحدث باللهجة المصرية الطبيعية والمهذبة، مباشرة وواضحة بدون حشو.
+- تستخدم بيانات الكتالوج التالية كمرجع وحيد للحقيقة ولا تخترع أي منتجات أو أسعار:
+${catalogSummary}
+
+قواعد أساسية:
+1. الأسعار المذكورة بالجنيه المصري مطابقة تماماً للمسجل.
+2. التمييز الدقيق بين On-Grid (بدون بطاريات) و Hybrid (مع بطاريات وشبكة) و Off-Grid (مستقل مع بطاريات).
+3. عند السؤال عن أحمال أو تشغيل ليلي (مثل تكييف وثلاجة)، اسأل عن قدرة الأجهزة وساعات التشغيل إذا لم تكن محددة.
+4. الرد المقترح هندسياً:
+${consultantResult.reply}
+
+قدم إجابتك للعميل بالأسلوب المصري الهندسي الراقي.`;
+
+      const aiRes: any = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+        messages: [
+          { role: 'system', content: aiSystemPrompt },
+          ...safeMessages
+        ],
+        max_tokens: 1024,
+        temperature: 0.2
+      });
+
+      if (aiRes && typeof aiRes.response === 'string' && aiRes.response.trim().length > 30) {
+        return json({
+          ok: true,
+          reply: aiRes.response.trim(),
+          products: consultantResult.products,
+          intent: consultantResult.intent,
+          model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+        }, 200, request);
+      }
+    } catch (aiErr) {
+      console.warn('Workers AI call error, falling back to deterministic response:', aiErr);
+    }
+  }
+
+  // Return the deterministic grounded consultant response
+  return json({
+    ok: true,
+    reply: consultantResult.reply,
+    products: consultantResult.products,
+    intent: consultantResult.intent,
+    model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+  }, 200, request);
+}
 
 // ============================================================================
 // 1. /products Handler (Preserved Existing Implementation)
