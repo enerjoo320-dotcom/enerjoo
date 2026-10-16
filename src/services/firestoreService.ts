@@ -141,6 +141,9 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
 
   // Handle 404 cleanly
   if (res.status === 404) {
+    if (normalizedPath === '/products') {
+      return { success: true, count: 0, products: [] } as T;
+    }
     throw new Error('NOT_FOUND');
   }
 
@@ -623,7 +626,10 @@ export const getProducts = async (): Promise<Product[]> => {
     }
     return [];
   } catch (error) {
-    console.error('Failed to get products from Cloudflare D1:', error);
+    if (error instanceof Error && error.message === 'NOT_FOUND') {
+      return [];
+    }
+    console.warn('Could not fetch products from Cloudflare D1:', error);
     return [];
   }
 };

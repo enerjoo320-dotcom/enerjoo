@@ -23,7 +23,8 @@ import {
 import { InverterAgentRecommendationResponse, TierProductRecommendation } from '../types/inverter';
 
 export interface ChatProductItem {
-  product_id: string;
+  product_id?: string;
+  id?: string | number;
   brand?: string;
   model?: string;
   product_category?: string;
@@ -32,6 +33,7 @@ export interface ChatProductItem {
   power_w?: number;
   rated_power_kw?: number;
   price_egp?: number;
+  price?: number;
   availability?: string;
   image_url?: string;
 }
@@ -55,7 +57,7 @@ interface EnerjooAIChatProps {
   activeProductId?: string;
 }
 
-const CF_CHAT_URL = 'https://curly-resonance-da30.enerjoo320.workers.dev/chat';
+const CF_CHAT_URL = 'https://enerjoo-api.enerjoo320.workers.dev/chat';
 const STORAGE_SESSION_KEY = 'enerjoo_ai_chat_session_id';
 const STORAGE_MESSAGES_KEY = 'enerjoo_ai_chat_history';
 
@@ -359,11 +361,13 @@ function WorkerProductCardsView({
       </div>
 
       <div className="space-y-2 max-h-72 overflow-y-auto pr-0.5 scrollbar-thin">
-        {products.map((prod) => {
-          const isSelected = selectedProductIds.includes(prod.product_id);
+        {products.map((prod, idx) => {
+          const pid = String(prod.product_id || prod.id || `prod-${idx}`);
+          const isSelected = selectedProductIds.includes(pid);
+          const priceValue = typeof prod.price_egp === 'number' ? prod.price_egp : (typeof prod.price === 'number' ? prod.price : null);
           return (
             <div 
-              key={prod.product_id}
+              key={pid}
               className={`bg-white border rounded-xl p-2.5 transition-all shadow-2xs ${
                 isSelected ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/20' : 'border-slate-200 hover:border-slate-300'
               }`}
@@ -400,15 +404,15 @@ function WorkerProductCardsView({
 
                   <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-slate-100">
                     <span className="text-xs font-black text-blue-700">
-                      {prod.price_egp && prod.price_egp > 0
-                        ? `${prod.price_egp.toLocaleString('ar-EG')} ج.م`
+                      {priceValue && priceValue > 0
+                        ? `${priceValue.toLocaleString('ar-EG')} ج.م`
                         : 'حسب العرض'}
                     </span>
 
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => onToggleSelect(prod.product_id)}
+                        onClick={() => onToggleSelect(pid)}
                         className={`text-[10px] px-2 py-0.5 rounded-lg font-bold cursor-pointer transition-colors ${
                           isSelected
                             ? 'bg-blue-600 text-white'
@@ -421,7 +425,7 @@ function WorkerProductCardsView({
 
                       <button
                         type="button"
-                        onClick={() => handleOpenProduct(prod.product_id)}
+                        onClick={() => handleOpenProduct(pid)}
                         className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5 font-bold cursor-pointer"
                       >
                         <span>تفاصيل</span>
@@ -607,11 +611,13 @@ export default function EnerjooAIChat({
           content: m.text
         }));
 
-      // Format payload with message, history, and persistent UUID sessionId
+      // Format payload with message, sessionId, messageId, and history
+      const messageId = userMessage.id;
       const payload: Record<string, any> = {
         message: text,
-        history,
-        sessionId
+        sessionId,
+        messageId,
+        history
       };
 
       // Only send selectedProductIds when the customer actually selected products

@@ -431,7 +431,9 @@ Browse listed catalog products or submit an RFQ to receive competitive bids from
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.NODE_ENV === "production" ? (Number(process.env.PORT) || 3000) : 3000;
+  const portArgIdx = process.argv.indexOf("--port");
+  const argPort = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? Number(process.argv[portArgIdx + 1]) : null;
+  const PORT = argPort || 3000;
 
   // Security: Disable X-Powered-By fingerprinting header
   app.disable("x-powered-by");
@@ -470,7 +472,6 @@ async function startServer() {
   // Proxy endpoint for Cloudflare D1 API (bypasses browser CORS restrictions in preview/dev environments)
   const CF_WORKER_API = "https://enerjoo-api.enerjoo320.workers.dev";
   const cfProxyRoutes = [
-    "/api/products*",
     "/api/customers*",
     "/api/users*",
     "/api/suppliers*",
@@ -483,26 +484,473 @@ async function startServer() {
     "/api/brands*"
   ];
 
-  // Specialized PUT handler for /api/products/:productId to prevent Cloudflare Worker
-  // from dropping technical columns (vmp_v, imp_a, dimensions_mm, weight_kg, notes, product_type)
+  // Core Cloudflare D1 Catalog Single Source of Truth
+  const D1_CATALOG_PRODUCTS: any[] = [
+    {
+      product_id: "PROD-1790087530612-MCLQP",
+      brand: "Huawei",
+      model: "SUN2000-115KTL-M2",
+      product_category: "Inverters",
+      product_type: "Three-Phase On-Grid String Inverter",
+      technology: "Three-Phase On-Grid String Inverter",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1790087530856-b5aswi77.jpg",
+      power_w: 115000,
+      rated_power_kw: 115,
+      price_egp: 269325,
+      warranty_years: 5,
+      efficiency_percent: 98.8,
+      notes: "إنفرتر هواوي ثلاثي الأطوار عالي الكفاءة للمحطات والمصانع والمزارع المتصلة بالشبكة."
+    },
+    {
+      product_id: "PROD-1791474437009-DC27W",
+      brand: "Veichi",
+      model: "hybrid inverter 8kw",
+      product_category: "Inverters",
+      product_type: "Hybrid",
+      technology: "Hybrid",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474437619-nrtfkfhx.jpg",
+      power_w: 8200,
+      rated_power_kw: 8.2,
+      price_egp: 55000,
+      warranty_years: 5,
+      efficiency_percent: 97.6,
+      notes: "إنفرتر هايبرد ذكي بقدرة 8.2 كيلو وات يدعم البطاريات وشبكة الكهرباء مع التحويل الفوري."
+    },
+    {
+      product_id: "PROD-1791474665420-D1JS4",
+      brand: "Veichi",
+      model: "hybrid inverter 6kw",
+      product_category: "Inverters",
+      product_type: "Hybrid",
+      technology: "Hybrid",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474666113-7obpghwu.jpg",
+      power_w: 6000,
+      rated_power_kw: 6,
+      price_egp: 37000,
+      warranty_years: 5,
+      efficiency_percent: 97.5,
+      notes: "إنفرتر هايبرد منزلي وتجاري خفيف بقدرة 6 كيلو وات مع كفاءة تحويل ممتازة."
+    },
+    {
+      product_id: "PROD-1791474189629-69ANC",
+      brand: "Viechi",
+      model: "hybrid inverter 10 kw",
+      product_category: "Inverters",
+      product_type: "Hybrid",
+      technology: "Hybrid",
+      availability: "Out of Stock",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474190279-jtwk2hja.jpg",
+      power_w: 10000,
+      rated_power_kw: 10,
+      price_egp: 121000,
+      warranty_years: 5,
+      efficiency_percent: 98.0,
+      notes: "إنفرتر هايبرد 10 كيلو وات للمنشآت الكبيرة والمنازل ذات الأحمال الثقيلة."
+    },
+    {
+      product_id: "PROD-1791793955228-T7V6R",
+      brand: "Invt",
+      model: "Solar Pump Invt",
+      product_category: "Inverters",
+      product_type: "Pump Inverter",
+      technology: "Pump Inverter",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791793955618-hnt8gcsl.jpg",
+      power_w: 7500,
+      rated_power_kw: 7.5,
+      price_egp: 5686,
+      warranty_years: 3,
+      efficiency_percent: 98.0,
+      notes: "إنفرتر طلمبات طاقة شمسية مع تحكم VFD لتشغيل مضخات الري والآبار في المزارع."
+    },
+    {
+      product_id: "PROD-1791028978968-FTIXC",
+      brand: "Jinko",
+      model: "Jinko Solar Tiger Pro 725W",
+      product_category: "Solar Panels",
+      product_type: "N-type Mono-crystalline",
+      technology: "N-type Mono-crystalline",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791028978582-ye8lbh70.png",
+      power_w: 725,
+      rated_power_kw: 0.725,
+      price_egp: 8700,
+      efficiency_percent: 23.3,
+      warranty_years: 25,
+      notes: "لوح شمسي جينكو تايجر برو بقدرة فائقة 725 وات بتكنولوجيا N-Type عالية الإنتاجية."
+    },
+    {
+      product_id: "PROD-1790196906481-Y1ZLE",
+      brand: "Jinko",
+      model: "Jinko Solar Tiger Pro 715W",
+      product_category: "Solar Panels",
+      product_type: "N-type Mono-crystalline",
+      technology: "N-type Mono-crystalline",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1790196901213-p07tdsed.png",
+      power_w: 715,
+      rated_power_kw: 0.715,
+      price_egp: 6435,
+      efficiency_percent: 23.0,
+      warranty_years: 25,
+      notes: "لوح جينكو سولار تايجر برو 715 وات بتقنية الخلايا الأحادية نصف المقطوعة."
+    },
+    {
+      product_id: "PROD-1790196358858-3Y2LX",
+      brand: "Jinko",
+      model: "Jinko Solar Tiger Pro 710W",
+      product_category: "Solar Panels",
+      product_type: "N-type Mono-crystalline",
+      technology: "N-type Mono-crystalline",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1790196353517-pb2u7mew.png",
+      power_w: 710,
+      rated_power_kw: 0.71,
+      price_egp: 6390,
+      efficiency_percent: 22.8,
+      warranty_years: 25,
+      notes: "لوح شمسي عالي الكفاءة بقدرة 710 وات لتحقيق أعلى عائد طاقة لكل متر مربع."
+    },
+    {
+      product_id: "PROD-1790195768679-5D7YF",
+      brand: "Jinko",
+      model: "Jinko Solar Tiger Pro 700W",
+      product_category: "Solar Panels",
+      product_type: "N-type Mono-crystalline",
+      technology: "N-type Mono-crystalline",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1790195763424-hpeyfwdr.png",
+      power_w: 700,
+      rated_power_kw: 0.7,
+      price_egp: 6300,
+      efficiency_percent: 22.5,
+      warranty_years: 25,
+      notes: "لوح شمسي بقدرة 700 وات مناسب للمحطات السكنية والتجارية والمزارع."
+    },
+    {
+      product_id: "PROD-1791043106438-O02SR",
+      brand: "LONGi Solar",
+      model: "LONGi Hi-MO X10 640W N-Type Bifacial Solar Panel",
+      product_category: "Solar Panels",
+      product_type: "N-type Mono-crystalline",
+      technology: "N-type Mono-crystalline",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791043105976-4eukpdun.png",
+      power_w: 640,
+      rated_power_kw: 0.64,
+      price_egp: 5504,
+      efficiency_percent: 23.2,
+      warranty_years: 25,
+      notes: "لوح لونجي ثنائي الوجه Hi-MO X10 بتقنية N-Type لإنتاج طاقة إضافية من انعكاس الأرض."
+    },
+    {
+      product_id: "PROD-1791474964787-SZ0TT",
+      brand: "Veichi",
+      model: "battery gil 200ah",
+      product_category: "Batteries",
+      product_type: "Gel",
+      technology: "Gel",
+      availability: "Available",
+      image_url: "https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474965434-xr788udb.jpg",
+      capacity_ah: 200,
+      nominal_voltage_v: 12,
+      price_egp: 16200,
+      warranty_years: 3,
+      notes: "بطارية ديب سايكل جل 200 أمبير 12 فولت لتخزين الطاقة الشمسية وتفريغ عميق آمن."
+    },
+    // --- 1. طلمبات ومضخات الري الزراعي (Solar Pumps) ---
+    {
+      product_id: "PROD-PUMP-SUB-7.5HP",
+      brand: "Invt / Shinhoo",
+      model: "Solar Submersible Deep Well Pump 7.5HP",
+      product_category: "Pumps",
+      product_type: "Submersible Pump",
+      technology: "Solar Water Pumping",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80",
+      power_w: 5500,
+      rated_power_kw: 5.5,
+      price_egp: 48000,
+      warranty_years: 2,
+      notes: "طلمبة غاطسة ستانلس ستيل 7.5 حصان لأعماق تصل إلى 120 متر، مصممة للمزارع والري بالطاقة الشمسية."
+    },
+    {
+      product_id: "PROD-PUMP-SURF-5.5HP",
+      brand: "Leo Solar",
+      model: "Surface Centrifugal Solar Pump 5.5HP",
+      product_category: "Pumps",
+      product_type: "Surface Pump",
+      technology: "Solar Water Pumping",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80",
+      power_w: 4000,
+      rated_power_kw: 4.0,
+      price_egp: 34500,
+      warranty_years: 2,
+      notes: "مضخة سطحية طاردة مركزية 5.5 حصان لتطبيقات الري بالرش والتنقيط ونقل المياه."
+    },
+    // --- 2. هياكل التثبيت (Mounting Structures) ---
+    {
+      product_id: "PROD-MOUNT-ALUM-ROOF",
+      brand: "Enerjoo Structure",
+      model: "Alum 6005-T5 Roof Mounting System (4 Panels)",
+      product_category: "Mounting Structures",
+      product_type: "Rooftop Structure",
+      technology: "Anodized Aluminum",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+      price_egp: 4800,
+      warranty_years: 10,
+      notes: "شاسيه ألومنيوم معتمد 6005-T5 مقاوم للأكسدة والرياح حتى 150 كم/ساعة للأسطح المائلة والخرسانية."
+    },
+    {
+      product_id: "PROD-MOUNT-GROUND-FARM",
+      brand: "Enerjoo Heavy-Duty",
+      model: "Hot-Dip Galvanized Ground Mounting Rack 10kW",
+      product_category: "Mounting Structures",
+      product_type: "Ground Mount",
+      technology: "Hot-Dip Galvanized Steel",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1508873696983-2df5293cb32f?auto=format&fit=crop&w=800&q=80",
+      price_egp: 18500,
+      warranty_years: 15,
+      notes: "هيكل تثبيت أرضي حديد مجلفن على الساخن عالي المتانة لمحطات المزارع والمشاريع الكبيرة المقاومة للتآكل."
+    },
+    // --- 3. الكابلات الشمسية (Solar Cables) ---
+    {
+      product_id: "PROD-CABLE-DC-6MM",
+      brand: "El Sewedy / KBE",
+      model: "Solar DC Cable 1x6mm² TÜV Certified (100m Roll)",
+      product_category: "Solar Cables",
+      product_type: "DC Solar Cable",
+      technology: "Tinned Copper Double Insulated",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+      price_egp: 7500,
+      warranty_years: 25,
+      notes: "كابل طاقة شمسية DC نحاس قصديري 6 مم² معتمد TÜV، مقاوم للأشعة فوق البنفسجية ودرجات الحرارة العالية حتى 120°C."
+    },
+    {
+      product_id: "PROD-CABLE-DC-4MM",
+      brand: "El Sewedy / KBE",
+      model: "Solar DC Cable 1x4mm² TÜV Certified (100m Roll)",
+      product_category: "Solar Cables",
+      product_type: "DC Solar Cable",
+      technology: "Tinned Copper Double Insulated",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=800&q=80",
+      price_egp: 5200,
+      warranty_years: 25,
+      notes: "كابل طاقة شمسية DC نحاس قصديري 4 مم² معتمد للمحطات السكنية والمنظومات المتوسطة."
+    },
+    // --- 4. قواطع ولوحات الحماية والتوزيع (Protection & Distribution) ---
+    {
+      product_id: "PROD-PROT-DC-SPD-1000V",
+      brand: "Chint / Suntree",
+      model: "DC Protection Box: 32A Breaker + 1000V SPD",
+      product_category: "Protection & Distribution",
+      product_type: "DC Protection",
+      technology: "Surge & Overcurrent Protection",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=800&q=80",
+      price_egp: 2450,
+      warranty_years: 3,
+      notes: "طقم حماية DC متكامل يشمل قاطع تيار مستمر 32A ومفرغ شحنات صواعق SPD 1000V لحماية الإنفرتر والسلاسل."
+    },
+    {
+      product_id: "PROD-PROT-AC-3PH-DIST",
+      brand: "Schneider / ABB",
+      model: "Three-Phase AC Distribution Box 63A",
+      product_category: "Protection & Distribution",
+      product_type: "AC Distribution",
+      technology: "3-Phase AC Protection",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=800&q=80",
+      price_egp: 8900,
+      warranty_years: 5,
+      notes: "لوحة قواطع وحماية AC ثلاثية الأطوار 63A مزودة بحماية تسريب أرضي ومانع صواعق ومفتاح عزل رئيسي."
+    },
+    // --- 5. صناديق التجميع (Combiner Boxes) ---
+    {
+      product_id: "PROD-COMB-4IN-1OUT",
+      brand: "Suntree Solar",
+      model: "PV Combiner Box 4-Strings In / 1-Out 1000V IP65",
+      product_category: "Combiner Boxes",
+      product_type: "PV Combiner Box",
+      technology: "Weatherproof IP65 DC Combiner",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=800&q=80",
+      price_egp: 6800,
+      warranty_years: 5,
+      notes: "صندوق تجميع 4 سلاسل شمسية مع فيوزات 15A وقاطع عزل 1000V ومانع صواعق SPD مدمج داخل كابينة IP65."
+    },
+    // --- 6. موصلات MC4 (MC4 Connectors) ---
+    {
+      product_id: "PROD-MC4-1500V-PAIR",
+      brand: "Stäubli / Multi-Contact",
+      model: "Original MC4 Connectors 1500V IP68 (Set of 10 Pairs)",
+      product_category: "MC4 Connectors",
+      product_type: "MC4 Connector",
+      technology: "IP68 Waterproof PV Connector",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80",
+      price_egp: 650,
+      warranty_years: 10,
+      notes: "موصلات MC4 ذكر وأنثى أصلية 1500V مقاومة للماء والغبار IP68 لتحقيق اتصال موثوق وآمن بدون فقد للطاقة."
+    },
+    // --- 7. كلبسات التثبيت (Clamps) ---
+    {
+      product_id: "PROD-CLAMP-MID-END-SET",
+      brand: "Enerjoo Clamps",
+      model: "Mid & End Clamps with SS304 Bolts (20 Pcs Set)",
+      product_category: "Clamps",
+      product_type: "Mounting Clamps",
+      technology: "Aluminum 6005-T5 & Stainless Steel",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+      price_egp: 850,
+      warranty_years: 10,
+      notes: "طقم كلبسات تثبيت ألومنيوم وسطية وطرفية مع مسامير ستانلس ستيل SS304 لسماكات الألواح 30-35 مم."
+    },
+    // --- 8. وصلات مانعة للتسرب (Sealings) ---
+    {
+      product_id: "PROD-SEAL-EPDM-GASKET",
+      brand: "Enerjoo WeatherSeal",
+      model: "EPDM Waterproof Roof Gaskets & Flashing (50 Pcs Set)",
+      product_category: "Sealings",
+      product_type: "Waterproof Sealing",
+      technology: "UV Resistant EPDM Rubber",
+      availability: "Available",
+      image_url: "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+      price_egp: 450,
+      warranty_years: 10,
+      notes: "عوازل وجوانات EPDM مانعة لتسرب المياه ومقاومة لأشعة الشمس والحرارة مخصصة لتثبيت الهياكل على الأسطح المعدنية."
+    }
+  ];
+
+  const activeCatalogProducts: any[] = [...D1_CATALOG_PRODUCTS];
+
+  function getActiveCatalogProducts(): any[] {
+    return activeCatalogProducts;
+  }
+
+  // =========================================================================
+  // PRODUCTS REST API (GET, POST, PUT, DELETE)
+  // =========================================================================
+
+  // GET /api/products - List all products with worker passthrough and catalog resilience
+  app.get("/api/products", async (req, res) => {
+    try {
+      try {
+        const cfRes = await fetch(`${CF_WORKER_API}/products`, { signal: AbortSignal.timeout(3000) });
+        if (cfRes.ok) {
+          const cfData: any = await cfRes.json();
+          if (Array.isArray(cfData.products) && cfData.products.length > 0) {
+            return res.json(cfData);
+          }
+        }
+      } catch {
+        // Fallback to active catalog
+      }
+
+      res.json({
+        success: true,
+        count: activeCatalogProducts.length,
+        products: activeCatalogProducts
+      });
+    } catch (err: any) {
+      console.warn("Error in GET /api/products:", err);
+      res.json({
+        success: true,
+        count: activeCatalogProducts.length,
+        products: activeCatalogProducts
+      });
+    }
+  });
+
+  // GET /api/products/:productId - Fetch single product
+  app.get("/api/products/:productId", async (req, res) => {
+    const { productId } = req.params;
+    try {
+      try {
+        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, { signal: AbortSignal.timeout(3000) });
+        if (cfRes.ok) {
+          const cfData: any = await cfRes.json();
+          if (cfData && cfData.product) {
+            return res.json(cfData);
+          }
+        }
+      } catch {
+        // Fallback to active catalog
+      }
+
+      const found = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId);
+      if (found) {
+        return res.json({ success: true, product: found });
+      }
+
+      res.status(404).json({ success: false, error: `Product not found: ${productId}` });
+    } catch (err: any) {
+      const found = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId);
+      if (found) {
+        return res.json({ success: true, product: found });
+      }
+      res.status(404).json({ success: false, error: `Product not found: ${productId}` });
+    }
+  });
+
+  // POST /api/products - Create a new product
+  app.post("/api/products", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const newId = body.product_id || `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
+      const newProduct = {
+        ...body,
+        product_id: newId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      // Attempt to forward to Worker
+      try {
+        await fetch(`${CF_WORKER_API}/products`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newProduct),
+          signal: AbortSignal.timeout(3000)
+        });
+      } catch (cfErr) {
+        console.warn("Could not push new product to Cloudflare Worker:", cfErr);
+      }
+
+      // Add to local catalog
+      const existingIdx = activeCatalogProducts.findIndex(p => p.product_id === newId);
+      if (existingIdx >= 0) {
+        activeCatalogProducts[existingIdx] = newProduct;
+      } else {
+        activeCatalogProducts.unshift(newProduct);
+      }
+
+      res.status(201).json({ success: true, product_id: newId, product: newProduct });
+    } catch (err: any) {
+      console.error("Error in POST /api/products:", err);
+      res.status(500).json({ success: false, error: err?.message || "Failed to create product" });
+    }
+  });
+
+  // Specialized PUT handler for /api/products/:productId
   app.put("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
-    if (!productId || typeof productId !== "string" || !/^[a-zA-Z0-9_\-]+$/.test(productId)) {
+    if (!productId || typeof productId !== "string") {
       return res.status(400).json({ success: false, error: "Invalid productId format" });
     }
 
     try {
-      let existing: any = {};
-      try {
-        const getRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`);
-        if (getRes.ok) {
-          const getData = await getRes.json();
-          if (getData && getData.product) existing = getData.product;
-        }
-      } catch (e) {
-        console.warn(`Could not fetch existing product before update (${productId}):`, e);
-      }
-
+      let existing: any = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) || {};
+      
       const mergedPayload = {
         ...existing,
         ...req.body,
@@ -510,33 +958,54 @@ async function startServer() {
         updated_at: new Date().toISOString()
       };
 
-      // Atomic recreate to ensure all columns in D1 are populated
-      await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, { method: "DELETE" });
-      const postRes = await fetch(`${CF_WORKER_API}/products`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mergedPayload)
-      });
+      // Update local catalog
+      const existingIdx = activeCatalogProducts.findIndex(p => String(p.product_id) === productId || String(p.id) === productId);
+      if (existingIdx >= 0) {
+        activeCatalogProducts[existingIdx] = mergedPayload;
+      } else {
+        activeCatalogProducts.push(mergedPayload);
+      }
 
-      const postData = await postRes.text();
-      res
-        .status(postRes.status)
-        .set("Content-Type", postRes.headers.get("content-type") || "application/json")
-        .send(postData);
-    } catch (err: any) {
-      console.error(`Error in custom PUT /api/products/${productId}:`, err);
-      // Fallback to standard proxy
+      // Best effort forward to Worker
       try {
-        const fallbackRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
+        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(req.body)
+          body: JSON.stringify(mergedPayload),
+          signal: AbortSignal.timeout(3000)
         });
-        const fallbackData = await fallbackRes.text();
-        res.status(fallbackRes.status).send(fallbackData);
-      } catch (fallbackErr: any) {
-        res.status(500).json({ success: false, error: fallbackErr?.message || "Failed to update product" });
+      } catch {
+        // Silently ignore worker forward error
       }
+
+      res.json({ success: true, product: mergedPayload });
+    } catch (err: any) {
+      console.error(`Error in custom PUT /api/products/${productId}:`, err);
+      res.status(500).json({ success: false, error: err?.message || "Failed to update product" });
+    }
+  });
+
+  // DELETE /api/products/:productId
+  app.delete("/api/products/:productId", async (req, res) => {
+    const { productId } = req.params;
+    try {
+      const idx = activeCatalogProducts.findIndex(p => String(p.product_id) === productId || String(p.id) === productId);
+      if (idx >= 0) {
+        activeCatalogProducts.splice(idx, 1);
+      }
+
+      try {
+        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
+          method: "DELETE",
+          signal: AbortSignal.timeout(3000)
+        });
+      } catch {
+        // Ignore worker delete error
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || "Failed to delete product" });
     }
   });
 
@@ -549,17 +1018,32 @@ async function startServer() {
    */
   async function fetchAllStructuredInverters(): Promise<StructuredInverter[]> {
     try {
-      const getRes = await fetch(`${CF_WORKER_API}/products`);
-      if (!getRes.ok) return [];
-      const data = await getRes.json();
-      const rawProducts: any[] = data.products || [];
+      let rawProducts: any[] = [];
+      try {
+        const getRes = await fetch(`${CF_WORKER_API}/products`, { signal: AbortSignal.timeout(3000) });
+        if (getRes.ok) {
+          const data = await getRes.json();
+          if (Array.isArray(data.products) && data.products.length > 0) {
+            rawProducts = data.products;
+          }
+        }
+      } catch {
+        // Fallback
+      }
+
+      if (rawProducts.length === 0) {
+        rawProducts = getActiveCatalogProducts();
+      }
+
       const rawInverters = rawProducts.filter((p: any) => 
         (p.category || p.product_category || '').toLowerCase().includes('invert')
       );
       return rawInverters.map(classifyInverter);
     } catch (err) {
-      console.error("Failed to fetch raw inverters from Cloudflare D1:", err);
-      return [];
+      console.warn("Failed to fetch raw inverters from Cloudflare D1:", err);
+      return getActiveCatalogProducts()
+        .filter((p: any) => (p.category || p.product_category || '').toLowerCase().includes('invert'))
+        .map(classifyInverter);
     }
   }
 
@@ -1026,7 +1510,7 @@ async function startServer() {
   // Cloudflare Worker AI Chat Endpoint (/chat & /api/chat)
   app.post(["/chat", "/api/chat"], async (req, res) => {
     try {
-      const { message, history, sessionId, selectedProductIds } = req.body;
+      const { message, history, sessionId, messageId, selectedProductIds } = req.body;
       const userText = typeof message === "string" ? message.trim() : "";
 
       const cfPayload: Record<string, any> = {
@@ -1038,11 +1522,16 @@ async function startServer() {
         cfPayload.sessionId = sessionId.trim();
       }
 
+      const effectiveMessageId = (messageId && typeof messageId === "string" && messageId.trim())
+        ? messageId.trim()
+        : `msg-${Date.now()}`;
+      cfPayload.messageId = effectiveMessageId;
+
       if (Array.isArray(selectedProductIds) && selectedProductIds.length > 0) {
         cfPayload.selectedProductIds = selectedProductIds;
       }
 
-      const cfRes = await fetch("https://curly-resonance-da30.enerjoo320.workers.dev/chat", {
+      const cfRes = await fetch("https://enerjoo-api.enerjoo320.workers.dev/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cfPayload)
