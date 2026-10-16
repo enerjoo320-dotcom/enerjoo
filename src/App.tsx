@@ -50,6 +50,7 @@ import { auth } from './lib/firebase';
 import { safeLocalStorage } from './utils/safeStorage';
 import { CUSTOMER_SERVICE_PHONE_DISPLAY, getCustomerServiceWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY, getSupplierWhatsAppUrl } from './constants/contact';
 import { AppNavState, parseUrlToNavState, navStateToUrl } from './utils/navigation';
+import { productsData } from './data/mockData';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -68,7 +69,7 @@ export default function App() {
   const [view, setView] = useState<ViewType>(initialNav.view);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [exchangePrices, setExchangePrices] = useState<Record<string, number>>(getInitialExchangePrices);
-  const [rawProducts, setRawProducts] = useState<Product[]>([]);
+  const [rawProducts, setRawProducts] = useState<Product[]>(productsData);
   const setProducts = setRawProducts;
   const products = useMemo(() => {
     return applySolarPanelPricingToProducts(rawProducts, exchangePrices);
@@ -435,7 +436,11 @@ export default function App() {
 
   useEffect(() => {
     // Setup real-time listeners for products, suppliers and energy exchange
-    const unsubProducts = subscribeToProducts(setProducts);
+    const unsubProducts = subscribeToProducts((loadedProducts) => {
+      if (Array.isArray(loadedProducts) && loadedProducts.length > 0) {
+        setProducts(loadedProducts);
+      }
+    });
     const unsubSuppliers = subscribeToSuppliers(setSuppliers);
     const unsubExchange = subscribeToEnergyExchange(setExchangePrices);
     return () => {

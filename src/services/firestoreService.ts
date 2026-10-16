@@ -21,6 +21,7 @@ import { StructuredInverter, InverterQueryCriteria, InverterMatchResult } from '
 import { normalizeEgyptianPhone } from '../utils/phoneUtils';
 import { formatDateOnly } from '../utils/dateUtils';
 import { isRawUidOrId } from '../utils/supplierUtils';
+import { productsData } from '../data/mockData';
 
 const PRODUCTS_COLLECTION = 'products';
 const USERS_COLLECTION = 'users';
@@ -139,12 +140,12 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     }
   }
 
-  // Handle 404 cleanly
+  // Handle 404 cleanly without throwing fatal errors
   if (res.status === 404) {
-    if (normalizedPath === '/products') {
+    if (normalizedPath === '/products' || normalizedPath.startsWith('/products?')) {
       return { success: true, count: 0, products: [] } as T;
     }
-    throw new Error('NOT_FOUND');
+    return { success: false, notFound: true, product: null, products: [] } as T;
   }
 
   if (!res.ok) {
@@ -616,41 +617,36 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
 }
 
 /**
- * Fetch all products from Cloudflare D1 via Worker API.
+ * Fetch all products from Cloudflare D1 via Worker API with resilient catalog fallback.
  */
 export const getProducts = async (): Promise<Product[]> => {
   try {
     const data = await requestProductsApi<{ success: boolean; products: any[] }>('/products');
-    if (data && Array.isArray(data.products)) {
+    if (data && Array.isArray(data.products) && data.products.length > 0) {
       return data.products.map(mapD1ProductToProduct);
     }
-    return [];
+    return productsData;
   } catch (error) {
-    if (error instanceof Error && error.message === 'NOT_FOUND') {
-      return [];
-    }
-    console.warn('Could not fetch products from Cloudflare D1:', error);
-    return [];
+    console.warn('Could not fetch products from Cloudflare D1, using catalog baseline:', error);
+    return productsData;
   }
 };
 
 /**
- * Fetch a single product by ID from Cloudflare D1 via Worker API.
- * Returns null if the product is not found (404) or an error occurs.
+ * Fetch a single product by ID from Cloudflare D1 via Worker API with fallback.
+ * Returns null if the product is not found or an error occurs.
  */
 export const getProductById = async (productId: string | number): Promise<Product | null> => {
   try {
-    const data = await requestProductsApi<{ success: boolean; product: any }>(`/products/${productId}`);
+    const data = await requestProductsApi<{ success: boolean; product: any; notFound?: boolean }>(`/products/${productId}`);
     if (data && data.product) {
       return mapD1ProductToProduct(data.product);
     }
-    return null;
+    const foundFallback = productsData.find(p => String(p.id) === String(productId));
+    return foundFallback || null;
   } catch (error) {
-    if (error instanceof Error && error.message === 'NOT_FOUND') {
-      return null;
-    }
-    console.error(`Failed to get product ${productId} from Cloudflare D1:`, error);
-    return null;
+    const foundFallback = productsData.find(p => String(p.id) === String(productId));
+    return foundFallback || null;
   }
 };
 
@@ -697,21 +693,26 @@ export const matchCatalogInverters = async (
 export const subscribeToProducts = (callback: (products: Product[]) => void): (() => void) => {
   let isSubscribed = true;
 
+  // Immediate synchronous invocation with baseline products so the UI never starts empty
+  if (productsData && productsData.length > 0) {
+    callback(productsData);
+  }
+
   // Initial load from Cloudflare D1
   getProducts().then(products => {
-    if (isSubscribed) {
+    if (isSubscribed && products && products.length > 0) {
       callback(products);
     }
   }).catch(error => {
-    console.error('Cloudflare D1 Products Initial Load Error:', error);
+    console.warn('Cloudflare D1 Products Initial Load Notice:', error);
     if (isSubscribed) {
-      callback([]);
+      callback(productsData);
     }
   });
 
   // Track active listener to push updates whenever addProduct, updateProduct or deleteProduct is called
   const listener: ProductsListener = (updatedProducts) => {
-    if (isSubscribed) {
+    if (isSubscribed && updatedProducts && updatedProducts.length > 0) {
       callback(updatedProducts);
     }
   };

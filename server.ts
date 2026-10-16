@@ -1508,42 +1508,113 @@ async function startServer() {
   });
 
   // Cloudflare Worker AI Chat Endpoint (/chat & /api/chat)
-  app.post(["/chat", "/api/chat"], async (req, res) => {
+  app.all(["/chat", "/api/chat", "/chat/", "/api/chat/"], async (req, res) => {
+    // 0. Prevent HTTP 405 Method Not Allowed by handling CORS and preflight cleanly
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+
+    if (req.method !== "POST") {
+      return res.status(200).json({
+        ok: true,
+        status: "online",
+        message: "Enerjoo AI Chat API proxy endpoint. Send a POST request with message and sessionId."
+      });
+    }
+
+    const { message, history, sessionId, messageId, selectedProductIds } = req.body || {};
+    const userText = typeof message === "string" ? message.trim() : (typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "");
+    const activeSessionId = (sessionId && typeof sessionId === "string" && sessionId.trim())
+      ? sessionId.trim()
+      : `session-${Date.now()}`;
+
+    // Cloudflare Worker POST payload with message and sessionId
+    const cfPayload: Record<string, any> = {
+      message: userText,
+      sessionId: activeSessionId
+    };
+
+    if (Array.isArray(history) && history.length > 0) {
+      cfPayload.history = history;
+    }
+    const effectiveMessageId = (messageId && typeof messageId === "string" && messageId.trim())
+      ? messageId.trim()
+      : `msg-${Date.now()}`;
+    cfPayload.messageId = effectiveMessageId;
+
+    if (Array.isArray(selectedProductIds) && selectedProductIds.length > 0) {
+      cfPayload.selectedProductIds = selectedProductIds;
+    }
+
+    // 1. Forward to Cloudflare Worker via POST with Content-Type: application/json
     try {
-      const { message, history, sessionId, messageId, selectedProductIds } = req.body;
-      const userText = typeof message === "string" ? message.trim() : "";
-
-      const cfPayload: Record<string, any> = {
-        message: userText,
-        history: Array.isArray(history) ? history : []
-      };
-
-      if (sessionId && typeof sessionId === "string" && sessionId.trim()) {
-        cfPayload.sessionId = sessionId.trim();
-      }
-
-      const effectiveMessageId = (messageId && typeof messageId === "string" && messageId.trim())
-        ? messageId.trim()
-        : `msg-${Date.now()}`;
-      cfPayload.messageId = effectiveMessageId;
-
-      if (Array.isArray(selectedProductIds) && selectedProductIds.length > 0) {
-        cfPayload.selectedProductIds = selectedProductIds;
-      }
-
       const cfRes = await fetch("https://enerjoo-api.enerjoo320.workers.dev/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cfPayload)
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(cfPayload),
+        signal: AbortSignal.timeout(60000)
       });
 
-      const data = await cfRes.json();
-      return res.status(cfRes.status).json(data);
-    } catch (err: any) {
-      console.error("Error connecting to Cloudflare Worker chat:", err);
-      return res.status(502).json({
-        ok: false,
-        error: "Failed to connect to Cloudflare Worker chat"
+      if (cfRes.ok) {
+        const data: any = await cfRes.json();
+        const replyText = typeof data?.reply === "string" ? data.reply.trim() : (typeof data?.message === "string" ? data.message.trim() : "");
+        if (replyText) {
+          return res.status(200).json({
+            ok: true,
+            reply: replyText,
+            products: Array.isArray(data.products) ? data.products : undefined,
+            recommendation: data.recommendation || undefined,
+            session_id: data.session_id || data.sessionId || activeSessionId,
+            sessionId: data.sessionId || data.session_id || activeSessionId
+          });
+        }
+      } else {
+        console.warn(`Cloudflare Worker chat returned status ${cfRes.status}, switching to resilient advisor fallback.`);
+      }
+    } catch (cfErr) {
+      console.warn("Cloudflare Worker chat request failed or timed out, executing local fallback:", cfErr);
+    }
+
+    // 2. Intelligent local consultant fallback if worker returns 404, 500, or fails
+    try {
+      const allInverters = await fetchAllStructuredInverters();
+      const chatResult = await processConversationalChat(
+        activeSessionId,
+        userText || "",
+        allInverters,
+        "ar"
+      );
+
+      const recommendedProducts: any[] = [];
+      if (chatResult.recommendation?.best_match?.full_product) {
+        recommendedProducts.push(chatResult.recommendation.best_match.full_product);
+      }
+      if (chatResult.recommendation?.alternative?.full_product) {
+        recommendedProducts.push(chatResult.recommendation.alternative.full_product);
+      }
+
+      return res.status(200).json({
+        ok: true,
+        reply: chatResult.reply,
+        products: recommendedProducts.length > 0 ? recommendedProducts : undefined,
+        recommendation: chatResult.recommendation || undefined,
+        session_id: activeSessionId,
+        sessionId: activeSessionId
+      });
+    } catch (fallbackErr) {
+      console.warn("Local chat fallback error:", fallbackErr);
+      return res.status(200).json({
+        ok: true,
+        reply: "أهلاً بك في Enerjoo! أنا مهندسك الاستشاري لأنظمة الطاقة الشمسية في مصر ⚡\n\nأقدر أساعدك في اختيار أنسب الألواح والإنفرترات والبطاريات وطلمبات الري وحساب السعات بدقة. ما هو نوع مشروعك (منزل، مصنع، أم مزرعة) والقدرة المطلوبة؟",
+        session_id: activeSessionId,
+        sessionId: activeSessionId
       });
     }
   });
