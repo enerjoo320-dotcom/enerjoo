@@ -4,6 +4,22 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/chat",
+      "destination": "https://enerjoo-api.enerjoo320.workers.dev/chat"
+    },
+    {
+      "source": "/api/chat/:path*",
+      "destination": "https://enerjoo-api.enerjoo320.workers.dev/chat"
+    },
+    {
+      "source": "/chat",
+      "destination": "https://enerjoo-api.enerjoo320.workers.dev/chat"
+    },
+    {
+      "source": "/chat/:path*",
+      "destination": "https://enerjoo-api.enerjoo320.workers.dev/chat"
+    },
+    {
       "source": "/api/products/:path*",
       "destination": "https://enerjoo-api.enerjoo320.workers.dev/products/:path*"
     },

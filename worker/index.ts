@@ -40,12 +40,14 @@ const getCorsHeaders = (request: Request): HeadersInit => {
   ];
 
   const isAllowed =
+    !origin ||
     allowedOrigins.includes(origin) ||
     origin.endsWith('.run.app') ||
-    origin.endsWith('.enerjoo.com');
+    origin.endsWith('.enerjoo.com') ||
+    origin.includes('vercel.app');
 
   return {
-    'Access-Control-Allow-Origin': isAllowed ? origin : 'https://enerjoo.com',
+    'Access-Control-Allow-Origin': isAllowed ? (origin || '*') : '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
     'Access-Control-Max-Age': '86400',
@@ -128,9 +130,9 @@ export default {
       }
 
       // ----------------------------------------------------------------------
-      // /chat (Enerjoo Solar Sales & Engineering Consultant)
+      // /chat & /api/chat (Enerjoo Solar Sales & Engineering Consultant)
       // ----------------------------------------------------------------------
-      if (path === '/chat') {
+      if (path === '/chat' || path === '/api/chat') {
         return await handleChat(request, env);
       }
 
