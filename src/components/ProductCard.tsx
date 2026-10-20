@@ -271,7 +271,30 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 </span>
               )}
             </div>
-            {user?.type !== 'admin' && (
+            {isOwner ? (
+              <div className="flex gap-1.5 items-center pointer-events-auto">
+                {onEdit && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onEdit(e, product); }}
+                    className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-md bg-white/95 backdrop-blur-md text-solar-muted hover:text-solar-blue cursor-pointer"
+                    title={isAr ? 'تعديل المنتج' : 'Edit Product'}
+                    aria-label="Edit"
+                  >
+                    <Edit size={16} />
+                  </button>
+                )}
+                {onDelete && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onDelete(e, product); }}
+                    className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all active:scale-90 shadow-md bg-white/95 backdrop-blur-md text-solar-muted hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                    title={isAr ? 'حذف المنتج' : 'Delete Product'}
+                    aria-label="Delete"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ) : (
               <div className="flex gap-1.5 items-center pointer-events-auto">
                 {onWishlist && (
                   <button 

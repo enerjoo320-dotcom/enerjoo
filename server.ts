@@ -831,10 +831,34 @@ async function startServer() {
     }
   ];
 
+  const DELETED_PRODUCTS_FILE = path.join(process.cwd(), "deleted-products.json");
+  const deletedProductIds = new Set<string>();
+
+  try {
+    const fs = await import("fs");
+    if (fs.existsSync(DELETED_PRODUCTS_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(DELETED_PRODUCTS_FILE, "utf-8"));
+      if (Array.isArray(saved)) {
+        saved.forEach((id: string) => deletedProductIds.add(String(id)));
+      }
+    }
+  } catch (e) {
+    console.warn("Could not load deleted-products.json:", e);
+  }
+
+  const saveDeletedProducts = async () => {
+    try {
+      const fs = await import("fs");
+      fs.writeFileSync(DELETED_PRODUCTS_FILE, JSON.stringify(Array.from(deletedProductIds), null, 2), "utf-8");
+    } catch (e) {
+      console.warn("Could not save deleted-products.json:", e);
+    }
+  };
+
   const activeCatalogProducts: any[] = [...D1_CATALOG_PRODUCTS];
 
   function getActiveCatalogProducts(): any[] {
-    return activeCatalogProducts;
+    return activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
   }
 
   // =========================================================================
@@ -849,24 +873,31 @@ async function startServer() {
         if (cfRes.ok) {
           const cfData: any = await cfRes.json();
           if (Array.isArray(cfData.products) && cfData.products.length > 0) {
-            return res.json(cfData);
+            const filtered = cfData.products.filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)));
+            return res.json({
+              ...cfData,
+              count: filtered.length,
+              products: filtered
+            });
           }
         }
       } catch {
         // Fallback to active catalog
       }
 
+      const activeFiltered = activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
       res.json({
         success: true,
-        count: activeCatalogProducts.length,
-        products: activeCatalogProducts
+        count: activeFiltered.length,
+        products: activeFiltered
       });
     } catch (err: any) {
       console.warn("Error in GET /api/products:", err);
+      const activeFiltered = activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
       res.json({
         success: true,
-        count: activeCatalogProducts.length,
-        products: activeCatalogProducts
+        count: activeFiltered.length,
+        products: activeFiltered
       });
     }
   });
@@ -874,12 +905,15 @@ async function startServer() {
   // GET /api/products/:productId - Fetch single product
   app.get("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
+    if (deletedProductIds.has(String(productId))) {
+      return res.status(404).json({ success: false, error: `Product deleted: ${productId}` });
+    }
     try {
       try {
         const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, { signal: AbortSignal.timeout(3000) });
         if (cfRes.ok) {
           const cfData: any = await cfRes.json();
-          if (cfData && cfData.product) {
+          if (cfData && cfData.product && !deletedProductIds.has(String(cfData.product.product_id || cfData.product.id))) {
             return res.json(cfData);
           }
         }
@@ -887,14 +921,14 @@ async function startServer() {
         // Fallback to active catalog
       }
 
-      const found = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId);
+      const found = activeCatalogProducts.find(p => (String(p.product_id) === productId || String(p.id) === productId) && !deletedProductIds.has(String(p.product_id || p.id)));
       if (found) {
         return res.json({ success: true, product: found });
       }
 
       res.status(404).json({ success: false, error: `Product not found: ${productId}` });
     } catch (err: any) {
-      const found = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId);
+      const found = activeCatalogProducts.find(p => (String(p.product_id) === productId || String(p.id) === productId) && !deletedProductIds.has(String(p.product_id || p.id)));
       if (found) {
         return res.json({ success: true, product: found });
       }
@@ -907,6 +941,13 @@ async function startServer() {
     try {
       const body = req.body || {};
       const newId = body.product_id || `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
+      
+      // If this ID was previously marked as deleted, unmark it
+      if (deletedProductIds.has(newId)) {
+        deletedProductIds.delete(newId);
+        await saveDeletedProducts();
+      }
+
       const newProduct = {
         ...body,
         product_id: newId,
@@ -949,6 +990,11 @@ async function startServer() {
     }
 
     try {
+      if (deletedProductIds.has(productId)) {
+        deletedProductIds.delete(productId);
+        await saveDeletedProducts();
+      }
+
       let existing: any = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) || {};
       
       const mergedPayload = {
@@ -989,13 +1035,17 @@ async function startServer() {
   app.delete("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
     try {
-      const idx = activeCatalogProducts.findIndex(p => String(p.product_id) === productId || String(p.id) === productId);
+      const pId = String(productId);
+      deletedProductIds.add(pId);
+      await saveDeletedProducts();
+
+      const idx = activeCatalogProducts.findIndex(p => String(p.product_id) === pId || String(p.id) === pId);
       if (idx >= 0) {
         activeCatalogProducts.splice(idx, 1);
       }
 
       try {
-        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
+        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(pId)}`, {
           method: "DELETE",
           signal: AbortSignal.timeout(3000)
         });
@@ -1003,7 +1053,7 @@ async function startServer() {
         // Ignore worker delete error
       }
 
-      res.json({ success: true });
+      res.json({ success: true, product_id: pId });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || "Failed to delete product" });
     }
@@ -1024,7 +1074,7 @@ async function startServer() {
         if (getRes.ok) {
           const data = await getRes.json();
           if (Array.isArray(data.products) && data.products.length > 0) {
-            rawProducts = data.products;
+            rawProducts = data.products.filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)));
           }
         }
       } catch {
@@ -1036,13 +1086,14 @@ async function startServer() {
       }
 
       const rawInverters = rawProducts.filter((p: any) => 
+        !deletedProductIds.has(String(p.product_id || p.id)) &&
         (p.category || p.product_category || '').toLowerCase().includes('invert')
       );
       return rawInverters.map(classifyInverter);
     } catch (err) {
       console.warn("Failed to fetch raw inverters from Cloudflare D1:", err);
       return getActiveCatalogProducts()
-        .filter((p: any) => (p.category || p.product_category || '').toLowerCase().includes('invert'))
+        .filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)) && (p.category || p.product_category || '').toLowerCase().includes('invert'))
         .map(classifyInverter);
     }
   }

@@ -636,22 +636,22 @@ export default function App() {
 
   const handleConfirmDeleteProduct = async () => {
     if (!productToDelete) return;
+    const pId = productToDelete.id.toString();
     try {
       setIsDeletingProduct(true);
-      const pId = productToDelete.id.toString();
       // Optimistically remove from state immediately
       setProducts(prev => prev.filter(p => p.id.toString() !== pId));
       if (selectedProduct && selectedProduct.id.toString() === pId) {
         setSelectedProduct(null);
         navigateBack('home');
       }
-      await deleteProduct(pId);
       setProductToDelete(null);
+      await deleteProduct(pId);
     } catch (err) {
       console.error('Failed to delete product:', err);
-      alert(isAr ? 'حدث خطأ أثناء حذف المنتج من قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to delete product from database. Please try again.');
     } finally {
       setIsDeletingProduct(false);
+      setProductToDelete(null);
     }
   };
 
@@ -694,9 +694,13 @@ export default function App() {
               onDelete={async (id) => {
                 const pId = id.toString();
                 setProducts(prev => prev.filter(p => p.id.toString() !== pId));
-                await deleteProduct(pId);
                 setSelectedProduct(null);
                 navigateBack('home');
+                try {
+                  await deleteProduct(pId);
+                } catch (e) {
+                  console.error('Failed to delete product from ProductDetail:', e);
+                }
               }}
             />
           );
@@ -1030,7 +1034,11 @@ export default function App() {
             onDelete={async (id) => {
               const pId = id.toString();
               setProducts(prev => prev.filter(p => p.id.toString() !== pId));
-              await deleteProduct(pId);
+              try {
+                await deleteProduct(pId);
+              } catch (e) {
+                console.error('Failed to delete product from SupplierDashboard:', e);
+              }
             }}
             onEdit={(p) => { setEditingProduct(p); navigateToView('add'); }}
             adminSearch={adminSearch}

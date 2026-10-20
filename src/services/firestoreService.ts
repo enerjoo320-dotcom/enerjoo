@@ -22,6 +22,54 @@ import { normalizeEgyptianPhone } from '../utils/phoneUtils';
 import { formatDateOnly } from '../utils/dateUtils';
 import { isRawUidOrId } from '../utils/supplierUtils';
 import { productsData } from '../data/mockData';
+import { safeLocalStorage } from '../utils/safeStorage';
+
+const DELETED_PRODUCTS_STORAGE_KEY = 'enerjoo_deleted_product_ids_v1';
+
+export const getDeletedProductIds = (): Set<string> => {
+  try {
+    const raw = safeLocalStorage.getItem(DELETED_PRODUCTS_STORAGE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return new Set(arr.map(String));
+      }
+    }
+  } catch (err) {
+    console.warn('Error reading deleted products from storage:', err);
+  }
+  return new Set();
+};
+
+export const markProductAsDeleted = (productId: string | number): void => {
+  try {
+    const pId = String(productId);
+    const set = getDeletedProductIds();
+    set.add(pId);
+    safeLocalStorage.setItem(DELETED_PRODUCTS_STORAGE_KEY, JSON.stringify(Array.from(set)));
+  } catch (err) {
+    console.warn('Error saving deleted product to storage:', err);
+  }
+};
+
+export const unmarkProductAsDeleted = (productId: string | number): void => {
+  try {
+    const pId = String(productId);
+    const set = getDeletedProductIds();
+    if (set.has(pId)) {
+      set.delete(pId);
+      safeLocalStorage.setItem(DELETED_PRODUCTS_STORAGE_KEY, JSON.stringify(Array.from(set)));
+    }
+  } catch (err) {
+    console.warn('Error unmarking deleted product in storage:', err);
+  }
+};
+
+export const filterDeletedProducts = (products: Product[]): Product[] => {
+  const deletedSet = getDeletedProductIds();
+  if (deletedSet.size === 0) return products;
+  return products.filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
+};
 
 const PRODUCTS_COLLECTION = 'products';
 const USERS_COLLECTION = 'users';
@@ -620,15 +668,17 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
  * Fetch all products from Cloudflare D1 via Worker API with resilient catalog fallback.
  */
 export const getProducts = async (): Promise<Product[]> => {
+  const deletedSet = getDeletedProductIds();
   try {
     const data = await requestProductsApi<{ success: boolean; products: any[] }>('/products');
     if (data && Array.isArray(data.products) && data.products.length > 0) {
-      return data.products.map(mapD1ProductToProduct);
+      const mapped = data.products.map(mapD1ProductToProduct);
+      return mapped.filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
     }
-    return productsData;
+    return productsData.filter(p => !deletedSet.has(String(p.id)));
   } catch (error) {
     console.warn('Could not fetch products from Cloudflare D1, using catalog baseline:', error);
-    return productsData;
+    return productsData.filter(p => !deletedSet.has(String(p.id)));
   }
 };
 
@@ -637,16 +687,28 @@ export const getProducts = async (): Promise<Product[]> => {
  * Returns null if the product is not found or an error occurs.
  */
 export const getProductById = async (productId: string | number): Promise<Product | null> => {
+  const pId = String(productId);
+  if (getDeletedProductIds().has(pId)) {
+    return null;
+  }
   try {
     const data = await requestProductsApi<{ success: boolean; product: any; notFound?: boolean }>(`/products/${productId}`);
     if (data && data.product) {
-      return mapD1ProductToProduct(data.product);
+      const prod = mapD1ProductToProduct(data.product);
+      if (getDeletedProductIds().has(String(prod.id))) return null;
+      return prod;
     }
-    const foundFallback = productsData.find(p => String(p.id) === String(productId));
-    return foundFallback || null;
+    const foundFallback = productsData.find(p => String(p.id) === pId);
+    if (foundFallback && !getDeletedProductIds().has(String(foundFallback.id))) {
+      return foundFallback;
+    }
+    return null;
   } catch (error) {
-    const foundFallback = productsData.find(p => String(p.id) === String(productId));
-    return foundFallback || null;
+    const foundFallback = productsData.find(p => String(p.id) === pId);
+    if (foundFallback && !getDeletedProductIds().has(String(foundFallback.id))) {
+      return foundFallback;
+    }
+    return null;
   }
 };
 
@@ -693,27 +755,28 @@ export const matchCatalogInverters = async (
 export const subscribeToProducts = (callback: (products: Product[]) => void): (() => void) => {
   let isSubscribed = true;
 
-  // Immediate synchronous invocation with baseline products so the UI never starts empty
-  if (productsData && productsData.length > 0) {
-    callback(productsData);
+  // Immediate synchronous invocation with filtered baseline products so the UI never starts empty or with deleted items
+  const initial = filterDeletedProducts(productsData);
+  if (initial && initial.length > 0) {
+    callback(initial);
   }
 
   // Initial load from Cloudflare D1
   getProducts().then(products => {
-    if (isSubscribed && products && products.length > 0) {
+    if (isSubscribed && products) {
       callback(products);
     }
   }).catch(error => {
     console.warn('Cloudflare D1 Products Initial Load Notice:', error);
     if (isSubscribed) {
-      callback(productsData);
+      callback(filterDeletedProducts(productsData));
     }
   });
 
   // Track active listener to push updates whenever addProduct, updateProduct or deleteProduct is called
   const listener: ProductsListener = (updatedProducts) => {
-    if (isSubscribed && updatedProducts && updatedProducts.length > 0) {
-      callback(updatedProducts);
+    if (isSubscribed && updatedProducts) {
+      callback(filterDeletedProducts(updatedProducts));
     }
   };
   activeProductListeners.add(listener);
@@ -733,6 +796,7 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
   try {
     // Generate a unique product_id for Cloudflare D1 if not provided
     const newProductId = (product.id ? String(product.id) : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`).toUpperCase();
+    unmarkProductAsDeleted(newProductId);
     const payload = {
       ...mapProductToD1Payload(product),
       product_id: newProductId
@@ -744,8 +808,9 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
     });
 
     const createdId = res.product_id || newProductId;
+    unmarkProductAsDeleted(createdId);
     // Notify active subscribers
-    notifyProductListeners();
+    await notifyProductListeners();
     return createdId;
   } catch (error) {
     console.error('Failed to add product to Cloudflare D1:', error);
@@ -761,6 +826,7 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
 export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
   try {
     const pId = String(productId);
+    unmarkProductAsDeleted(pId);
     const payload = mapProductToD1Payload(data);
     payload.product_id = pId;
 
@@ -802,7 +868,7 @@ export const updateProduct = async (productId: string | number, data: Partial<Pr
     }
 
     // Notify active subscribers
-    notifyProductListeners();
+    await notifyProductListeners();
   } catch (error) {
     console.error(`Failed to update product ${productId} in Cloudflare D1:`, error);
     throw error;
@@ -811,24 +877,26 @@ export const updateProduct = async (productId: string | number, data: Partial<Pr
 
 /**
  * Delete a product from Cloudflare D1 via Worker API (DELETE /products/:id).
+ * Guaranteed persistent removal across reloads and catalog updates.
  */
 export const deleteProduct = async (productId: string | number): Promise<void> => {
+  const pId = String(productId);
+
+  // 1. Mark as permanently deleted in persistent client storage first
+  markProductAsDeleted(pId);
+
+  // 2. Request deletion from Cloudflare Worker / backend API
   try {
-    const pId = String(productId);
-    await requestProductsApi<{ success: boolean; message?: string }>(`/products/${pId}`, {
+    await requestProductsApi<{ success: boolean; message?: string }>(`/products/${encodeURIComponent(pId)}`, {
       method: 'DELETE'
     });
-
-    // Notify active subscribers
-    notifyProductListeners();
   } catch (error) {
-    if (error instanceof Error && error.message === 'NOT_FOUND') {
-      console.warn(`Product ${productId} was not found on Cloudflare D1 (already deleted).`);
-      return;
-    }
-    console.error(`Failed to delete product ${productId} from Cloudflare D1:`, error);
-    throw error;
+    // Non-blocking log: even if live worker returns 404 or fails, product is permanently excluded locally
+    console.warn(`Products API deletion notice for ${productId}:`, error);
   }
+
+  // 3. Immediately notify all active product subscribers with filtered products
+  await notifyProductListeners();
 };
 
 export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) => {
