@@ -14,11 +14,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return request.auth != null && (
-        (request.auth.token.keys().contains('email') && (
-          request.auth.token.email.matches('(?i)^enerjoo365@.*') ||
-          request.auth.token.email.matches('(?i)^enerjoo320@.*') ||
-          request.auth.token.email == 'eng.faressnasser@gmail.com'
-        )) ||
+        (request.auth.token.keys().contains('email') &&
+          request.auth.token.email.matches('(?i)^enerjoo365@gmail\\.com$')) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin')
       );
@@ -108,16 +105,25 @@ service cloud.firestore {
       // Public read access for supplier directory, profiles, ratings
       allow read, list: if true;
 
-      // Users can only create their own document or admins can create
-      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      // Users can only create their own document (as customer or unverified supplier) or admins can create
+      allow create: if isSignedIn() && (
+        isAdmin() || (
+          request.auth.uid == userId &&
+          (!incoming().keys().contains('type') || incoming().type in ['customer', 'supplier']) &&
+          (incoming().type != 'supplier' || !incoming().keys().contains('verified') || incoming().verified == false)
+        )
+      );
 
-      // Users can update their own profile, but cannot self-escalate role to admin
+      // Users can update their own profile, but cannot self-escalate role to admin or self-verify a supplier account
       allow update: if isSignedIn() && (
         isAdmin() ||
-        (request.auth.uid == userId && (
-          !incoming().diff(resource.data).affectedKeys().hasAny(['type']) ||
-          resource.data.type == incoming().type
-        ))
+        (request.auth.uid == userId &&
+          (!incoming().diff(resource.data).affectedKeys().hasAny(['type', 'rejected']) ||
+           (resource.data.type == incoming().type && resource.data.get('rejected', false) == incoming().get('rejected', false))) &&
+          (resource.data.type != 'supplier' ||
+           !incoming().diff(resource.data).affectedKeys().hasAny(['verified']) ||
+           resource.data.get('verified', false) == incoming().get('verified', false))
+        )
       );
       
       // Users can delete their own profile or admins can delete

@@ -21,6 +21,8 @@ import {
   InverterQueryCriteria
 } from "./src/types/inverter";
 
+import { productsData } from "./src/data/mockData";
+
 dotenv.config();
 
 // Fallback Helper Functions for High-Demand/Network Failures
@@ -451,6 +453,7 @@ async function startServer() {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(self)");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
     res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,Content-Type,Authorization");
@@ -460,14 +463,106 @@ async function startServer() {
     next();
   });
 
-  // Defensive request body limits to mitigate Denial of Service (DoS) attacks
-  app.use(express.json({ limit: "2mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+  // Defensive request body limits to support compressed product images while mitigating DoS
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
   // API Health Check (accessible on /api/health, /health, and /_health)
   app.get(["/health", "/api/health", "/_health"], (req, res) => {
     res.json({ status: "ok" });
   });
+
+  // Dedicated Product & Asset Image Upload Endpoint (/api/upload)
+  app.post("/api/upload", async (req, res) => {
+    try {
+      const { file, image, dataUrl, name, filename } = req.body || {};
+      const rawPayload = file || image || dataUrl;
+      if (!rawPayload || typeof rawPayload !== "string") {
+        return res.status(400).json({ success: false, error: "Missing image data in request" });
+      }
+
+      // Check if data URL format
+      const match = rawPayload.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      if (!match) {
+        // If it's already a hosted URL, return as-is
+        if (rawPayload.startsWith("http://") || rawPayload.startsWith("https://") || rawPayload.startsWith("/")) {
+          return res.json({ success: true, image_url: rawPayload, url: rawPayload });
+        }
+        return res.status(400).json({ success: false, error: "Invalid image format. Expected Base64 Data URL." });
+      }
+
+      let subType = match[1].toLowerCase();
+      if (subType === "jpeg") subType = "jpg";
+      if (!["jpg", "png", "webp"].includes(subType)) {
+        subType = "jpg";
+      }
+
+      const buffer = Buffer.from(match[2], "base64");
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: "Image file exceeds 10 MB limit" });
+      }
+
+      const fs = await import("fs");
+      const uploadsDir = path.join(process.cwd(), "public", "uploads", "products");
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      const rawName = String(name || filename || `img_${Date.now()}`);
+      const safeBaseName = rawName.replace(/[^a-zA-Z0-9_\-]/g, "_").slice(0, 30);
+      const uniqueFileName = `${Date.now()}_${safeBaseName}.${subType}`;
+      const filePath = path.join(uploadsDir, uniqueFileName);
+
+      fs.writeFileSync(filePath, buffer);
+
+      const publicUrl = `/uploads/products/${uniqueFileName}`;
+      return res.json({
+        success: true,
+        image_url: publicUrl,
+        url: publicUrl,
+        fileName: uniqueFileName
+      });
+    } catch (err: any) {
+      console.error("Error in /api/upload:", err);
+      return res.status(500).json({ success: false, error: "Failed to upload image file" });
+    }
+  });
+
+  // In-memory Rate Limiter Middleware for API & AI Endpoints
+  const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of rateLimitStore.entries()) {
+      if (now > entry.resetAt) rateLimitStore.delete(key);
+    }
+  }, 60_000).unref();
+
+  const createRateLimiter = (windowMs: number, maxRequests: number, scope: string) => {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.method === "OPTIONS") return next();
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "local";
+      const key = `${scope}:${ip}`;
+      const now = Date.now();
+      const record = rateLimitStore.get(key);
+      if (!record || now > record.resetAt) {
+        rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+        return next();
+      }
+      record.count += 1;
+      if (record.count > maxRequests) {
+        const retryAfterSec = Math.ceil((record.resetAt - now) / 1000);
+        res.setHeader("Retry-After", String(Math.max(1, retryAfterSec)));
+        return res.status(429).json({
+          success: false,
+          error: "Too many requests. Please slow down and try again shortly."
+        });
+      }
+      next();
+    };
+  };
+
+  app.use("/api", createRateLimiter(60_000, 180, "api-general"));
+  app.use(["/chat", "/api/chat", "/api/n8n-chat", "/api/semantic-search", "/api/solar-calculate", "/api/solar-chat"], createRateLimiter(60_000, 35, "ai-endpoints"));
 
   // Proxy endpoint for Cloudflare D1 API (bypasses browser CORS restrictions in preview/dev environments)
   const CF_WORKER_API = "https://enerjoo-api.enerjoo320.workers.dev";
@@ -701,7 +796,7 @@ async function startServer() {
       product_type: "Rooftop Structure",
       technology: "Anodized Aluminum",
       availability: "Available",
-      image_url: "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+      image_url: "https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=800&q=80",
       price_egp: 4800,
       warranty_years: 10,
       notes: "شاسيه ألومنيوم معتمد 6005-T5 مقاوم للأكسدة والرياح حتى 150 كم/ساعة للأسطح المائلة والخرسانية."
@@ -714,7 +809,7 @@ async function startServer() {
       product_type: "Ground Mount",
       technology: "Hot-Dip Galvanized Steel",
       availability: "Available",
-      image_url: "https://images.unsplash.com/photo-1508873696983-2df5293cb32f?auto=format&fit=crop&w=800&q=80",
+      image_url: "https://images.unsplash.com/photo-1508514177221-188b1cf16e9d?auto=format&fit=crop&w=800&q=80",
       price_egp: 18500,
       warranty_years: 15,
       notes: "هيكل تثبيت أرضي حديد مجلفن على الساخن عالي المتانة لمحطات المزارع والمشاريع الكبيرة المقاومة للتآكل."
@@ -810,7 +905,7 @@ async function startServer() {
       product_type: "Mounting Clamps",
       technology: "Aluminum 6005-T5 & Stainless Steel",
       availability: "Available",
-      image_url: "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+      image_url: "https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=800&q=80",
       price_egp: 850,
       warranty_years: 10,
       notes: "طقم كلبسات تثبيت ألومنيوم وسطية وطرفية مع مسامير ستانلس ستيل SS304 لسماكات الألواح 30-35 مم."
@@ -824,7 +919,7 @@ async function startServer() {
       product_type: "Waterproof Sealing",
       technology: "UV Resistant EPDM Rubber",
       availability: "Available",
-      image_url: "https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=800&q=80",
+      image_url: "https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=800&q=80",
       price_egp: 450,
       warranty_years: 10,
       notes: "عوازل وجوانات EPDM مانعة لتسرب المياه ومقاومة لأشعة الشمس والحرارة مخصصة لتثبيت الهياكل على الأسطح المعدنية."
@@ -846,6 +941,14 @@ async function startServer() {
     console.warn("Could not load deleted-products.json:", e);
   }
 
+  // Baseline catalog products and live D1 items must never be suppressed by stale test runs
+  const baselineCatalogIds = new Set(D1_CATALOG_PRODUCTS.map(p => String(p.product_id || p.id)));
+  for (const id of Array.from(deletedProductIds)) {
+    if (baselineCatalogIds.has(id)) {
+      deletedProductIds.delete(id);
+    }
+  }
+
   const saveDeletedProducts = async () => {
     try {
       const fs = await import("fs");
@@ -857,46 +960,365 @@ async function startServer() {
 
   const activeCatalogProducts: any[] = [...D1_CATALOG_PRODUCTS];
 
-  function getActiveCatalogProducts(): any[] {
-    return activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
+  function normalizeCategoryKey(catStr?: string | null): string {
+    if (!catStr) return 'panels';
+    const c = String(catStr).toLowerCase();
+    if (c.includes('panel') || c.includes('لوح') || c.includes('ألواح') || c.includes('الواح') || c.includes('خلايا شمسية')) return 'panels';
+    if (c.includes('invert') || c.includes('محول') || c.includes('إنفرتر') || c.includes('انفرتر')) return 'inverters';
+    if (c.includes('batter') || c.includes('بطار')) return 'batteries';
+    if (c.includes('pump') || c.includes('مضخ') || c.includes('طلمب') || c.includes('غطاس')) return 'pumps';
+    if (c.includes('mount') || c.includes('structur') || c.includes('هيكل') || c.includes('شاسيه') || c.includes('حوامل')) return 'mounting';
+    if (c.includes('protect') || c.includes('حماي') || c.includes('قاطع') || c.includes('توزيع')) return 'protection';
+    if (c.includes('combin') || c.includes('تجميع') || c.includes('صندوق')) return 'combiner';
+    if (c.includes('cable') || c.includes('كابل') || c.includes('سلك') || c.includes('أسلاك')) return 'cables';
+    if (c.includes('mc4') || c.includes('كونكتور')) return 'mc4';
+    if (c.includes('seal') || c.includes('عازل') || c.includes('عوازل') || c.includes('جوان')) return 'sealings';
+    if (c.includes('clamp') || c.includes('كلبس') || c.includes('تثبيت') || c.includes('مشابك')) return 'clamps';
+    return c;
   }
+
+  function formatCategoryTitle(catKey: string): string {
+    switch (catKey) {
+      case 'panels': return 'Solar Panels';
+      case 'inverters': return 'Inverters';
+      case 'batteries': return 'Batteries';
+      case 'pumps': return 'Pumps';
+      case 'mounting': return 'Mounting Structures';
+      case 'protection': return 'Protection & Distribution';
+      case 'combiner': return 'Combiner Boxes';
+      case 'cables': return 'Solar Cables';
+      case 'mc4': return 'MC4 Connectors';
+      case 'sealings': return 'Sealings';
+      case 'clamps': return 'Clamps';
+      default: return catKey;
+    }
+  }
+
+  function resolveDefaultProductImage(normCat: string, brand: string, model: string): string {
+    const b = (brand || '').toLowerCase();
+    const m = (model || '').toLowerCase();
+    if (normCat === 'inverters') {
+      if (b.includes('huawei') || m.includes('sun2000')) {
+        return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1790087530856-b5aswi77.jpg';
+      }
+      if (b.includes('invt') || m.includes('pump')) {
+        return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791793955618-hnt8gcsl.jpg';
+      }
+      return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474437619-nrtfkfhx.jpg';
+    }
+    if (normCat === 'panels') {
+      if (b.includes('longi') || b.includes('trina')) {
+        return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791043105976-4eukpdun.png';
+      }
+      return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791028978582-ye8lbh70.png';
+    }
+    if (normCat === 'batteries') {
+      return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474965434-xr788udb.jpg';
+    }
+    return 'https://images.unsplash.com/photo-1509391366360-2e959784a276?auto=format&fit=crop&w=800&q=80';
+  }
+
+  function normalizeBrandName(rawBrand?: string | null, model?: string | null): string {
+    const b = String(rawBrand || '').trim();
+    const bl = b.toLowerCase();
+    const ml = String(model || '').toLowerCase();
+    if (bl.startsWith('huawei') || ml.includes('sun2000')) return 'Huawei';
+    if (bl === 'felicity') return 'Felicity';
+    if (bl === 'eastman') return 'Eastman';
+    if (bl === 'veichi' || bl === 'viechi') return 'Veichi';
+    if (bl.startsWith('jinko')) return 'Jinko';
+    if (bl.startsWith('longi')) return 'LONGi Solar';
+    if (bl.startsWith('trina')) return 'Trina Solar';
+    if (bl === 'invt') return 'Invt';
+    return b || 'Enerjoo';
+  }
+
+  function normalizeProductRecord(p: any): any {
+    const id = String(p.product_id || p.id || '');
+    const baseMatch = productsData.find(b => String(b.id) === id);
+    const rawCat = p.product_category || p.category || (baseMatch ? baseMatch.category : '');
+    const normCat = normalizeCategoryKey(rawCat);
+    const titleCat = formatCategoryTitle(normCat);
+
+    const ratedKw = Number(p.rated_power_kw ?? p.specs?.ratedPowerKw ?? 0);
+    let power = Number(p.power ?? p.power_w ?? (baseMatch ? baseMatch.power : 0));
+    if ((!power || isNaN(power)) && ratedKw > 0) {
+      power = ratedKw <= 200 ? ratedKw * 1000 : ratedKw;
+    }
+
+    let price = Number(p.price ?? p.price_egp ?? (baseMatch ? baseMatch.price : 0));
+    // Fix D1 shorthand thousands entry (e.g. Veichi 8kW entered as 55 -> 55000 EGP, 6kW entered as 37 -> 37000 EGP)
+    if (normCat === 'inverters' && price > 0 && price < 500) {
+      price = baseMatch?.price && baseMatch.price >= 1000 ? baseMatch.price : price * 1000;
+    }
+
+    const efficiency = Number(p.efficiency ?? p.efficiency_percent ?? (baseMatch ? baseMatch.efficiency : 0));
+    const warranty = Number(p.warranty ?? p.warranty_years ?? (baseMatch ? baseMatch.warranty : 0));
+
+    const brand = normalizeBrandName(p.brand || baseMatch?.brand, p.model || p.name);
+    let rawModel = String(p.model || p.name || baseMatch?.name || `Product ${id}`).trim();
+    const kwDisplay = ratedKw > 0 ? ratedKw : (power >= 1000 ? power / 1000 : 0);
+
+    // Disambiguate generic Felicity / Eastman model strings in D1 using rated power
+    if (brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
+      rawModel = `Felicity Off-Grid Inverter ${kwDisplay}kW`;
+    } else if (brand === 'Eastman' && /^inverter\b/i.test(rawModel) && kwDisplay > 0) {
+      rawModel = `Eastman Off-Grid Inverter ${kwDisplay}kW`;
+    }
+
+    const name = baseMatch?.name || rawModel;
+    let nameAr = p.nameAr || p.name_ar || baseMatch?.nameAr || '';
+    if (!nameAr || nameAr === rawModel || nameAr === p.model) {
+      if (brand === 'Huawei' && kwDisplay > 0) {
+        nameAr = `إنفرتر هواوي ${kwDisplay} كيلو وات On-Grid ثلاثي الأطوار (${rawModel.replace(/^Huawei\s*/i, '')})`;
+      } else if (brand === 'Felicity' && kwDisplay > 0) {
+        nameAr = `إنفرتر فيليسيتي (فيلسيتي) أوف جريد ${kwDisplay} كيلو وات`;
+      } else if (brand === 'Eastman' && kwDisplay > 0) {
+        nameAr = `إنفرتر إيستمان أوف جريد ${kwDisplay} كيلو وات`;
+      } else if (brand === 'Jinko' && power > 0) {
+        nameAr = `لوح طاقة شمسية جينكو ${power} وات (${rawModel})`;
+      } else if (brand === 'LONGi Solar' && power > 0) {
+        nameAr = `لوح طاقة شمسية لونجي ثنائي الوجه ${power} وات (${rawModel})`;
+      } else if (brand === 'Trina Solar' && power > 0) {
+        nameAr = `لوح طاقة شمسية ترينا سولار ثنائي الوجه ${power} وات (${rawModel})`;
+      } else {
+        nameAr = name;
+      }
+    }
+
+    const image = p.image || p.image_url || baseMatch?.image || resolveDefaultProductImage(normCat, brand, name);
+    const availability = p.availability || (p.status === 'out_of_stock' ? 'Out of Stock' : p.status === 'limited' ? 'Limited' : 'Available');
+    const status = p.status || (availability.toLowerCase().includes('out') ? 'out_of_stock' : availability.toLowerCase().includes('limit') ? 'limited' : 'available');
+    const notes = p.notes || p.description || baseMatch?.notes || nameAr;
+    const specs = {
+      ...(baseMatch?.specs || {}),
+      ...(p.specs || {}),
+      productType: p.product_type || baseMatch?.specs?.productType || '',
+      technology: p.technology || baseMatch?.specs?.technology || '',
+      ratedPowerKw: ratedKw || (normCat === 'inverters' && power >= 1000 ? power / 1000 : power / 1000),
+      vmpV: p.vmp_v ?? baseMatch?.specs?.vmpV,
+      impA: p.imp_a ?? baseMatch?.specs?.impA,
+      acVoltageV: p.ac_voltage_v ?? baseMatch?.specs?.acVoltageV
+    };
+
+    return {
+      ...p,
+      id,
+      product_id: id,
+      name,
+      model: rawModel,
+      nameAr,
+      name_ar: nameAr,
+      brand,
+      category: normCat,
+      product_category: titleCat,
+      power,
+      power_w: power,
+      price,
+      price_egp: price,
+      efficiency,
+      efficiency_percent: efficiency,
+      warranty,
+      warranty_years: warranty,
+      image,
+      image_url: image,
+      availability,
+      status,
+      notes,
+      description: notes,
+      specs,
+      source: p._fromD1 ? 'd1' : (baseMatch ? 'catalog' : 'd1')
+    };
+  }
+
+  function getActiveCatalogProducts(): any[] {
+    return activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id))).map(normalizeProductRecord);
+  }
+
+  // Live Cloudflare D1 Full Partition Harvester (bypasses deployed Worker's hardcoded LIMIT 10 per request)
+  let liveD1ProductsCache = new Map<string, any>();
+  let lastD1CacheTime = 0;
+  let d1FetchInFlight: Promise<Map<string, any>> | null = null;
+  const D1_CACHE_TTL_MS = 60_000;
+
+  const D1_PARTITIONS = [
+    "",
+    "PROD-1789",
+    "PROD-1790081", "PROD-1790082", "PROD-1790083", "PROD-1790085", "PROD-1790086", "PROD-1790087",
+    "PROD-1790193", "PROD-1790194", "PROD-1790195", "PROD-1790196",
+    "PROD-179028",
+    "PROD-179052",
+    "PROD-179092",
+    "PROD-17910",
+    "PROD-17913",
+    "PROD-17914",
+    "PROD-17917",
+    "PROD-1792",
+    "PROD-1793"
+  ];
+
+  async function fetchAllLiveD1Products(forceRefresh = false): Promise<Map<string, any>> {
+    const now = Date.now();
+    if (!forceRefresh && liveD1ProductsCache.size > 0 && now - lastD1CacheTime < D1_CACHE_TTL_MS) {
+      return liveD1ProductsCache;
+    }
+    if (d1FetchInFlight) {
+      return d1FetchInFlight;
+    }
+
+    d1FetchInFlight = (async () => {
+      const discovered = new Map<string, any>();
+
+      async function fetchPartition(q: string, depth = 0): Promise<void> {
+        try {
+          const url = q ? `${CF_WORKER_API}/products?q=${encodeURIComponent(q)}` : `${CF_WORKER_API}/products`;
+          const r = await fetch(url, { signal: AbortSignal.timeout(4500) });
+          if (!r.ok) return;
+          const d: any = await r.json();
+          const prods = Array.isArray(d.products) ? d.products : [];
+          for (const item of prods) {
+            const id = String(item.product_id || item.id || '');
+            if (id) {
+              discovered.set(id, { ...item, _fromD1: true });
+            }
+          }
+          // If a prefix partition hits the Worker's 10-item cap, subdivide by digits 0-9
+          if (q && prods.length >= 10 && depth < 2) {
+            const digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+            await Promise.all(digits.map(dg => fetchPartition(q + dg, depth + 1)));
+          }
+        } catch {
+          // Ignore single partition network error
+        }
+      }
+
+      await Promise.all(D1_PARTITIONS.map(q => fetchPartition(q)));
+
+      if (discovered.size > 0) {
+        liveD1ProductsCache = discovered;
+        lastD1CacheTime = Date.now();
+      }
+      d1FetchInFlight = null;
+      return liveD1ProductsCache;
+    })();
+
+    return d1FetchInFlight;
+  }
+
+  // Pre-warm live D1 cache immediately on server startup
+  fetchAllLiveD1Products().catch(() => {});
 
   // =========================================================================
   // PRODUCTS REST API (GET, POST, PUT, DELETE)
   // =========================================================================
 
-  // GET /api/products - List all products with worker passthrough and catalog resilience
+  // GET /api/products - List all products with full D1 partition harvesting, catalog resilience, and filter support
   app.get("/api/products", async (req, res) => {
     try {
-      try {
-        const cfRes = await fetch(`${CF_WORKER_API}/products`, { signal: AbortSignal.timeout(3000) });
-        if (cfRes.ok) {
-          const cfData: any = await cfRes.json();
-          if (Array.isArray(cfData.products) && cfData.products.length > 0) {
-            const filtered = cfData.products.filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)));
-            return res.json({
-              ...cfData,
-              count: filtered.length,
-              products: filtered
-            });
-          }
+      const productsMap = new Map<string, any>();
+
+      // 1. Initialize with activeCatalogProducts (baseline categories + locally created/updated products)
+      for (const p of activeCatalogProducts) {
+        const id = String(p.product_id || p.id);
+        if (!deletedProductIds.has(id)) {
+          productsMap.set(id, normalizeProductRecord(p));
         }
-      } catch {
-        // Fallback to active catalog
       }
 
-      const activeFiltered = activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
-      res.json({
+      // 2. Fetch ALL live products from Cloudflare Worker D1 (across all partitions)
+      try {
+        const d1Map = await fetchAllLiveD1Products();
+        for (const [id, p] of d1Map.entries()) {
+          // Live D1 database is authoritative: unmark from deletedProductIds if returned
+          if (deletedProductIds.has(id)) {
+            deletedProductIds.delete(id);
+          }
+          const existing = productsMap.get(id) || {};
+          productsMap.set(id, normalizeProductRecord({ ...existing, ...p, _fromD1: true }));
+        }
+      } catch (cfErr) {
+        console.warn("Notice: could not reach remote Cloudflare Worker, using active catalog:", cfErr);
+      }
+
+      let mergedProducts = Array.from(productsMap.values());
+
+      // Query Filters (category, brand, search, pagination)
+      const queryCat = req.query.category as string | undefined;
+      if (queryCat && queryCat !== 'all') {
+        const normFilterCat = normalizeCategoryKey(queryCat);
+        mergedProducts = mergedProducts.filter(p => p.category === normFilterCat || p.product_category?.toLowerCase() === queryCat.toLowerCase());
+      }
+
+      const queryBrand = req.query.brand as string | undefined;
+      if (queryBrand && queryBrand !== 'all') {
+        mergedProducts = mergedProducts.filter(p => p.brand?.toLowerCase() === queryBrand.toLowerCase());
+      }
+
+      const querySearch = req.query.search as string | undefined;
+      if (querySearch && querySearch.trim()) {
+        const qRaw = querySearch.trim().toLowerCase();
+        const normalizeArabic = (s?: string | null) => (s || '')
+          .toLowerCase()
+          .replace(/[أإآ]/g, 'ا')
+          .replace(/ة/g, 'ه')
+          .replace(/ى/g, 'ي')
+          .replace(/[\u064B-\u065F]/g, '');
+
+        const q = normalizeArabic(qRaw);
+
+        // Check if query is a category intent in Arabic or English
+        const isInvQuery = q.includes('محول') || q.includes('انفرتر') || q.includes('inverter');
+        const isPanelQuery = q.includes('لوح') || q.includes('الواح') || q.includes('panel');
+        const isBatteryQuery = q.includes('بطار') || q.includes('battery');
+        const isPumpQuery = q.includes('طلمب') || q.includes('مضخ') || q.includes('pump');
+
+        mergedProducts = mergedProducts.filter(p => {
+          if (isInvQuery && p.category === 'inverters') return true;
+          if (isPanelQuery && p.category === 'panels') return true;
+          if (isBatteryQuery && p.category === 'batteries') return true;
+          if (isPumpQuery && p.category === 'pumps') return true;
+
+          const haystack = normalizeArabic([
+            p.name,
+            p.nameAr,
+            p.name_ar,
+            p.brand,
+            p.model,
+            p.notes,
+            p.description,
+            p.product_category,
+            p.category,
+            p.product_type
+          ].join(' '));
+
+          return haystack.includes(q) || haystack.includes(qRaw);
+        });
+      }
+
+      const totalCount = mergedProducts.length;
+      const limitParam = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+      const pageParam = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+      if (limitParam && limitParam > 0) {
+        const offset = Math.max(0, (pageParam - 1) * limitParam);
+        mergedProducts = mergedProducts.slice(offset, offset + limitParam);
+      }
+
+      return res.json({
         success: true,
-        count: activeFiltered.length,
-        products: activeFiltered
+        ok: true,
+        count: mergedProducts.length,
+        total: totalCount,
+        d1_count: liveD1ProductsCache.size,
+        products: mergedProducts
       });
     } catch (err: any) {
       console.warn("Error in GET /api/products:", err);
-      const activeFiltered = activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
-      res.json({
+      const activeFiltered = activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id))).map(normalizeProductRecord);
+      return res.json({
         success: true,
+        ok: true,
         count: activeFiltered.length,
+        total: activeFiltered.length,
         products: activeFiltered
       });
     }
@@ -905,42 +1327,94 @@ async function startServer() {
   // GET /api/products/:productId - Fetch single product
   app.get("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
-    if (deletedProductIds.has(String(productId))) {
+    const pIdStr = String(productId);
+    if (deletedProductIds.has(pIdStr) && !baselineCatalogIds.has(pIdStr) && !liveD1ProductsCache.has(pIdStr)) {
       return res.status(404).json({ success: false, error: `Product deleted: ${productId}` });
     }
     try {
+      // 1. Check live D1 cache + local catalog merged
+      const d1Map = await fetchAllLiveD1Products();
+      const foundD1 = d1Map.get(pIdStr);
+      const foundLocal = activeCatalogProducts.find(p => String(p.product_id) === pIdStr || String(p.id) === pIdStr);
+      if (foundD1 || foundLocal) {
+        if (deletedProductIds.has(pIdStr)) deletedProductIds.delete(pIdStr);
+        return res.json({
+          success: true,
+          ok: true,
+          product: normalizeProductRecord({ ...(foundLocal || {}), ...(foundD1 || {}) })
+        });
+      }
+
+      // 2. Fallback: targeted search in remote D1 by product_id query
       try {
-        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, { signal: AbortSignal.timeout(3000) });
-        if (cfRes.ok) {
-          const cfData: any = await cfRes.json();
-          if (cfData && cfData.product && !deletedProductIds.has(String(cfData.product.product_id || cfData.product.id))) {
-            return res.json(cfData);
+        const listRes = await fetch(`${CF_WORKER_API}/products?q=${encodeURIComponent(pIdStr)}`, { signal: AbortSignal.timeout(3500) });
+        if (listRes.ok) {
+          const listData: any = await listRes.json();
+          if (Array.isArray(listData.products)) {
+            const foundInList = listData.products.find((p: any) => String(p.product_id) === pIdStr || String(p.id) === pIdStr);
+            if (foundInList) {
+              if (deletedProductIds.has(pIdStr)) deletedProductIds.delete(pIdStr);
+              liveD1ProductsCache.set(pIdStr, { ...foundInList, _fromD1: true });
+              return res.json({ success: true, ok: true, product: normalizeProductRecord({ ...foundInList, _fromD1: true }) });
+            }
           }
         }
       } catch {
-        // Fallback to active catalog
+        // Fallback
       }
 
-      const found = activeCatalogProducts.find(p => (String(p.product_id) === productId || String(p.id) === productId) && !deletedProductIds.has(String(p.product_id || p.id)));
-      if (found) {
-        return res.json({ success: true, product: found });
-      }
-
-      res.status(404).json({ success: false, error: `Product not found: ${productId}` });
+      return res.status(404).json({ success: false, error: `Product not found: ${productId}` });
     } catch (err: any) {
-      const found = activeCatalogProducts.find(p => (String(p.product_id) === productId || String(p.id) === productId) && !deletedProductIds.has(String(p.product_id || p.id)));
-      if (found) {
-        return res.json({ success: true, product: found });
-      }
-      res.status(404).json({ success: false, error: `Product not found: ${productId}` });
+      return res.status(404).json({ success: false, error: `Product not found: ${productId}` });
     }
   });
+
+  // Input sanitization helper to prevent Prototype Pollution & Stored XSS in product payloads
+  function sanitizeProductPayload(raw: any): Record<string, any> {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+    const URL_KEYS = new Set(["image_url", "image", "datasheet_url", "datasheetUrl"]);
+    const clean: Record<string, any> = {};
+
+    for (const [key, val] of Object.entries(raw)) {
+      if (DANGEROUS_KEYS.has(key)) continue;
+      if (typeof val === "string") {
+        let str = val.trim().slice(0, 4000);
+        // Strip script tags and inline event handlers
+        str = str
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+          .replace(/\bon\w+\s*=/gi, "");
+        if (URL_KEYS.has(key)) {
+          if (/^\s*(?:javascript|vbscript|data:text\/html):/i.test(str)) {
+            str = "";
+          }
+        }
+        clean[key] = str;
+      } else if (typeof val === "number") {
+        clean[key] = Number.isFinite(val) ? val : 0;
+      } else if (typeof val === "boolean" || val === null) {
+        clean[key] = val;
+      } else if (typeof val === "object" && !Array.isArray(val)) {
+        clean[key] = sanitizeProductPayload(val);
+      } else if (Array.isArray(val)) {
+        clean[key] = val.slice(0, 50);
+      }
+    }
+    return clean;
+  }
+
+  function isValidProductId(id: unknown): id is string {
+    return typeof id === "string" && id.trim().length > 0 && id.length <= 128 && /^[a-zA-Z0-9_\-.]+$/.test(id);
+  }
 
   // POST /api/products - Create a new product
   app.post("/api/products", async (req, res) => {
     try {
-      const body = req.body || {};
-      const newId = body.product_id || `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
+      const body = sanitizeProductPayload(req.body || {});
+      const rawId = body.product_id ? String(body.product_id).trim() : "";
+      const newId = isValidProductId(rawId)
+        ? rawId
+        : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
       
       // If this ID was previously marked as deleted, unmark it
       if (deletedProductIds.has(newId)) {
@@ -978,14 +1452,14 @@ async function startServer() {
       res.status(201).json({ success: true, product_id: newId, product: newProduct });
     } catch (err: any) {
       console.error("Error in POST /api/products:", err);
-      res.status(500).json({ success: false, error: err?.message || "Failed to create product" });
+      res.status(500).json({ success: false, error: "Failed to create product" });
     }
   });
 
   // Specialized PUT handler for /api/products/:productId
   app.put("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
-    if (!productId || typeof productId !== "string") {
+    if (!isValidProductId(productId)) {
       return res.status(400).json({ success: false, error: "Invalid productId format" });
     }
 
@@ -995,11 +1469,12 @@ async function startServer() {
         await saveDeletedProducts();
       }
 
-      let existing: any = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) || {};
+      const existing: any = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) || {};
+      const safeBody = sanitizeProductPayload(req.body || {});
       
       const mergedPayload = {
         ...existing,
-        ...req.body,
+        ...safeBody,
         product_id: productId,
         updated_at: new Date().toISOString()
       };
@@ -1027,13 +1502,16 @@ async function startServer() {
       res.json({ success: true, product: mergedPayload });
     } catch (err: any) {
       console.error(`Error in custom PUT /api/products/${productId}:`, err);
-      res.status(500).json({ success: false, error: err?.message || "Failed to update product" });
+      res.status(500).json({ success: false, error: "Failed to update product" });
     }
   });
 
   // DELETE /api/products/:productId
   app.delete("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
+    if (!isValidProductId(productId)) {
+      return res.status(400).json({ success: false, error: "Invalid productId format" });
+    }
     try {
       const pId = String(productId);
       deletedProductIds.add(pId);
@@ -1055,7 +1533,7 @@ async function startServer() {
 
       res.json({ success: true, product_id: pId });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err?.message || "Failed to delete product" });
+      res.status(500).json({ success: false, error: "Failed to delete product" });
     }
   });
 
@@ -1068,32 +1546,38 @@ async function startServer() {
    */
   async function fetchAllStructuredInverters(): Promise<StructuredInverter[]> {
     try {
-      let rawProducts: any[] = [];
+      const invertersMap = new Map<string, any>();
+
+      // 1. Seed from active catalog
+      for (const p of getActiveCatalogProducts()) {
+        const cat = (p.category || p.product_category || '').toLowerCase();
+        if (cat.includes('invert')) {
+          invertersMap.set(String(p.product_id || p.id), p);
+        }
+      }
+
+      // 2. Overlay ALL live products from Cloudflare Worker D1
       try {
-        const getRes = await fetch(`${CF_WORKER_API}/products`, { signal: AbortSignal.timeout(3000) });
-        if (getRes.ok) {
-          const data = await getRes.json();
-          if (Array.isArray(data.products) && data.products.length > 0) {
-            rawProducts = data.products.filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)));
+        const d1Map = await fetchAllLiveD1Products();
+        for (const [id, p] of d1Map.entries()) {
+          if (!deletedProductIds.has(id) || baselineCatalogIds.has(id)) {
+            const cat = (p.category || p.product_category || '').toLowerCase();
+            if (cat.includes('invert') || !cat) {
+              const existing = invertersMap.get(id) || {};
+              invertersMap.set(id, normalizeProductRecord({ ...existing, ...p, _fromD1: true }));
+            }
           }
         }
-      } catch {
-        // Fallback
+      } catch (cfErr) {
+        console.warn("Could not fetch remote inverters, using active catalog baseline:", cfErr);
       }
 
-      if (rawProducts.length === 0) {
-        rawProducts = getActiveCatalogProducts();
-      }
-
-      const rawInverters = rawProducts.filter((p: any) => 
-        !deletedProductIds.has(String(p.product_id || p.id)) &&
-        (p.category || p.product_category || '').toLowerCase().includes('invert')
-      );
+      const rawInverters = Array.from(invertersMap.values()).filter(p => !deletedProductIds.has(String(p.product_id || p.id)) || baselineCatalogIds.has(String(p.product_id || p.id)) || liveD1ProductsCache.has(String(p.product_id || p.id)));
       return rawInverters.map(classifyInverter);
     } catch (err) {
       console.warn("Failed to fetch raw inverters from Cloudflare D1:", err);
       return getActiveCatalogProducts()
-        .filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)) && (p.category || p.product_category || '').toLowerCase().includes('invert'))
+        .filter((p: any) => (!deletedProductIds.has(String(p.product_id || p.id)) || baselineCatalogIds.has(String(p.product_id || p.id))) && (p.category || p.product_category || '').toLowerCase().includes('invert'))
         .map(classifyInverter);
     }
   }
@@ -1492,7 +1976,16 @@ async function startServer() {
 
   app.post("/api/energy-exchange", async (req, res) => {
     try {
-      const { brand, pricePerWatt, prices, adminEmail } = req.body;
+      const { brand, pricePerWatt, prices, adminEmail } = req.body || {};
+
+      // Verify caller is an authorized administrator
+      const normalizedAdminEmail = typeof adminEmail === "string" ? adminEmail.toLowerCase().trim() : "";
+      if (normalizedAdminEmail !== "enerjoo365@gmail.com") {
+        return res.status(403).json({
+          success: false,
+          error: "Forbidden: Only authorized Enerjoo administrators can modify Energy Exchange prices."
+        });
+      }
 
       // Defensive validation for exchange updates
       if (brand) {
@@ -1525,11 +2018,11 @@ async function startServer() {
         success: true,
         prices: memoryExchangePrices,
         updatedAt: new Date().toISOString(),
-        updatedBy: adminEmail || "admin"
+        updatedBy: normalizedAdminEmail
       });
     } catch (err: any) {
       console.error("Error in POST /api/energy-exchange:", err);
-      res.status(500).json({ success: false, error: err?.message || "Failed to update exchange prices" });
+      res.status(500).json({ success: false, error: "Failed to update exchange prices" });
     }
   });
 

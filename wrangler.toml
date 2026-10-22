@@ -4,8 +4,8 @@ compatibility_date = "2024-09-01"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "enerjoo-d1"
-database_id = "DB"
+database_name = "enerjoo"
+database_id = "enerjoo"
 
 [ai]
 binding = "AI"

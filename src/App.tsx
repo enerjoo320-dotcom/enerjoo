@@ -437,7 +437,7 @@ export default function App() {
   useEffect(() => {
     // Setup real-time listeners for products, suppliers and energy exchange
     const unsubProducts = subscribeToProducts((loadedProducts) => {
-      if (Array.isArray(loadedProducts) && loadedProducts.length > 0) {
+      if (Array.isArray(loadedProducts)) {
         setProducts(loadedProducts);
       }
     });
@@ -627,10 +627,24 @@ export default function App() {
         setProducts(prev => [createdProduct, ...prev]);
       }
       navigateToView(user?.type === 'supplier' || user?.type === 'admin' ? 'supplier-dashboard' : 'home');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Action error:", err);
-      alert(isAr ? 'حدث خطأ أثناء حفظ المنتج في قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to save product in database. Please try again.');
-      throw err;
+      let errMsg = '';
+      if (typeof err === 'string') {
+        errMsg = err;
+      } else if (err?.message && typeof err.message === 'string' && err.message !== '[object Object]') {
+        errMsg = err.message;
+      } else if (err?.error?.message) {
+        errMsg = err.error.message;
+      } else if (typeof err?.error === 'string') {
+        errMsg = err.error;
+      } else {
+        errMsg = isAr ? 'حدث خطأ أثناء حفظ المنتج في قاعدة البيانات. يرجى المحاولة مرة أخرى.' : 'Failed to save product in database. Please try again.';
+      }
+      if (errMsg === '[object Object]' || !errMsg.trim()) {
+        errMsg = isAr ? 'تعذر حفظ المنتج في قاعدة البيانات.' : 'Failed to save product in database.';
+      }
+      throw new Error(errMsg);
     }
   };
 
@@ -639,8 +653,10 @@ export default function App() {
     const pId = productToDelete.id.toString();
     try {
       setIsDeletingProduct(true);
-      // Optimistically remove from state immediately
+      // Optimistically remove from state, compareList, and wishlist immediately
       setProducts(prev => prev.filter(p => p.id.toString() !== pId));
+      setCompareList(prev => prev.filter(p => p.id.toString() !== pId));
+      setWishlist(prev => prev.filter(p => p.id.toString() !== pId));
       if (selectedProduct && selectedProduct.id.toString() === pId) {
         setSelectedProduct(null);
         navigateBack('home');
@@ -694,6 +710,8 @@ export default function App() {
               onDelete={async (id) => {
                 const pId = id.toString();
                 setProducts(prev => prev.filter(p => p.id.toString() !== pId));
+                setCompareList(prev => prev.filter(p => p.id.toString() !== pId));
+                setWishlist(prev => prev.filter(p => p.id.toString() !== pId));
                 setSelectedProduct(null);
                 navigateBack('home');
                 try {
@@ -1019,12 +1037,32 @@ export default function App() {
       case 'compare':
         return <CompareView products={compareList} lang={lang} onBack={() => navigateBack('home')} onRemove={(id) => setCompareList(l => l.filter(p => p.id !== id))} />;
       case 'add':
+        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
+        if (user.type !== 'supplier' && user.type !== 'admin') {
+          return (
+            <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm max-w-xl mx-auto">
+              <h3 className="text-2xl font-black text-solar-text mb-2">{isAr ? 'غير مصرح بالوصول' : 'Access Denied'}</h3>
+              <p className="text-solar-muted font-bold mb-6">{isAr ? 'هذه الصفحة مخصصة للموردين المعتمدين وإدارة المنصة فقط.' : 'This page is restricted to verified suppliers and platform administrators.'}</p>
+              <button onClick={() => navigateToView('home')} className="bg-solar-blue text-white px-6 py-3 rounded-2xl font-black">{t.back}</button>
+            </div>
+          );
+        }
         return <AddProductView lang={lang} onBack={() => { navigateBack(user?.type === 'supplier' || user?.type === 'admin' ? 'supplier-dashboard' : 'home'); setEditingProduct(null); }} onAdd={handleProductAction} editingProduct={editingProduct} />;
       case 'login':
         return <LoginView lang={lang} setView={navigateToView} />;
       case 'register':
         return <RegisterView lang={lang} setView={navigateToView} />;
       case 'supplier-dashboard':
+        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
+        if (user.type !== 'supplier' && user.type !== 'admin') {
+          return (
+            <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm max-w-xl mx-auto">
+              <h3 className="text-2xl font-black text-solar-text mb-2">{isAr ? 'غير مصرح بالوصول' : 'Access Denied'}</h3>
+              <p className="text-solar-muted font-bold mb-6">{isAr ? 'لوحة الموردين متاحة فقط لحسابات الموردين وإدارة المنصة.' : 'Supplier dashboard is restricted to supplier and administrator accounts.'}</p>
+              <button onClick={() => navigateToView('home')} className="bg-solar-blue text-white px-6 py-3 rounded-2xl font-black">{t.back}</button>
+            </div>
+          );
+        }
         return (
           <SupplierDashboard 
             lang={lang} 
@@ -1034,6 +1072,8 @@ export default function App() {
             onDelete={async (id) => {
               const pId = id.toString();
               setProducts(prev => prev.filter(p => p.id.toString() !== pId));
+              setCompareList(prev => prev.filter(p => p.id.toString() !== pId));
+              setWishlist(prev => prev.filter(p => p.id.toString() !== pId));
               try {
                 await deleteProduct(pId);
               } catch (e) {
@@ -1048,6 +1088,16 @@ export default function App() {
           />
         );
       case 'admin-suppliers':
+        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
+        if (user.type !== 'admin') {
+          return (
+            <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm max-w-xl mx-auto">
+              <h3 className="text-2xl font-black text-solar-text mb-2">{isAr ? 'صلاحية مسؤول مطلوبة' : 'Administrator Access Required'}</h3>
+              <p className="text-solar-muted font-bold mb-6">{isAr ? 'هذه اللوحة مخصصة لمديري منصة Enerjoo فقط.' : 'This panel is restricted to Enerjoo administrators only.'}</p>
+              <button onClick={() => navigateToView('home')} className="bg-solar-blue text-white px-6 py-3 rounded-2xl font-black">{t.back}</button>
+            </div>
+          );
+        }
         return (
           <AdminSupplierManagement 
             lang={lang} 
@@ -1064,6 +1114,16 @@ export default function App() {
           />
         );
       case 'admin-requests':
+        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
+        if (user.type !== 'admin') {
+          return (
+            <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm max-w-xl mx-auto">
+              <h3 className="text-2xl font-black text-solar-text mb-2">{isAr ? 'صلاحية مسؤول مطلوبة' : 'Administrator Access Required'}</h3>
+              <p className="text-solar-muted font-bold mb-6">{isAr ? 'هذه اللوحة مخصصة لمديري منصة Enerjoo فقط.' : 'This panel is restricted to Enerjoo administrators only.'}</p>
+              <button onClick={() => navigateToView('home')} className="bg-solar-blue text-white px-6 py-3 rounded-2xl font-black">{t.back}</button>
+            </div>
+          );
+        }
         return (
           <AdminSolarRequests
             lang={lang}
@@ -1071,6 +1131,7 @@ export default function App() {
           />
         );
       case 'customer-requests':
+        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
         return (
           <CustomerRequestsView
             lang={lang}
@@ -1078,6 +1139,7 @@ export default function App() {
           />
         );
       case 'profile':
+        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
         return (
           <ProfileView 
             lang={lang}

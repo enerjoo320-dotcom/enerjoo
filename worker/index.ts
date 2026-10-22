@@ -196,7 +196,7 @@ export default {
       return errorJson('Endpoint not found', 404, request);
     } catch (err: any) {
       console.error('Unhandled Worker Error:', err);
-      return errorJson(err?.message || 'Internal Server Error', 500, request);
+      return errorJson('Internal Server Error', 500, request);
     }
   },
 };
@@ -217,15 +217,17 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   }
 
   const rawMessage = (body.message || body.chatInput || '').trim();
-  const rawMessages: any[] = Array.isArray(body.messages) ? body.messages : [];
+  const rawMessages: any[] = Array.isArray(body.messages)
+    ? body.messages
+    : (Array.isArray(body.history) ? body.history : []);
 
   // Sanitize message turns and prevent system instruction injection
   const safeMessages: Array<{ role: 'user' | 'assistant'; content: string }> = rawMessages
-    .filter(m => m && typeof m.content === 'string' && (m.role === 'user' || m.role === 'assistant'))
+    .filter(m => m && typeof (m.content || m.text) === 'string' && (m.role === 'user' || m.role === 'assistant'))
     .slice(-8)
     .map(m => ({
       role: m.role as 'user' | 'assistant',
-      content: m.content
+      content: String(m.content || m.text)
         .replace(/(?:ignore all previous instructions|system prompt|jailbreak|developer mode)/gi, '')
         .slice(0, 1000)
     }));
@@ -325,15 +327,43 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
 
   if (method === 'GET') {
     if (productId) {
-      const row = await env.DB.prepare('SELECT * FROM products WHERE product_id = ?')
-        .bind(productId)
+      const row = await env.DB.prepare('SELECT * FROM products WHERE product_id = ? OR id = ?')
+        .bind(productId, productId)
         .first();
       if (!row) return errorJson(`Product not found: ${productId}`, 404, request);
       return successJson({ product: row }, 200, request);
     }
 
-    const { results } = await env.DB.prepare('SELECT * FROM products ORDER BY created_at DESC LIMIT 500').all();
-    return successJson({ count: results.length, products: results }, 200, request);
+    const url = new URL(request.url);
+    const limit = Math.min(1000, Math.max(1, parseInt(url.searchParams.get('limit') || '500', 10)));
+    const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+    const offset = (page - 1) * limit;
+    const categoryParam = url.searchParams.get('category')?.trim();
+    const searchParam = url.searchParams.get('search')?.trim();
+
+    let queryStr = 'SELECT * FROM products';
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    if (categoryParam && categoryParam !== 'all') {
+      conditions.push('(product_category LIKE ? OR product_type LIKE ?)');
+      params.push(`%${categoryParam}%`, `%${categoryParam}%`);
+    }
+
+    if (searchParam) {
+      conditions.push('(brand LIKE ? OR model LIKE ? OR notes LIKE ?)');
+      params.push(`%${searchParam}%`, `%${searchParam}%`, `%${searchParam}%`);
+    }
+
+    if (conditions.length > 0) {
+      queryStr += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    queryStr += ' ORDER BY COALESCE(created_at, datetime("now")) DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const { results } = await env.DB.prepare(queryStr).bind(...params).all();
+    return json({ success: true, ok: true, count: results.length, page, limit, products: results }, 200, request);
   }
 
   if (method === 'POST') {

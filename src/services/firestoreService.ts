@@ -24,15 +24,25 @@ import { isRawUidOrId } from '../utils/supplierUtils';
 import { productsData } from '../data/mockData';
 import { safeLocalStorage } from '../utils/safeStorage';
 
-const DELETED_PRODUCTS_STORAGE_KEY = 'enerjoo_deleted_product_ids_v1';
+const DELETED_PRODUCTS_STORAGE_KEY = 'enerjoo_deleted_product_ids_v2';
 
 export const getDeletedProductIds = (): Set<string> => {
   try {
+    // Purge old contaminated key from previous test runs
+    if (typeof window !== 'undefined') {
+      const oldRaw = safeLocalStorage.getItem('enerjoo_deleted_product_ids_v1');
+      if (oldRaw) {
+        safeLocalStorage.removeItem('enerjoo_deleted_product_ids_v1');
+      }
+    }
     const raw = safeLocalStorage.getItem(DELETED_PRODUCTS_STORAGE_KEY);
     if (raw) {
       const arr = JSON.parse(raw);
       if (Array.isArray(arr)) {
-        return new Set(arr.map(String));
+        // Protect all baseline products: baseline catalog items must never be suppressed by stale local keys
+        const baselineIds = new Set(productsData.map(p => String(p.id)));
+        const validDeletes = arr.filter(id => !baselineIds.has(String(id)));
+        return new Set(validDeletes.map(String));
       }
     }
   } catch (err) {
@@ -200,8 +210,14 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     let errorDetail = `Status ${res.status} ${res.statusText}`;
     try {
       const errJson: any = await res.json();
-      if (errJson && errJson.error) {
-        errorDetail = errJson.error;
+      if (errJson) {
+        if (typeof errJson.error === 'string') {
+          errorDetail = errJson.error;
+        } else if (errJson.error?.message && typeof errJson.error.message === 'string') {
+          errorDetail = errJson.error.message;
+        } else if (typeof errJson.message === 'string') {
+          errorDetail = errJson.message;
+        }
       }
     } catch {
       // Ignore JSON parse error on non-ok responses
@@ -224,17 +240,17 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
 function mapD1CategoryToCategory(catStr?: string | null): Category {
   if (!catStr) return 'panels';
   const c = catStr.toLowerCase();
-  if (c.includes('panel')) return 'panels';
-  if (c.includes('invert')) return 'inverters';
-  if (c.includes('batter')) return 'batteries';
+  if (c.includes('panel') || c.includes('لوح') || c.includes('ألواح') || c.includes('الواح')) return 'panels';
+  if (c.includes('invert') || c.includes('محول') || c.includes('إنفرتر') || c.includes('انفرتر')) return 'inverters';
+  if (c.includes('batter') || c.includes('بطار')) return 'batteries';
   if (c.includes('pump') || c.includes('مضخ') || c.includes('طلمب')) return 'pumps';
-  if (c.includes('mount') || c.includes('structur')) return 'mounting';
-  if (c.includes('protect')) return 'protection';
-  if (c.includes('combin')) return 'combiner';
-  if (c.includes('cable')) return 'cables';
+  if (c.includes('mount') || c.includes('structur') || c.includes('هيكل') || c.includes('شاسيه')) return 'mounting';
+  if (c.includes('protect') || c.includes('حماي') || c.includes('قاطع')) return 'protection';
+  if (c.includes('combin') || c.includes('تجميع') || c.includes('صندوق')) return 'combiner';
+  if (c.includes('cable') || c.includes('كابل') || c.includes('سلك')) return 'cables';
   if (c.includes('mc4')) return 'mc4';
-  if (c.includes('seal')) return 'sealings';
-  if (c.includes('clamp')) return 'clamps';
+  if (c.includes('seal') || c.includes('عازل') || c.includes('عوازل')) return 'sealings';
+  if (c.includes('clamp') || c.includes('كلبس') || c.includes('تثبيت')) return 'clamps';
   return (c as Category) || 'panels';
 }
 
@@ -296,16 +312,91 @@ export function parseDimensionsString(dimStr?: string | null): {
 /**
  * Map D1 product object to application Product interface.
  */
+function resolveDefaultD1Image(cat: Category, brand: string, model: string): string {
+  const b = (brand || '').toLowerCase();
+  const m = (model || '').toLowerCase();
+  if (cat === 'inverters') {
+    if (b.includes('huawei') || m.includes('sun2000')) {
+      return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1790087530856-b5aswi77.jpg';
+    }
+    if (b.includes('invt') || m.includes('pump')) {
+      return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791793955618-hnt8gcsl.jpg';
+    }
+    return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474437619-nrtfkfhx.jpg';
+  }
+  if (cat === 'panels') {
+    if (b.includes('longi') || b.includes('trina')) {
+      return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791043105976-4eukpdun.png';
+    }
+    return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791028978582-ye8lbh70.png';
+  }
+  if (cat === 'batteries') {
+    return 'https://enerjoo-api.enerjoo320.workers.dev/files/products/1791474965434-xr788udb.jpg';
+  }
+  return 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop';
+}
+
+function normalizeD1Brand(rawBrand?: string | null, model?: string | null): string {
+  const b = String(rawBrand || '').trim();
+  const bl = b.toLowerCase();
+  const ml = String(model || '').toLowerCase();
+  if (bl.startsWith('huawei') || ml.includes('sun2000')) return 'Huawei';
+  if (bl === 'felicity') return 'Felicity';
+  if (bl === 'eastman') return 'Eastman';
+  if (bl === 'veichi' || bl === 'viechi') return 'Veichi';
+  if (bl.startsWith('jinko')) return 'Jinko';
+  if (bl.startsWith('longi')) return 'LONGi Solar';
+  if (bl.startsWith('trina')) return 'Trina Solar';
+  if (bl === 'invt') return 'Invt';
+  return b || 'Enerjoo';
+}
+
 function mapD1ProductToProduct(d1Item: any): Product {
   const id = d1Item.product_id || d1Item.id || '';
-  const name = d1Item.name || d1Item.model || `Product ${id}`;
-  const nameAr = d1Item.nameAr || d1Item.model || name;
-  const brand = d1Item.brand || '';
-  const category = mapD1CategoryToCategory(d1Item.product_category || d1Item.category);
-  const power = Number(d1Item.power_w ?? d1Item.power ?? 0);
-  const price = Number(d1Item.price_egp ?? d1Item.price ?? 0);
-  const efficiency = Number(d1Item.efficiency_percent ?? d1Item.efficiency ?? 0);
-  const warranty = Number(d1Item.warranty_years ?? d1Item.warranty ?? 0);
+  const baseMatch = productsData.find(b => String(b.id) === String(id));
+  const category = mapD1CategoryToCategory(d1Item.product_category || d1Item.category || baseMatch?.category);
+  const ratedKw = Number(d1Item.rated_power_kw ?? d1Item.specs?.ratedPowerKw ?? 0);
+  let power = Number(d1Item.power_w ?? d1Item.power ?? baseMatch?.power ?? 0);
+  if ((!power || isNaN(power)) && ratedKw > 0) {
+    power = ratedKw <= 200 ? ratedKw * 1000 : ratedKw;
+  }
+
+  let price = Number(d1Item.price_egp ?? d1Item.price ?? baseMatch?.price ?? 0);
+  if (category === 'inverters' && price > 0 && price < 500) {
+    price = baseMatch?.price && baseMatch.price >= 1000 ? baseMatch.price : price * 1000;
+  }
+
+  const efficiency = Number(d1Item.efficiency_percent ?? d1Item.efficiency ?? baseMatch?.efficiency ?? 0);
+  const warranty = Number(d1Item.warranty_years ?? d1Item.warranty ?? baseMatch?.warranty ?? 0);
+  const brand = normalizeD1Brand(d1Item.brand || baseMatch?.brand, d1Item.model || d1Item.name);
+
+  let rawModel = String(d1Item.model || d1Item.name || baseMatch?.name || `Product ${id}`).trim();
+  const kwDisplay = ratedKw > 0 ? ratedKw : (power >= 1000 ? power / 1000 : 0);
+  if (brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
+    rawModel = `Felicity Off-Grid Inverter ${kwDisplay}kW`;
+  } else if (brand === 'Eastman' && /^inverter\b/i.test(rawModel) && kwDisplay > 0) {
+    rawModel = `Eastman Off-Grid Inverter ${kwDisplay}kW`;
+  }
+
+  const name = baseMatch?.name || d1Item.name || rawModel;
+  let nameAr = d1Item.nameAr || d1Item.name_ar || baseMatch?.nameAr || '';
+  if (!nameAr || nameAr === rawModel || nameAr === d1Item.model) {
+    if (brand === 'Huawei' && kwDisplay > 0) {
+      nameAr = `إنفرتر هواوي ${kwDisplay} كيلو وات On-Grid ثلاثي الأطوار (${rawModel.replace(/^Huawei\s*/i, '')})`;
+    } else if (brand === 'Felicity' && kwDisplay > 0) {
+      nameAr = `إنفرتر فيليسيتي (فيلسيتي) أوف جريد ${kwDisplay} كيلو وات`;
+    } else if (brand === 'Eastman' && kwDisplay > 0) {
+      nameAr = `إنفرتر إيستمان أوف جريد ${kwDisplay} كيلو وات`;
+    } else if (brand === 'Jinko' && power > 0) {
+      nameAr = `لوح طاقة شمسية جينكو ${power} وات (${rawModel})`;
+    } else if (brand === 'LONGi Solar' && power > 0) {
+      nameAr = `لوح طاقة شمسية لونجي ثنائي الوجه ${power} وات (${rawModel})`;
+    } else if (brand === 'Trina Solar' && power > 0) {
+      nameAr = `لوح طاقة شمسية ترينا سولار ثنائي الوجه ${power} وات (${rawModel})`;
+    } else {
+      nameAr = name;
+    }
+  }
 
   // Parse raw specs if stored as string or object
   let parsedSpecs: Record<string, any> = {};
@@ -391,9 +482,9 @@ function mapD1ProductToProduct(d1Item: any): Product {
     else if (dimensionUnit === 'm') area = parseFloat((length * width).toFixed(4));
   }
 
-  const description = d1Item.notes || specs.description || specs.notes || '';
-  const notes = d1Item.notes || specs.notes || specs.description || '';
-  const image = d1Item.image_url || d1Item.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop';
+  const description = d1Item.notes || specs.description || specs.notes || nameAr;
+  const notes = d1Item.notes || specs.notes || specs.description || nameAr;
+  const image = d1Item.image_url || d1Item.image || baseMatch?.image || resolveDefaultD1Image(category, brand, name);
   const supplierId = d1Item.supplier_id || d1Item.supplierId || d1Item.supplier || '';
   const rawUpdatedAt = d1Item.updated_at || d1Item.updatedAt || new Date().toISOString().split('T')[0];
   const updatedAt = formatDateOnly(rawUpdatedAt);
@@ -670,10 +761,64 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
 export const getProducts = async (): Promise<Product[]> => {
   const deletedSet = getDeletedProductIds();
   try {
-    const data = await requestProductsApi<{ success: boolean; products: any[] }>('/products');
+    const data = await requestProductsApi<{ success?: boolean; ok?: boolean; products: any[] }>('/products');
     if (data && Array.isArray(data.products) && data.products.length > 0) {
-      const mapped = data.products.map(mapD1ProductToProduct);
-      return mapped.filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
+      let rawD1List = [...data.products];
+
+      // If calling the deployed Cloudflare Worker directly (which caps each response at 10 items), harvest all partitions
+      if (rawD1List.length <= 10 && getProductsApiBaseUrl() === CF_DIRECT_BASE_URL) {
+        const partitions = [
+          'PROD-1789',
+          'PROD-1790081', 'PROD-1790082', 'PROD-1790083', 'PROD-1790085', 'PROD-1790086', 'PROD-1790087',
+          'PROD-1790193', 'PROD-1790194', 'PROD-1790195', 'PROD-1790196',
+          'PROD-179028', 'PROD-179052', 'PROD-179092', 'PROD-17910', 'PROD-17913', 'PROD-17914', 'PROD-17917', 'PROD-1792', 'PROD-1793'
+        ];
+        const partMap = new Map<string, any>();
+        for (const p of rawD1List) partMap.set(String(p.product_id || p.id), p);
+        await Promise.all(partitions.map(async (q) => {
+          try {
+            const pData = await requestProductsApi<{ products?: any[] }>(`/products?q=${encodeURIComponent(q)}`);
+            for (const item of (pData.products || [])) {
+              partMap.set(String(item.product_id || item.id), item);
+            }
+          } catch {
+            // Ignore partition failure
+          }
+        }));
+        rawD1List = Array.from(partMap.values());
+      }
+
+      // Any product returned actively by D1 / API is authoritative; unmark if erroneously blacklisted
+      for (const p of rawD1List) {
+        const pId = String(p.product_id || p.id);
+        if (deletedSet.has(pId)) {
+          unmarkProductAsDeleted(pId);
+          deletedSet.delete(pId);
+        }
+      }
+
+      const mappedD1 = rawD1List
+        .map(mapD1ProductToProduct)
+        .filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
+
+      // Merge: start with baseline productsData (all categories)
+      const productsMap = new Map<string, Product>();
+      for (const baseProd of productsData) {
+        const id = String(baseProd.id);
+        if (!deletedSet.has(id)) {
+          productsMap.set(id, baseProd);
+        }
+      }
+      // Overlay live D1 products (live D1 properties take precedence and enrich)
+      for (const d1Prod of mappedD1) {
+        const id = String(d1Prod.id);
+        if (!deletedSet.has(id)) {
+          const existing = productsMap.get(id);
+          productsMap.set(id, existing ? { ...existing, ...d1Prod, specs: { ...(existing.specs || {}), ...(d1Prod.specs || {}) } } : d1Prod);
+        }
+      }
+
+      return Array.from(productsMap.values());
     }
     return productsData.filter(p => !deletedSet.has(String(p.id)));
   } catch (error) {
@@ -692,24 +837,31 @@ export const getProductById = async (productId: string | number): Promise<Produc
     return null;
   }
   try {
-    const data = await requestProductsApi<{ success: boolean; product: any; notFound?: boolean }>(`/products/${productId}`);
+    const data = await requestProductsApi<{ success?: boolean; ok?: boolean; product: any; notFound?: boolean }>(`/products/${productId}`);
     if (data && data.product) {
       const prod = mapD1ProductToProduct(data.product);
       if (getDeletedProductIds().has(String(prod.id))) return null;
       return prod;
     }
-    const foundFallback = productsData.find(p => String(p.id) === pId);
-    if (foundFallback && !getDeletedProductIds().has(String(foundFallback.id))) {
-      return foundFallback;
-    }
-    return null;
-  } catch (error) {
-    const foundFallback = productsData.find(p => String(p.id) === pId);
-    if (foundFallback && !getDeletedProductIds().has(String(foundFallback.id))) {
-      return foundFallback;
-    }
-    return null;
+  } catch {
+    // Non-blocking, fallback to catalog / list lookup
   }
+
+  try {
+    const all = await getProducts();
+    const foundInAll = all.find(p => String(p.id) === pId || String((p as any).product_id) === pId);
+    if (foundInAll && !getDeletedProductIds().has(String(foundInAll.id))) {
+      return foundInAll;
+    }
+  } catch {
+    // Fallback
+  }
+
+  const foundFallback = productsData.find(p => String(p.id) === pId);
+  if (foundFallback && !getDeletedProductIds().has(String(foundFallback.id))) {
+    return foundFallback;
+  }
+  return null;
 };
 
 /**

@@ -11,6 +11,7 @@ import { getSupplierWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY } from '../const
 import { formatDateOnly } from '../utils/dateUtils';
 import { getSupplierDisplayName, getSupplierAvatarInitial, isRawUidOrId } from '../utils/supplierUtils';
 import { classifyInverter } from '../utils/inverterClassification';
+import { formatCleanNumber } from '../utils/dimensionUtils';
 
 const DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=800';
 
@@ -193,8 +194,8 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           { 
             label: hasDims ? (isAr ? 'الأبعاد والمساحة' : 'Dimensions & Area') : t.area, 
             value: hasDims 
-              ? `${pLen}×${pWidth}${pThick ? `×${pThick}` : ''} ${pUnit} (${product.area} m²)` 
-              : `${product.area} m²`, 
+              ? `${formatCleanNumber(pLen)}×${formatCleanNumber(pWidth)}${pThick ? `×${formatCleanNumber(pThick)}` : ''} ${pUnit} (${formatCleanNumber(product.area, 3)} m²)` 
+              : `${formatCleanNumber(product.area, 3)} m²`, 
             icon: <Ruler className="text-solar-accent" /> 
           }
         ];
@@ -452,7 +453,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       list.push({ 
         key: 'dimensions', 
         label: isAr ? 'الأبعاد' : 'Dimensions', 
-        value: `${pLen} × ${pWidth}${pThick ? ` × ${pThick}` : ''} ${pUnit}`,
+        value: `${formatCleanNumber(pLen)} × ${formatCleanNumber(pWidth)}${pThick ? ` × ${formatCleanNumber(pThick)}` : ''} ${pUnit}`,
         icon: <Ruler size={14} className="text-solar-accent" />
       });
     } else if (specsObj.dimensionsMm) {
@@ -462,9 +463,9 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     // Only show area for solar panels
     if (product.category === 'panels') {
       if (product.area && product.area > 0) {
-        list.push({ key: 'area', label: t.area, value: `${product.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+        list.push({ key: 'area', label: t.area, value: `${formatCleanNumber(product.area, 3)} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
       } else if (specsObj.area && Number(specsObj.area) > 0) {
-        list.push({ key: 'area', label: t.area, value: `${specsObj.area} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
+        list.push({ key: 'area', label: t.area, value: `${formatCleanNumber(specsObj.area, 3)} m²`, icon: <Ruler size={14} className="text-solar-accent" /> });
       }
     }
 

@@ -9,6 +9,7 @@ import { classifyInverterType, classifyInverterPhase, classifyInverter } from '.
 import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
+import { formatCleanNumber, cleanDecimal, calculateMetricArea } from '../utils/dimensionUtils';
 
 const normalizeCategory = (cat?: string): string => {
   if (!cat) return 'panels';
@@ -178,29 +179,29 @@ const extractInitialFormData = (data?: Product | null) => {
 
   // Dimensions
   let dimLength = data.length !== undefined && data.length !== null
-    ? data.length.toString()
-    : (specs.length && category !== 'cables' ? specs.length.toString() : '');
+    ? formatCleanNumber(data.length)
+    : (specs.length && category !== 'cables' ? formatCleanNumber(specs.length) : '');
   let dimWidth = data.width !== undefined && data.width !== null
-    ? data.width.toString()
-    : (specs.width ? specs.width.toString() : '');
+    ? formatCleanNumber(data.width)
+    : (specs.width ? formatCleanNumber(specs.width) : '');
   let dimThickness = data.thickness !== undefined && data.thickness !== null
-    ? data.thickness.toString()
-    : (specs.thickness ? specs.thickness.toString() : '');
+    ? formatCleanNumber(data.thickness)
+    : (specs.thickness ? formatCleanNumber(specs.thickness) : '');
   let dimensionUnit = ((data.dimensionUnit || specs.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm');
   let area = data.area !== undefined && data.area !== null
-    ? data.area.toString()
-    : (specs.area ? specs.area.toString() : '');
+    ? formatCleanNumber(data.area, 3)
+    : (specs.area ? formatCleanNumber(specs.area, 3) : '');
 
   // Fallback parsing for dimensions string if length/width are missing
   if (!dimLength || !dimWidth) {
     const rawDimStr = (data as any).dimensions_mm || specs.dimensionsMm || (data as any).dimensions;
     if (rawDimStr) {
       const parsed = parseDimensionsString(rawDimStr);
-      if (parsed.length && !dimLength) dimLength = parsed.length.toString();
-      if (parsed.width && !dimWidth) dimWidth = parsed.width.toString();
-      if (parsed.thickness && !dimThickness) dimThickness = parsed.thickness.toString();
+      if (parsed.length && !dimLength) dimLength = formatCleanNumber(parsed.length);
+      if (parsed.width && !dimWidth) dimWidth = formatCleanNumber(parsed.width);
+      if (parsed.thickness && !dimThickness) dimThickness = formatCleanNumber(parsed.thickness);
       if (parsed.dimensionUnit) dimensionUnit = parsed.dimensionUnit;
-      if (parsed.area && !area) area = parsed.area.toString();
+      if (parsed.area && !area) area = formatCleanNumber(parsed.area, 3);
     }
   }
 
@@ -328,29 +329,15 @@ export const ProductForm: React.FC<{
   const widthNum = parseFloat(formData.dimWidth);
   const hasDimensions = !isNaN(lengthNum) && !isNaN(widthNum) && lengthNum > 0 && widthNum > 0;
 
-  let calculatedAreaInM2 = 0;
-  let conversionText = '';
+  const metricResult = hasDimensions 
+    ? calculateMetricArea(lengthNum, widthNum, formData.dimensionUnit)
+    : null;
 
-  if (hasDimensions) {
-    let factor = 1;
-    if (formData.dimensionUnit === 'mm') factor = 0.001;
-    else if (formData.dimensionUnit === 'cm') factor = 0.01;
-
-    const lengthInM = lengthNum * factor;
-    const widthInM = widthNum * factor;
-    const rawArea = lengthInM * widthInM;
-    calculatedAreaInM2 = Math.round(rawArea * 1000) / 1000;
-
-    // e.g., 2384 mm × 1303 mm => 2.384 × 1.303 = 3.106 m²
-    if (formData.dimensionUnit === 'mm' || formData.dimensionUnit === 'cm') {
-      conversionText = `${lengthInM} × ${widthInM} = ${calculatedAreaInM2} m²`;
-    } else {
-      conversionText = `${lengthNum} × ${widthNum} = ${calculatedAreaInM2} m²`;
-    }
-  }
+  const calculatedAreaInM2 = metricResult ? metricResult.areaInM2 : 0;
+  const conversionText = metricResult ? metricResult.conversionText : '';
 
   // Fallback to preserved area for existing products if dimensions are not specified
-  const currentSavedAreaNum = parseFloat(formData.area) || 0;
+  const currentSavedAreaNum = cleanDecimal(formData.area, 4);
   const effectiveArea = hasDimensions ? calculatedAreaInM2 : currentSavedAreaNum;
 
   // Main product image state
@@ -528,14 +515,14 @@ export const ProductForm: React.FC<{
         }
       }
 
-      const lengthVal = formData.dimLength && !isNaN(parseFloat(formData.dimLength)) ? parseFloat(formData.dimLength) : undefined;
-      const widthVal = formData.dimWidth && !isNaN(parseFloat(formData.dimWidth)) ? parseFloat(formData.dimWidth) : undefined;
-      const thicknessVal = formData.dimThickness && !isNaN(parseFloat(formData.dimThickness)) ? parseFloat(formData.dimThickness) : undefined;
+      const lengthVal = formData.dimLength && !isNaN(parseFloat(formData.dimLength)) ? cleanDecimal(formData.dimLength, 4) : undefined;
+      const widthVal = formData.dimWidth && !isNaN(parseFloat(formData.dimWidth)) ? cleanDecimal(formData.dimWidth, 4) : undefined;
+      const thicknessVal = formData.dimThickness && !isNaN(parseFloat(formData.dimThickness)) ? cleanDecimal(formData.dimThickness, 4) : undefined;
       const dimensionUnitVal = formData.dimensionUnit;
 
       const finalArea = calculatedAreaInM2 > 0 
         ? calculatedAreaInM2 
-        : (formData.area ? parseFloat(formData.area) || 0 : (initialData?.area ?? 0));
+        : (formData.area ? cleanDecimal(formData.area, 4) : cleanDecimal(initialData?.area, 4));
 
       let effectivePower = 0;
       if (formData.category === 'inverters') {
@@ -645,8 +632,27 @@ export const ProductForm: React.FC<{
       
       await onSave(newProduct);
     } catch (error: any) {
-      console.error("Upload failed", error);
-      setUploadError(error.message || (lang === 'ar' ? 'حدث خطأ أثناء رفع صورة المنتج إلى Cloudflare R2' : 'Failed to upload product image to Cloudflare R2'));
+      console.error("Save or upload failed:", error);
+      let msg = '';
+      if (typeof error === 'string') {
+        msg = error;
+      } else if (error?.message && typeof error.message === 'string' && error.message !== '[object Object]') {
+        msg = error.message;
+      } else if (error?.error?.message) {
+        msg = error.error.message;
+      } else if (typeof error?.error === 'string') {
+        msg = error.error;
+      } else {
+        msg = lang === 'ar' 
+          ? 'حدث خطأ أثناء حفظ المنتج أو رفع الصورة. يرجى التحقق من البيانات والمحاولة مرة أخرى.' 
+          : 'Failed to save product or upload image. Please verify your connection and try again.';
+      }
+      if (msg === '[object Object]' || !msg.trim()) {
+        msg = lang === 'ar' 
+          ? 'تعذر إتمام عملية الحفظ. يرجى مراجعة البيانات والمحاولة مرة أخرى.' 
+          : 'Unable to save product. Please check the inputs and try again.';
+      }
+      setUploadError(msg);
     } finally {
       setIsUploading(false);
     }
@@ -1234,11 +1240,11 @@ export const ProductForm: React.FC<{
               <span>
                 {hasDimensions ? (
                   <>
-                    {isAr ? 'المساحة المحسوبة:' : 'Calculated Area:'} <span className="underline decoration-solar-blue/40 underline-offset-4">{calculatedAreaInM2} m²</span>
+                    {isAr ? 'المساحة المحسوبة:' : 'Calculated Area:'} <span className="underline decoration-solar-blue/40 underline-offset-4">{formatCleanNumber(calculatedAreaInM2, 3)} m²</span>
                   </>
                 ) : effectiveArea > 0 ? (
                   <>
-                    {isAr ? 'المساحة المسجلة:' : 'Current Saved Area:'} <span>{effectiveArea} m²</span>
+                    {isAr ? 'المساحة المسجلة:' : 'Current Saved Area:'} <span>{formatCleanNumber(effectiveArea, 3)} m²</span>
                   </>
                 ) : (
                   <span className="text-solar-muted text-xs font-bold">
@@ -1255,7 +1261,7 @@ export const ProductForm: React.FC<{
             )}
             {!hasDimensions && currentSavedAreaNum > 0 && (
               <p className="text-[11px] font-bold text-solar-muted pt-1">
-                {isAr ? `هذا المنتج مسجل بمساحة ${currentSavedAreaNum} م² (يمكنك إدخال الطول والعرض لتحديثها تلقائياً)` : `This product has a saved area of ${currentSavedAreaNum} m² (enter length & width to update)`}
+                {isAr ? `هذا المنتج مسجل بمساحة ${formatCleanNumber(currentSavedAreaNum, 3)} م² (يمكنك إدخال الطول والعرض لتحديثها تلقائياً)` : `This product has a saved area of ${formatCleanNumber(currentSavedAreaNum, 3)} m² (enter length & width to update)`}
               </p>
             )}
           </div>
@@ -1265,7 +1271,7 @@ export const ProductForm: React.FC<{
             <input 
               type="text" 
               readOnly 
-              value={effectiveArea > 0 ? `${effectiveArea} m²` : ''} 
+              value={effectiveArea > 0 ? `${formatCleanNumber(effectiveArea, 3)} m²` : ''} 
               placeholder="0.000 m²"
               className="bg-solar-card border border-solar-border/80 text-solar-blue font-black text-sm px-3 py-2 rounded-xl text-center w-28 cursor-not-allowed select-all"
               tabIndex={-1}

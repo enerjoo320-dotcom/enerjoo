@@ -369,13 +369,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const updateUserProfile = async (data: Partial<User>) => {
     if (!user) return;
-    const updatedUser = { ...user, ...data };
+    const safeData: Partial<User> = { ...data };
+    if (user.type !== 'admin') {
+      delete (safeData as any).type;
+      delete (safeData as any).verified;
+      delete (safeData as any).rejected;
+      delete (safeData as any).uid;
+    }
+
+    const updatedUser = { ...user, ...safeData };
     setUser(updatedUser);
 
     try {
       const userDocRef = doc(db, "users", user.uid);
       await setDoc(userDocRef, {
-        ...data,
+        ...safeData,
         updatedAt: new Date().toISOString()
       }, { merge: true });
 
@@ -383,9 +391,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (user.type === 'customer') {
         const custDocRef = doc(db, "customers", user.uid);
         await setDoc(custDocRef, {
-          fullName: data.name || data.nameAr || user.name,
-          phoneNumber: data.phone || user.phone || '',
-          governorate: data.governorate || user.governorate || 'القاهرة',
+          fullName: safeData.name || safeData.nameAr || user.name,
+          phoneNumber: safeData.phone || user.phone || '',
+          governorate: safeData.governorate || user.governorate || 'القاهرة',
           updatedAt: serverTimestamp()
         }, { merge: true });
       }
