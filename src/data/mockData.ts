@@ -5,7 +5,7 @@ export const defaultSupplier: Supplier = {
   name: 'Enerjoo Official Hub',
   nameAr: 'مركز إنرجو للتوزيع والحلول الشمسية',
   price: 0,
-  phone: '01011684784',
+  phone: '01551509776',
   location: 'القاهرة، مصر',
   verified: true,
   lastUpdate: '2026-10-15',

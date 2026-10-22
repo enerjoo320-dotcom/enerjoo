@@ -23,6 +23,7 @@ import { formatDateOnly } from '../utils/dateUtils';
 import { isRawUidOrId } from '../utils/supplierUtils';
 import { productsData } from '../data/mockData';
 import { safeLocalStorage } from '../utils/safeStorage';
+import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 
 const DELETED_PRODUCTS_STORAGE_KEY = 'enerjoo_deleted_product_ids_v2';
 
@@ -577,7 +578,7 @@ function mapD1ProductToProduct(d1Item: any): Product {
         name: rawSupName || cachedSup?.name || 'Enerjoo Certified Supplier',
         nameAr: rawSupNameAr || cachedSup?.nameAr || cachedSup?.name || 'مورد معتمد',
         price: price,
-        phone: d1Item.supplier_phone || cachedSup?.phone || '01000000000',
+        phone: d1Item.supplier_phone || cachedSup?.phone || SUPPLIER_CONTACT_PHONE_DISPLAY,
         location: d1Item.supplier_location || cachedSup?.location || 'Cairo, Egypt',
         verified: cachedSup?.verified ?? true,
         lastUpdate: updatedAt
