@@ -38,7 +38,8 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
             id="header-enerjoo-logo"
             src="/enerjoo-logo-original-2026.jpeg" 
             alt="Enerjoo - عالم الطاقة بين يديك" 
-            itemProp="logo image"
+            itemProp="image"
+            fetchPriority="high"
             className="h-full w-auto max-h-11 sm:max-h-12 object-contain select-none block"
             referrerPolicy="no-referrer"
           />

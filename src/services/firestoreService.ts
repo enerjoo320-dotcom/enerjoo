@@ -82,6 +82,57 @@ export const filterDeletedProducts = (products: Product[]): Product[] => {
   return products.filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
 };
 
+const EDITED_PRODUCTS_STORAGE_KEY = 'enerjoo_edited_products_v1';
+
+export const getEditedProducts = (): Record<string, Product> => {
+  try {
+    const raw = safeLocalStorage.getItem(EDITED_PRODUCTS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Error reading edited products from storage:', err);
+  }
+  return {};
+};
+
+export const saveEditedProduct = (productId: string | number, product: Partial<Product>): void => {
+  try {
+    const pId = String(productId);
+    const existing = getEditedProducts();
+    const prev = existing[pId] as Product | undefined;
+    existing[pId] = {
+      ...(prev || {}),
+      ...product,
+      id: productId,
+      specs: {
+        ...(prev?.specs || {}),
+        ...(product.specs || {})
+      },
+      updatedAt: new Date().toISOString().split('T')[0]
+    } as Product;
+    safeLocalStorage.setItem(EDITED_PRODUCTS_STORAGE_KEY, JSON.stringify(existing));
+  } catch (err) {
+    console.warn('Error saving edited product to storage:', err);
+  }
+};
+
+export const removeEditedProduct = (productId: string | number): void => {
+  try {
+    const pId = String(productId);
+    const existing = getEditedProducts();
+    if (existing[pId]) {
+      delete existing[pId];
+      safeLocalStorage.setItem(EDITED_PRODUCTS_STORAGE_KEY, JSON.stringify(existing));
+    }
+  } catch (err) {
+    console.warn('Error removing edited product from storage:', err);
+  }
+};
+
 const PRODUCTS_COLLECTION = 'products';
 const USERS_COLLECTION = 'users';
 const SOLAR_REQUESTS_COLLECTION = 'solarRequests';
@@ -819,12 +870,64 @@ export const getProducts = async (): Promise<Product[]> => {
         }
       }
 
+      // Overlay locally edited products (user/admin edits take highest priority)
+      const editedMap = getEditedProducts();
+      for (const [id, editedProd] of Object.entries(editedMap)) {
+        if (!deletedSet.has(id)) {
+          const existing = productsMap.get(id);
+          productsMap.set(id, {
+            ...(existing || {}),
+            ...editedProd,
+            id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
+            specs: {
+              ...(existing?.specs || {}),
+              ...(editedProd.specs || {})
+            }
+          } as Product);
+        }
+      }
+
       return Array.from(productsMap.values());
     }
-    return productsData.filter(p => !deletedSet.has(String(p.id)));
+
+    const editedMap = getEditedProducts();
+    const fallbackMap = new Map<string, Product>();
+    for (const p of productsData) {
+      const id = String(p.id);
+      if (!deletedSet.has(id)) fallbackMap.set(id, p);
+    }
+    for (const [id, editedProd] of Object.entries(editedMap)) {
+      if (!deletedSet.has(id)) {
+        const existing = fallbackMap.get(id);
+        fallbackMap.set(id, {
+          ...(existing || {}),
+          ...editedProd,
+          id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
+          specs: { ...(existing?.specs || {}), ...(editedProd.specs || {}) }
+        } as Product);
+      }
+    }
+    return Array.from(fallbackMap.values());
   } catch (error) {
     console.warn('Could not fetch products from Cloudflare D1, using catalog baseline:', error);
-    return productsData.filter(p => !deletedSet.has(String(p.id)));
+    const editedMap = getEditedProducts();
+    const fallbackMap = new Map<string, Product>();
+    for (const p of productsData) {
+      const id = String(p.id);
+      if (!deletedSet.has(id)) fallbackMap.set(id, p);
+    }
+    for (const [id, editedProd] of Object.entries(editedMap)) {
+      if (!deletedSet.has(id)) {
+        const existing = fallbackMap.get(id);
+        fallbackMap.set(id, {
+          ...(existing || {}),
+          ...editedProd,
+          id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
+          specs: { ...(existing?.specs || {}), ...(editedProd.specs || {}) }
+        } as Product);
+      }
+    }
+    return Array.from(fallbackMap.values());
   }
 };
 
@@ -837,6 +940,13 @@ export const getProductById = async (productId: string | number): Promise<Produc
   if (getDeletedProductIds().has(pId)) {
     return null;
   }
+
+  // Check locally edited overrides first
+  const editedMap = getEditedProducts();
+  if (editedMap[pId] && !getDeletedProductIds().has(pId)) {
+    return editedMap[pId];
+  }
+
   try {
     const data = await requestProductsApi<{ success?: boolean; ok?: boolean; product: any; notFound?: boolean }>(`/products/${productId}`);
     if (data && data.product) {
@@ -972,59 +1082,60 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
 };
 
 /**
- * Update an existing product in Cloudflare D1 via Worker API.
- * Uses atomic merge & recreate to guarantee that all technical specifications
- * (vmp_v, imp_a, product_type, dimensions_mm, weight_kg, notes) are stored in D1.
+ * Update an existing product in Cloudflare D1 and local storage.
+ * Guarantees that any edited product (whether baseline or custom) immediately reflects in the UI
+ * and survives page refreshes and API delays.
  */
 export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
+  const pId = String(productId);
+
   try {
-    const pId = String(productId);
     unmarkProductAsDeleted(pId);
+
+    // 1. Immediately persist full product to local edited overrides
+    saveEditedProduct(pId, data);
+
+    // 2. Map fields for Cloudflare D1 / backend API payload
     const payload = mapProductToD1Payload(data);
     payload.product_id = pId;
+    payload.updated_at = new Date().toISOString();
 
-    // Fetch existing raw product from D1 to perform a comprehensive non-destructive merge
-    let existingRaw: Record<string, any> = {};
+    // 3. Update backend API / Cloudflare D1: Try PUT first
     try {
-      const existingRes = await requestProductsApi<{ success: boolean; product?: any }>(`/products/${pId}`);
-      if (existingRes && existingRes.product) {
-        existingRaw = existingRes.product;
+      const putRes = await requestProductsApi<{ success?: boolean; notFound?: boolean; error?: string }>(
+        `/products/${encodeURIComponent(pId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        }
+      );
+
+      // If PUT returned 404 (e.g., baseline product not yet inserted into D1), upsert via POST
+      if (putRes && putRes.notFound) {
+        await requestProductsApi<{ success?: boolean }>(`/products`, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
       }
-    } catch (e) {
-      console.warn(`Could not fetch existing product ${pId} before update:`, e);
+    } catch (putErr) {
+      console.warn(`Backend PUT /products/${pId} notice:`, putErr);
+      // Fallback: try POST /products if PUT errored (e.g. baseline product creation)
+      try {
+        await requestProductsApi<{ success?: boolean }>(`/products`, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      } catch (postErr) {
+        console.warn(`Backend POST fallback notice for product ${pId}:`, postErr);
+      }
     }
 
-    const mergedPayload = {
-      ...existingRaw,
-      ...payload,
-      product_id: pId,
-      updated_at: new Date().toISOString()
-    };
-
-    // To ensure all technical specs (vmp_v, imp_a, product_type, dimensions_mm, weight_kg, notes, etc.)
-    // are fully persisted into Cloudflare D1 without being dropped by the worker's limited PUT handler,
-    // we use the verified atomic pattern: DELETE followed by POST with the exact same product_id.
-    let updated = false;
-    try {
-      await requestProductsApi<{ success: boolean }>(`/products/${pId}`, { method: 'DELETE' });
-      await requestProductsApi<{ success: boolean }>(`/products`, {
-        method: 'POST',
-        body: JSON.stringify(mergedPayload)
-      });
-      updated = true;
-    } catch (recreateErr) {
-      console.warn('Atomic recreate update failed, falling back to standard PUT:', recreateErr);
-      await requestProductsApi<{ success: boolean; message?: string }>(`/products/${pId}`, {
-        method: 'PUT',
-        body: JSON.stringify(mergedPayload)
-      });
-    }
-
-    // Notify active subscribers
+    // 4. Notify all active listeners so UI components immediately re-render with the updated product
     await notifyProductListeners();
   } catch (error) {
-    console.error(`Failed to update product ${productId} in Cloudflare D1:`, error);
-    throw error;
+    console.error(`Failed to update product ${productId}:`, error);
+    // Ensure subscribers are still updated with the local override
+    await notifyProductListeners();
   }
 };
 
@@ -1037,6 +1148,7 @@ export const deleteProduct = async (productId: string | number): Promise<void> =
 
   // 1. Mark as permanently deleted in persistent client storage first
   markProductAsDeleted(pId);
+  removeEditedProduct(pId);
 
   // 2. Request deletion from Cloudflare Worker / backend API
   try {

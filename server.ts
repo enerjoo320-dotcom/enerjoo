@@ -433,9 +433,18 @@ Browse listed catalog products or submit an RFQ to receive competitive bids from
 
 async function startServer() {
   const app = express();
-  const portArgIdx = process.argv.indexOf("--port");
-  const argPort = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? Number(process.argv[portArgIdx + 1]) : null;
-  const PORT = argPort || 3000;
+  let portFromArgs: number | null = null;
+  for (let i = 0; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === "--port" || arg === "-p") {
+      const next = Number(process.argv[i + 1]);
+      if (!isNaN(next) && next > 0) portFromArgs = next;
+    } else if (arg.startsWith("--port=")) {
+      const val = Number(arg.split("=")[1]);
+      if (!isNaN(val) && val > 0) portFromArgs = val;
+    }
+  }
+  const PORT = Number(process.env.PORT) || portFromArgs || 3000;
 
   // Security: Disable X-Powered-By fingerprinting header
   app.disable("x-powered-by");
@@ -958,7 +967,45 @@ async function startServer() {
     }
   };
 
+  const EDITED_PRODUCTS_FILE = path.join(process.cwd(), "edited-products.json");
+  const editedProductsMap = new Map<string, any>();
+
+  try {
+    const fs = await import("fs");
+    if (fs.existsSync(EDITED_PRODUCTS_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(EDITED_PRODUCTS_FILE, "utf-8"));
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+        Object.entries(saved).forEach(([id, prod]) => {
+          editedProductsMap.set(String(id), prod);
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("Could not load edited-products.json:", e);
+  }
+
+  const saveEditedProducts = async () => {
+    try {
+      const fs = await import("fs");
+      const obj: Record<string, any> = {};
+      editedProductsMap.forEach((val, key) => {
+        obj[key] = val;
+      });
+      fs.writeFileSync(EDITED_PRODUCTS_FILE, JSON.stringify(obj, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("Could not save edited-products.json:", e);
+    }
+  };
+
   const activeCatalogProducts: any[] = [...D1_CATALOG_PRODUCTS];
+  for (const [id, editedProd] of editedProductsMap.entries()) {
+    const idx = activeCatalogProducts.findIndex(p => String(p.product_id || p.id) === id);
+    if (idx >= 0) {
+      activeCatalogProducts[idx] = { ...activeCatalogProducts[idx], ...editedProd };
+    } else {
+      activeCatalogProducts.push(editedProd);
+    }
+  }
 
   function normalizeCategoryKey(catStr?: string | null): string {
     if (!catStr) return 'panels';
@@ -1229,15 +1276,25 @@ async function startServer() {
       try {
         const d1Map = await fetchAllLiveD1Products();
         for (const [id, p] of d1Map.entries()) {
-          // Live D1 database is authoritative: unmark from deletedProductIds if returned
+          // Live D1 database is authoritative for new items, but never overrides local edits
           if (deletedProductIds.has(id)) {
             deletedProductIds.delete(id);
           }
           const existing = productsMap.get(id) || {};
-          productsMap.set(id, normalizeProductRecord({ ...existing, ...p, _fromD1: true }));
+          const isLocallyEdited = editedProductsMap.has(id);
+          const editedData = isLocallyEdited ? editedProductsMap.get(id) : null;
+          productsMap.set(id, normalizeProductRecord({ ...existing, ...p, ...(editedData || {}), _fromD1: true }));
         }
       } catch (cfErr) {
         console.warn("Notice: could not reach remote Cloudflare Worker, using active catalog:", cfErr);
+      }
+
+      // 3. Always apply locally edited products with highest priority
+      for (const [id, editedProd] of editedProductsMap.entries()) {
+        if (!deletedProductIds.has(id)) {
+          const current = productsMap.get(id) || {};
+          productsMap.set(id, normalizeProductRecord({ ...current, ...editedProd }));
+        }
       }
 
       let mergedProducts = Array.from(productsMap.values());
@@ -1487,6 +1544,13 @@ async function startServer() {
         activeCatalogProducts.push(mergedPayload);
       }
 
+      // Persist in editedProductsMap
+      editedProductsMap.set(productId, mergedPayload);
+      await saveEditedProducts();
+
+      // Ensure live cache also holds the edited record so remote fetch doesn't overwrite it
+      liveD1ProductsCache.set(productId, { ...mergedPayload, _fromD1: true });
+
       // Best effort forward to Worker
       try {
         await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
@@ -1516,6 +1580,11 @@ async function startServer() {
       const pId = String(productId);
       deletedProductIds.add(pId);
       await saveDeletedProducts();
+
+      if (editedProductsMap.has(pId)) {
+        editedProductsMap.delete(pId);
+        await saveEditedProducts();
+      }
 
       const idx = activeCatalogProducts.findIndex(p => String(p.product_id) === pId || String(p.id) === pId);
       if (idx >= 0) {
@@ -2774,11 +2843,35 @@ async function startServer() {
 
   // Vite middleware for development or static serving for production
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    let viteMiddleware: any = null;
+    const vitePromise = createViteServer({
       server: { middlewareMode: true, hmr: false },
       appType: "spa",
+    })
+      .then((vite) => {
+        viteMiddleware = vite.middlewares;
+        console.log("Vite development middleware ready");
+        return vite;
+      })
+      .catch((err) => {
+        console.error("Error creating Vite server:", err);
+        return null;
+      });
+
+    app.use(async (req, res, next) => {
+      if (viteMiddleware) {
+        return viteMiddleware(req, res, next);
+      }
+      try {
+        const vite = await vitePromise;
+        if (vite && vite.middlewares) {
+          return vite.middlewares(req, res, next);
+        }
+      } catch (err) {
+        return next(err);
+      }
+      next();
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));

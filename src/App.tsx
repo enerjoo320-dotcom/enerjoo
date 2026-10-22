@@ -616,6 +616,11 @@ export default function App() {
         };
         // Optimistically update products state immediately
         setProducts(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
+        setCompareList(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
+        setWishlist(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
+        if (selectedProduct && selectedProduct.id.toString() === prodId) {
+          setSelectedProduct(mergedProduct);
+        }
         await updateProduct(prodId, mergedProduct);
         setEditingProduct(null);
       } else {

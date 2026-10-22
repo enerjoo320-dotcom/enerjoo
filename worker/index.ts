@@ -501,14 +501,38 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       `UPDATE products SET 
         brand = COALESCE(?, brand),
         model = COALESCE(?, model),
+        product_category = COALESCE(?, product_category),
+        product_type = COALESCE(?, product_type),
+        technology = COALESCE(?, technology),
         power_w = COALESCE(?, power_w),
         price_egp = COALESCE(?, price_egp),
+        efficiency_percent = COALESCE(?, efficiency_percent),
+        warranty_years = COALESCE(?, warranty_years),
+        dimensions_mm = COALESCE(?, dimensions_mm),
+        weight_kg = COALESCE(?, weight_kg),
+        notes = COALESCE(?, notes),
         image_url = COALESCE(?, image_url),
         availability = COALESCE(?, availability),
         updated_at = datetime('now')
       WHERE product_id = ?`
     )
-      .bind(body.brand || null, body.model || null, body.power_w || null, body.price_egp || null, body.image_url || null, body.availability || null, productId)
+      .bind(
+        body.brand || null,
+        body.model || null,
+        body.product_category || null,
+        body.product_type || null,
+        body.technology || null,
+        body.power_w || null,
+        body.price_egp || null,
+        body.efficiency_percent || null,
+        body.warranty_years || null,
+        body.dimensions_mm || null,
+        body.weight_kg || null,
+        body.notes || null,
+        body.image_url || null,
+        body.availability || null,
+        productId
+      )
       .run();
 
     return successJson({ message: 'Product updated successfully', product_id: productId }, 200, request);
