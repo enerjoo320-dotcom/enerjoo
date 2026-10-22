@@ -216,6 +216,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         return specsList;
       }
       case 'inverters': {
+        const hpVal = product.specs?.hp || product.specs?.horsepower || product.specs?.horsePower || product.specs?.pumpHorsepower || (product as any).hp;
         const powerVal = product.specs?.powerKw 
           ? (String(product.specs.powerKw).includes('kW') || String(product.specs.powerKw).includes('كيلو') ? String(product.specs.powerKw) : `${product.specs.powerKw} kW`)
           : (product.power ? (product.power >= 1000 ? `${product.power / 1000} kW` : `${product.power} W`) : (product.specs?.ratedPowerKw ? `${product.specs.ratedPowerKw} kW` : 'N/A'));
@@ -223,12 +224,20 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         const effVal = product.efficiency ? `${product.efficiency}%` : (product.specs?.peakEfficiency ? `${product.specs.peakEfficiency}%` : 'N/A');
         const typeVal = product.specs?.type || product.specs?.waveform || product.specs?.productType || 'N/A';
 
-        const specsList = [
+        const specsList = [];
+        if (hpVal && hpVal !== 'Unknown') {
+          specsList.push({
+            label: isAr ? 'القدرة بالحصان (HP)' : 'Horsepower (HP)',
+            value: isAr ? `${hpVal} حصان` : `${hpVal} HP`,
+            icon: <Power className="text-solar-blue" />
+          });
+        }
+        specsList.push(
           { label: t.powerKw, value: powerVal, icon: <Power className="text-solar-blue" /> },
           { label: t.efficiency, value: effVal, icon: <Zap className="text-solar-warning" /> },
           { label: t.type, value: typeVal, icon: <Grid className="text-solar-accent" /> },
           { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> }
-        ];
+        );
 
         const mpptVal = product.specs?.pvMpptVoltageRangeV || product.specs?.mppt || product.specs?.mpptVoltageRange || (product as any).pv_mppt_voltage_range_v;
         if (mpptVal) {
@@ -247,6 +256,35 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           const strCurr = String(product.specs.current);
           const formattedCurr = /a|أمبير/i.test(strCurr) ? strCurr : `${strCurr} ${t.ampere || 'A'}`;
           specsList.push({ label: isAr ? 'تيار الخرج (AC)' : t.current, value: formattedCurr, icon: <Power className="text-solar-warning" /> });
+        }
+
+        return specsList;
+      }
+      case 'pumps': {
+        const hpVal = product.specs?.hp || product.specs?.horsepower || product.specs?.horsePower || product.specs?.pumpHorsepower || (product as any).hp;
+        const powerVal = product.specs?.powerKw 
+          ? (String(product.specs.powerKw).includes('kW') ? String(product.specs.powerKw) : `${product.specs.powerKw} kW`)
+          : (product.power ? (product.power >= 1000 ? `${(product.power / 1000).toFixed(1)} kW` : `${product.power} W`) : 'N/A');
+
+        const specsList = [];
+        if (hpVal && hpVal !== 'Unknown') {
+          specsList.push({
+            label: isAr ? 'القدرة بالحصان (HP)' : 'Horsepower (HP)',
+            value: isAr ? `${hpVal} حصان` : `${hpVal} HP`,
+            icon: <Power className="text-solar-blue" />
+          });
+        }
+        specsList.push(
+          { label: t.powerKw, value: powerVal, icon: <Power className="text-solar-blue" /> },
+          { label: t.type, value: product.specs?.type || (isAr ? 'مضخة ري' : 'Pump'), icon: <Grid className="text-solar-accent" /> },
+          { label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield className="text-solar-success" /> }
+        );
+
+        if (product.specs?.voltage) {
+          specsList.push({ label: t.voltage, value: `${product.specs.voltage} V`, icon: <Zap className="text-solar-blue" /> });
+        }
+        if (product.specs?.current) {
+          specsList.push({ label: t.current, value: `${product.specs.current} A`, icon: <Power className="text-solar-warning" /> });
         }
 
         return specsList;
@@ -317,6 +355,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
       weight: t.weight,
       capacity: t.capacity,
       powerKw: t.powerKw,
+      hp: isAr ? 'القدرة بالحصان (HP)' : 'Horsepower (HP)',
+      horsepower: isAr ? 'القدرة بالحصان (HP)' : 'Horsepower (HP)',
+      horsePower: isAr ? 'القدرة بالحصان (HP)' : 'Horsepower (HP)',
+      pumpHorsepower: isAr ? 'قدرة المضخة بالحصان (HP)' : 'Pump Horsepower (HP)',
+      motorPowerRange: isAr ? 'نطاق قدرة الماتور / المضخة' : 'Motor Power Range',
       crossSection: t.crossSection,
       length: t.length,
       width: t.width,
@@ -389,6 +432,11 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
         case 'powerKw':
         case 'ratedPowerKw':
           return /kw|كيلو/i.test(strVal) ? strVal : `${strVal} kW`;
+        case 'hp':
+        case 'horsepower':
+        case 'horsePower':
+        case 'pumpHorsepower':
+          return /hp|حصان/i.test(strVal) ? strVal : `${strVal} ${isAr ? 'حصان' : 'HP'}`;
         case 'efficiency':
         case 'peakEfficiency':
           return strVal.endsWith('%') ? strVal : `${strVal}%`;
@@ -415,6 +463,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
           return strVal;
       }
     };
+
+    // 0. Horsepower (for pump inverters and motors)
+    const hpVal = specsObj.hp || specsObj.horsepower || specsObj.horsePower || specsObj.pumpHorsepower || (product as any).hp;
+    if (hpVal && hpVal !== 'Unknown') {
+      list.push({ key: 'hp', label: isAr ? 'القدرة بالحصان (HP)' : 'Horsepower (HP)', value: `${hpVal} ${isAr ? 'حصان' : 'HP'}`, icon: <Power size={14} className="text-solar-blue" /> });
+    }
 
     // 1. Power
     if (product.power && product.power > 0) {

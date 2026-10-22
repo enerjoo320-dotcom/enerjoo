@@ -104,6 +104,7 @@ export interface StructuredInverter {
   max_discharging_current_a?: number | 'Unknown';
 
   // Pump Information (Pump Inverter)
+  pump_horsepower_hp?: number | string;
   pump_application?: string | 'Unknown';
   motor_power_range?: string | 'Unknown';
   motor_voltage_v?: string | number | 'Unknown';

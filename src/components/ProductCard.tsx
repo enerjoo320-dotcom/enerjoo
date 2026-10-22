@@ -91,13 +91,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     if (product.category === 'inverters') {
       const inv = classifyInverter(product);
       const specs = [];
+      const hpVal = product.specs?.hp || product.specs?.horsepower || product.specs?.horsePower || product.specs?.pumpHorsepower || (product as any).hp || (inv as any).pump_horsepower_hp;
+      const isPumpInv = inv.type === 'Pump Inverter' || Boolean(hpVal);
       
-      // 1. Rated AC Power
-      specs.push({
-        label: isAr ? 'القدرة المقدرة' : 'Rated Power',
-        value: `${inv.rated_power_kw} kW`,
-        icon: <Power size={14} className="text-solar-blue" />
-      });
+      // 1. Rated AC Power / Horsepower
+      if (isPumpInv && hpVal && hpVal !== 'Unknown') {
+        specs.push({
+          label: isAr ? 'القدرة (حصان / ك.و)' : 'Power (HP / kW)',
+          value: isAr ? `${hpVal} حصان (${inv.rated_power_kw} kW)` : `${hpVal} HP (${inv.rated_power_kw} kW)`,
+          icon: <Power size={14} className="text-solar-blue" />
+        });
+      } else {
+        specs.push({
+          label: isAr ? 'القدرة المقدرة' : 'Rated Power',
+          value: `${inv.rated_power_kw} kW`,
+          icon: <Power size={14} className="text-solar-blue" />
+        });
+      }
 
       // 2. Phase
       specs.push({
@@ -106,8 +116,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         icon: <Cpu size={14} className="text-solar-blue" />
       });
 
-      // 3. Battery Support or Efficiency
-      if (inv.battery_support) {
+      // 3. Application or Battery Support or Efficiency
+      if (isPumpInv) {
+        specs.push({
+          label: isAr ? 'الاستخدام' : 'Application',
+          value: isAr ? 'طلمبات ومضخات ري' : 'Solar Pump VFD',
+          icon: <Grid size={14} className="text-solar-accent" />
+        });
+      } else if (inv.battery_support) {
         specs.push({
           label: isAr ? 'دعم البطاريات' : 'Battery Storage',
           value: isAr ? 'يدعم بطارية' : 'Battery Supported',
@@ -128,6 +144,29 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       }
 
       return specs;
+    }
+
+    if (product.category === 'pumps') {
+      const hpVal = specsObj.hp || specsObj.horsepower || specsObj.horsePower || specsObj.pumpHorsepower || (product as any).hp;
+      const specs = [];
+      if (hpVal && hpVal !== 'Unknown') {
+        specs.push({
+          label: isAr ? 'القدرة بالحصان' : 'Horsepower',
+          value: isAr ? `${hpVal} حصان` : `${hpVal} HP`,
+          icon: <Power size={14} className="text-solar-blue" />
+        });
+      } else if (product.power) {
+        specs.push({
+          label: t.power,
+          value: product.power >= 1000 ? `${(product.power / 1000).toFixed(1)} kW` : `${product.power} W`,
+          icon: <Power size={14} className="text-solar-blue" />
+        });
+      }
+      if (specsObj.voltage) {
+        specs.push({ label: t.voltage, value: `${specsObj.voltage}V`, icon: <Zap size={14} className="text-solar-warning" /> });
+      }
+      specs.push({ label: t.warranty, value: `${product.warranty} ${t.years}`, icon: <Shield size={14} /> });
+      return specs.slice(0, 3);
     }
 
     if (product.category === 'batteries') {

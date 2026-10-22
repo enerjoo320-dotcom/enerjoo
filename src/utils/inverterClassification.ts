@@ -389,8 +389,12 @@ export function classifyInverter(rawProduct: Product | any): StructuredInverter 
 
   // Pump Information
   const isPump = type === 'Pump Inverter';
+  const rawHp = rawProduct.hp || rawProduct.specs?.hp || rawProduct.specs?.horsepower || rawProduct.specs?.horsePower || rawProduct.specs?.pumpHorsepower;
+  const calculatedHp = isPump ? (rawHp || (rated_power_kw ? Math.round(rated_power_kw * 1.34) : 'Unknown')) : undefined;
   const pump_application = isPump ? (rawProduct.specs?.pumpApplication || 'Agricultural Well & Submersible Pumping') : 'Unknown';
-  const motor_power_range = isPump ? (rawProduct.specs?.motorPowerRange || `${Math.round(rated_power_kw * 1.34)} HP (${rated_power_kw} kW)`) : 'Unknown';
+  const motor_power_range = isPump 
+    ? (rawHp ? `${rawHp} HP (${rated_power_kw} kW)` : (rawProduct.specs?.motorPowerRange || `${Math.round(rated_power_kw * 1.34)} HP (${rated_power_kw} kW)`)) 
+    : 'Unknown';
   const motor_voltage_v = isPump ? (phase === 'Three Phase' ? '380V AC (3-Phase)' : '220V AC (1-Phase)') : 'Unknown';
   const max_motor_current_a = isPump ? (rawProduct.specs?.maxMotorCurrentA || 'Unknown') : 'Unknown';
   const pump_mppt_range_v = isPump ? (mppt_voltage_range_v !== 'Unknown' ? mppt_voltage_range_v : 'Unknown') : 'Unknown';
@@ -440,6 +444,7 @@ export function classifyInverter(rawProduct: Product | any): StructuredInverter 
     battery_voltage_range,
     max_charging_current_a,
     max_discharging_current_a,
+    pump_horsepower_hp: calculatedHp,
     pump_application,
     motor_power_range,
     motor_voltage_v,

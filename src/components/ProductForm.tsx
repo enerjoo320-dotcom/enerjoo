@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2, Ruler, Maximize2, Calculator, Zap } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, AlertCircle, Plus, Trash2, Sparkles, CheckCircle2, Ruler, Maximize2, Calculator, Zap, Droplets } from 'lucide-react';
 import { translations } from '../translations';
 import { uploadProductImage } from '../services/uploadService';
 import { autoCompressImage, formatFileSize, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
@@ -10,6 +10,50 @@ import { useAuth } from '../context/AuthContext';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
 import { formatCleanNumber, cleanDecimal, calculateMetricArea } from '../utils/dimensionUtils';
+
+export const STANDARD_PUMP_HP_OPTIONS = [1, 2, 3, 5.5, 7.5, 10, 15, 20, 25, 30, 40, 50, 75, 100];
+
+export const HP_TO_KW_MAP: Record<string, string> = {
+  '1': '0.75',
+  '1.5': '1.1',
+  '2': '1.5',
+  '3': '2.2',
+  '4': '3',
+  '5': '3.7',
+  '5.5': '4',
+  '7.5': '5.5',
+  '10': '7.5',
+  '15': '11',
+  '20': '15',
+  '25': '18.5',
+  '30': '22',
+  '40': '30',
+  '50': '37',
+  '60': '45',
+  '75': '55',
+  '100': '75'
+};
+
+export const KW_TO_HP_MAP: Record<string, string> = {
+  '0.75': '1',
+  '1.1': '1.5',
+  '1.5': '2',
+  '2.2': '3',
+  '3': '4',
+  '3.7': '5',
+  '4': '5.5',
+  '5.5': '7.5',
+  '7.5': '10',
+  '11': '15',
+  '15': '20',
+  '18.5': '25',
+  '22': '30',
+  '30': '40',
+  '37': '50',
+  '45': '60',
+  '55': '75',
+  '75': '100'
+};
 
 const normalizeCategory = (cat?: string): string => {
   if (!cat) return 'panels';
@@ -39,6 +83,7 @@ const extractInitialFormData = (data?: Product | null) => {
       description: '',
       power: '',
       powerKw: '',
+      hp: '',
       efficiency: '',
       warranty: '',
       type: '',
@@ -83,6 +128,34 @@ const extractInitialFormData = (data?: Product | null) => {
   if (specs.ratedPowerKw !== undefined && specs.ratedPowerKw !== null && specs.ratedPowerKw !== '') {
     powerKw = specs.ratedPowerKw.toString();
     if (!power) power = (parseFloat(specs.ratedPowerKw) * 1000).toString();
+  }
+
+  // Extract horsepower for pump inverters and motors
+  let hp = '';
+  if ((data as any).hp !== undefined && (data as any).hp !== null && (data as any).hp !== '') {
+    hp = (data as any).hp.toString();
+  } else if (specs.hp !== undefined && specs.hp !== null && specs.hp !== '') {
+    hp = specs.hp.toString();
+  } else if (specs.horsepower !== undefined && specs.horsepower !== null && specs.horsepower !== '') {
+    hp = specs.horsepower.toString();
+  } else if (specs.horsePower !== undefined && specs.horsePower !== null && specs.horsePower !== '') {
+    hp = specs.horsePower.toString();
+  } else if (specs.pumpHorsepower !== undefined && specs.pumpHorsepower !== null && specs.pumpHorsepower !== '') {
+    hp = specs.pumpHorsepower.toString();
+  } else if (specs.motorHp !== undefined && specs.motorHp !== null && specs.motorHp !== '') {
+    hp = specs.motorHp.toString();
+  } else if (specs.motorPowerRange && typeof specs.motorPowerRange === 'string') {
+    const m = specs.motorPowerRange.match(/(\d+(?:\.\d+)?)\s*(?:hp|حصان)/i);
+    if (m) hp = m[1];
+  }
+
+  // If hp is found but powerKw is missing, calculate powerKw & power
+  if (hp && !powerKw) {
+    const numHp = parseFloat(hp);
+    if (!isNaN(numHp)) {
+      powerKw = HP_TO_KW_MAP[hp.trim()] || (numHp * 0.7457).toFixed(1);
+      if (!power) power = Math.round(parseFloat(powerKw) * 1000).toString();
+    }
   }
 
   // Extract voltage
@@ -245,6 +318,7 @@ const extractInitialFormData = (data?: Product | null) => {
     description: finalDescription,
     power,
     powerKw,
+    hp,
     efficiency,
     warranty,
     type: finalType,
@@ -294,17 +368,59 @@ export const ProductForm: React.FC<{
     setExistingAdditionalUrls(initialData?.additionalImages || []);
   }, [initialData]);
 
+  const handleHpChange = (rawHp: string) => {
+    setFormData(prev => {
+      const clean = rawHp.trim();
+      const num = parseFloat(clean);
+      let calcKw = prev.powerKw;
+      let calcPower = prev.power;
+      if (!isNaN(num) && num > 0) {
+        calcKw = HP_TO_KW_MAP[clean] || (num * 0.7457).toFixed(1);
+        calcPower = Math.round(parseFloat(calcKw) * 1000).toString();
+      }
+      return {
+        ...prev,
+        hp: rawHp,
+        powerKw: calcKw,
+        power: calcPower,
+        // If type was On-Grid and user enters HP for pump, auto-switch type to Pump Inverter for clarity
+        type: (prev.category === 'inverters' && prev.type === 'On-Grid' && !prev.hp && rawHp) ? 'Pump Inverter' : prev.type
+      };
+    });
+  };
+
+  const handlePowerKwChange = (rawKw: string) => {
+    setFormData(prev => {
+      const cleanKw = rawKw.replace(/[^0-9.]/g, '');
+      const num = parseFloat(cleanKw);
+      let calcHp = prev.hp;
+      let calcPower = prev.power;
+      if (!isNaN(num) && num > 0) {
+        calcPower = Math.round(num * 1000).toString();
+        if (prev.category === 'pumps' || prev.type === 'Pump Inverter' || prev.hp) {
+          calcHp = KW_TO_HP_MAP[cleanKw] || (num / 0.7457).toFixed(1);
+        }
+      }
+      return {
+        ...prev,
+        powerKw: rawKw,
+        power: calcPower,
+        hp: calcHp
+      };
+    });
+  };
+
   const getFieldsForCategory = (cat: string) => {
     const common = ['price', 'warranty'];
     switch (cat) {
       case 'panels':
         return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'weight'];
       case 'inverters':
-        return [...common, 'powerKw', 'efficiency', 'type', 'mppt', 'maxPvVoltage', 'mpptCount', 'voltage', 'current', 'weight'];
+        return [...common, 'powerKw', 'hp', 'efficiency', 'type', 'mppt', 'maxPvVoltage', 'mpptCount', 'voltage', 'current', 'weight'];
       case 'batteries':
         return [...common, 'capacity', 'voltage', 'type', 'weight'];
       case 'pumps':
-        return [...common, 'powerKw', 'voltage', 'current', 'type', 'weight'];
+        return [...common, 'hp', 'powerKw', 'voltage', 'current', 'type', 'weight'];
       case 'cables':
         return ['price', 'crossSection', 'length', 'voltage', 'material', 'color'];
       case 'mounting':
@@ -525,10 +641,24 @@ export const ProductForm: React.FC<{
         : (formData.area ? cleanDecimal(formData.area, 4) : cleanDecimal(initialData?.area, 4));
 
       let effectivePower = 0;
+      const cleanHp = formData.hp && !isNaN(parseFloat(formData.hp)) ? parseFloat(formData.hp) : (formData.hp ? formData.hp.trim() : undefined);
+
       if (formData.category === 'inverters') {
-        effectivePower = formData.powerKw 
-          ? Math.round(parseFloat(formData.powerKw) * 1000) 
-          : (parseInt(formData.power) || initialData?.power || 0);
+        if (formData.powerKw) {
+          effectivePower = Math.round(parseFloat(formData.powerKw) * 1000);
+        } else if (cleanHp && typeof cleanHp === 'number') {
+          effectivePower = Math.round(cleanHp * 746);
+        } else {
+          effectivePower = parseInt(formData.power) || initialData?.power || 0;
+        }
+      } else if (formData.category === 'pumps') {
+        if (cleanHp && typeof cleanHp === 'number') {
+          effectivePower = Math.round(cleanHp * 746);
+        } else if (formData.powerKw) {
+          effectivePower = Math.round(parseFloat(formData.powerKw) * 1000);
+        } else {
+          effectivePower = parseInt(formData.power) || initialData?.power || 0;
+        }
       } else {
         effectivePower = parseInt(formData.power) || (formData.powerKw ? Math.round(parseFloat(formData.powerKw) * 1000) : initialData?.power || 0);
       }
@@ -541,6 +671,7 @@ export const ProductForm: React.FC<{
         category: formData.category as any,
         price: parseInt(formData.price) || (initialData?.price ?? 0),
         power: effectivePower,
+        hp: cleanHp,
         efficiency: parseFloat(formData.efficiency) || (initialData?.efficiency ?? 0),
         warranty: parseInt(formData.warranty) || (initialData?.warranty ?? 0),
         image: imageUrl || initialData?.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
@@ -564,6 +695,11 @@ export const ProductForm: React.FC<{
           description: formData.description,
           notes: formData.description,
           power: effectivePower,
+          hp: cleanHp,
+          horsepower: cleanHp,
+          horsePower: cleanHp,
+          pumpHorsepower: cleanHp,
+          motorPowerRange: cleanHp ? `${cleanHp} HP (${formData.powerKw || (typeof cleanHp === 'number' ? (cleanHp * 0.746).toFixed(1) : '')} kW)` : (initialData?.specs?.motorPowerRange || undefined),
           efficiency: parseFloat(formData.efficiency) || undefined,
           warranty: parseInt(formData.warranty) || undefined,
           type: formData.type,
@@ -758,17 +894,132 @@ export const ProductForm: React.FC<{
         )}
 
         {fields.includes('powerKw') && (
-          <div className="space-y-1.5 text-left">
-            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.powerKw}</label>
-            <input 
-              type="text" 
-              value={formData.powerKw}
-              onChange={e => setFormData(p => ({...p, powerKw: e.target.value}))}
-              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="5kW"
-              required
-            />
-          </div>
+          (formData.category === 'inverters' && formData.type === 'Pump Inverter') || formData.category === 'pumps' ? (
+            <div className="col-span-full bg-gradient-to-r from-blue-50/90 via-sky-50/70 to-blue-50/90 border-2 border-solar-blue/40 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-sm">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-solar-blue text-white flex items-center justify-center shadow-xs">
+                    <Droplets size={19} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm sm:text-base font-black text-solar-text flex items-center gap-2">
+                      <span>{isAr ? 'القدرة بالحصان (Horsepower - HP) لإنفرتر المضخة / الماتور' : 'Pump / Motor Horsepower (HP)'}</span>
+                      <span className="text-[10px] bg-solar-blue text-white px-2 py-0.5 rounded-full font-bold">
+                        {isAr ? 'خاص بالمضخات' : 'Pump Rating'}
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-solar-muted font-bold mt-0.5">
+                      {isAr ? 'إنفرترات ومواتير المضخات تُقاس بالحصان (HP). يتم احتساب الكيلوواط والوات تلقائياً.' : 'Pump inverters and motors are rated in Horsepower (HP). Kilowatts and Watts are synchronized automatically.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                {/* 1. Horsepower Input */}
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[11px] font-black text-solar-text uppercase flex items-center justify-between">
+                    <span>{isAr ? 'القدرة بالحصان (HP) *' : 'Horsepower (HP) *'}</span>
+                    {formData.hp && (
+                      <span className="text-solar-blue font-bold text-[10px]">
+                        ≈ {formData.powerKw || (parseFloat(formData.hp) * 0.746).toFixed(1)} kW
+                      </span>
+                    )}
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type="number"
+                      step="any"
+                      inputMode="decimal"
+                      value={formData.hp}
+                      onChange={e => handleHpChange(e.target.value)}
+                      className="w-full bg-white border-2 border-solar-blue/60 rounded-xl px-4 py-3 min-h-[48px] text-base font-black text-solar-text outline-none focus:border-solar-blue transition shadow-inner"
+                      placeholder={isAr ? "مثال: 7.5 أو 10 أو 15 أو 25" : "e.g. 7.5, 10, 15, 20"}
+                      required
+                    />
+                    <div className={`absolute ${isAr ? 'left-3' : 'right-3'} top-1/2 -translate-y-1/2 text-xs font-black text-solar-blue bg-solar-blue/10 px-2 py-1 rounded-lg pointer-events-none`}>
+                      {isAr ? 'حصان (HP)' : 'HP'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Synchronized kW Input */}
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[11px] font-black text-solar-muted uppercase">
+                    <span>{isAr ? 'القدرة المقابلة بالكيلوواط (kW)' : 'Equivalent Power (kW)'}</span>
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      value={formData.powerKw}
+                      onChange={e => handlePowerKwChange(e.target.value)}
+                      className="w-full bg-white border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base font-bold text-solar-text outline-none focus:border-solar-blue transition" 
+                      placeholder="7.5 kW"
+                      required
+                    />
+                    <div className={`absolute ${isAr ? 'left-3' : 'right-3'} top-1/2 -translate-y-1/2 text-xs font-bold text-solar-muted pointer-events-none`}>
+                      kW
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Select Buttons for Standard Agricultural Pump Inverter Sizes */}
+              <div className="space-y-1.5 pt-1">
+                <div className="text-[10px] font-black text-solar-muted uppercase">
+                  {isAr ? 'اختيار سريع للقدرات الشائعة لطلمبات ومواتير الري (حصان):' : 'Quick select common pump/motor ratings (HP):'}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {STANDARD_PUMP_HP_OPTIONS.map((val) => {
+                    const isSelected = String(formData.hp) === String(val);
+                    return (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => handleHpChange(String(val))}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'bg-solar-blue text-white shadow-xs ring-2 ring-solar-blue/30 scale-105' 
+                            : 'bg-white border border-solar-border text-solar-text hover:border-solar-blue hover:text-solar-blue'
+                        }`}
+                      >
+                        {val} {isAr ? 'حصان' : 'HP'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5 text-left">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.powerKw}</label>
+                {formData.category === 'inverters' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData(p => ({
+                        ...p,
+                        type: 'Pump Inverter'
+                      }));
+                    }}
+                    className="text-[10px] font-bold text-solar-blue hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Droplets size={11} />
+                    <span>{isAr ? 'إنفرتر مضخة/ماتور؟ حدد بالحصان (HP)' : 'Pump/motor inverter? Set HP'}</span>
+                  </button>
+                )}
+              </div>
+              <input 
+                type="text" 
+                value={formData.powerKw}
+                onChange={e => handlePowerKwChange(e.target.value)}
+                className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+                placeholder="5kW"
+                required
+              />
+            </div>
+          )
         )}
 
         {fields.includes('capacity') && (
@@ -844,7 +1095,7 @@ export const ProductForm: React.FC<{
                     <option value="On-Grid">On-Grid (متصل بالشبكة)</option>
                     <option value="Hybrid">Hybrid (هايبرد / هجين)</option>
                     <option value="Off-Grid">Off-Grid (منفصل عن الشبكة)</option>
-                    <option value="Pump Inverter">Pump Inverter (طلمبات ري)</option>
+                    <option value="Pump Inverter">{isAr ? 'Pump Inverter (طلمبات ومضخات ري - بالحصان HP)' : 'Pump Inverter (Solar Pumping - HP)'}</option>
                   </select>
                 </div>
 
@@ -877,6 +1128,17 @@ export const ProductForm: React.FC<{
                     <option value="true">{isAr ? 'نعم (يدعم بنك بطاريات)' : 'Yes (Battery Ready)'}</option>
                   </select>
                 </div>
+
+                {formData.type === 'Pump Inverter' && (
+                  <div className="col-span-full bg-blue-50/80 border border-blue-200 text-blue-900 rounded-xl p-2.5 text-xs font-bold flex items-center gap-2">
+                    <Droplets size={14} className="text-solar-blue shrink-0" />
+                    <span>
+                      {isAr 
+                        ? 'إنفرتر طلمبات ومواتير: تم تفعيل إدخال القدرة بالحصان (HP) في حقل القدرة مع التحويل التلقائي للكيلوواط.' 
+                        : 'Pump/Motor Inverter: Horsepower (HP) rating is enabled in the power section with automatic kW synchronization.'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           ) : (

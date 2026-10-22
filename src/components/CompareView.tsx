@@ -40,8 +40,20 @@ export const CompareView: React.FC<CompareViewProps> = ({ products, lang, onBack
       key: 'power', 
       label: t.power, 
       render: (p: Product) => {
+        const hpVal = p.specs?.hp || p.specs?.horsepower || p.specs?.horsePower || p.specs?.pumpHorsepower || (p as any).hp;
         if (p.category === 'inverters') {
+          if (hpVal && hpVal !== 'Unknown') {
+            const kw = p.specs?.powerKw ? `${p.specs.powerKw} kW` : (p.power >= 1000 ? `${p.power / 1000} kW` : (p.specs?.ratedPowerKw ? `${p.specs.ratedPowerKw} kW` : ''));
+            return isAr ? `${hpVal} حصان ${kw ? `(${kw})` : ''}` : `${hpVal} HP ${kw ? `(${kw})` : ''}`;
+          }
           return p.specs?.powerKw ? `${p.specs.powerKw} kW` : (p.specs?.ratedPowerKw ? `${p.specs.ratedPowerKw} kW` : (p.power >= 1000 ? `${p.power / 1000} kW` : `${p.power} W`));
+        }
+        if (p.category === 'pumps') {
+          if (hpVal && hpVal !== 'Unknown') {
+            const kw = p.specs?.powerKw ? `(${p.specs.powerKw} kW)` : '';
+            return isAr ? `${hpVal} حصان ${kw}` : `${hpVal} HP ${kw}`;
+          }
+          return p.specs?.powerKw ? `${p.specs.powerKw} kW` : (p.power ? `${p.power} W` : '-');
         }
         if (p.category === 'batteries') {
           return p.specs?.capacity ? `${p.specs.capacity}` : (p.specs?.capacityAh ? `${p.specs.capacityAh} Ah` : (p.power ? `${p.power} W` : '-'));
