@@ -250,7 +250,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
             }`}
           >
             <Mail size={14} />
-            <span>{isAr ? 'الموردين / الإدارة' : 'Suppliers / Admin'}</span>
+            <span>{isAr ? 'الموردين' : 'Suppliers'}</span>
           </button>
         </div>
 
