@@ -12,6 +12,7 @@ import { formatDateOnly } from '../utils/dateUtils';
 import { getSupplierDisplayName, getSupplierAvatarInitial, isRawUidOrId } from '../utils/supplierUtils';
 import { classifyInverter } from '../utils/inverterClassification';
 import { formatCleanNumber } from '../utils/dimensionUtils';
+import { applyProductSeo } from '../utils/seo';
 
 const DEFAULT_PRODUCT_IMAGE = 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&q=80&w=800';
 
@@ -95,6 +96,12 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
     setSelectedImage(product.image);
     setShowAdvancedSpecs(false);
   }, [product.image, product.id]);
+
+  // Dynamic SEO metadata, canonical link, OpenGraph tags, and Schema.org Product structured data
+  useEffect(() => {
+    const cleanupSeo = applyProductSeo(product, lang);
+    return cleanupSeo;
+  }, [product, lang]);
 
   const [reviews, setReviews] = useState<ProductReview[]>([]);
   const [newComment, setNewComment] = useState('');

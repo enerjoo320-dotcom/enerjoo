@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -1254,6 +1255,177 @@ async function startServer() {
 
   // Pre-warm live D1 cache immediately on server startup
   fetchAllLiveD1Products().catch(() => {});
+
+  // Category Arabic names mapping for SEO & OpenGraph snippets
+  const CATEGORY_NAMES_AR: Record<string, string> = {
+    panels: 'ألواح شمسية',
+    inverters: 'محولات طاقة (إنفرتر)',
+    batteries: 'بطاريات طاقة شمسية',
+    pumps: 'طلمبات شمسية',
+    mounting: 'شاسيهات وهياكل تثبيت',
+    protection: 'لوحات وقواطع حماية',
+    combiner: 'صناديق تجميع (Combiner Box)',
+    cables: 'كابلات طاقة شمسية',
+    mc4: 'وصلات MC4',
+    sealings: 'مواد عزل وتثبيت',
+    clamps: 'كلبسات تثبيت',
+    all: 'معدات طاقة شمسية'
+  };
+
+  // Retrieve all authoritative, published, non-deleted products from Cloudflare D1 + local catalog + local edits
+  async function getAuthoritativePublishedProducts(): Promise<any[]> {
+    const productsMap = new Map<string, any>();
+
+    // 1. Initialize with activeCatalogProducts
+    for (const p of activeCatalogProducts) {
+      const id = String(p.product_id || p.id);
+      if (!deletedProductIds.has(id)) {
+        productsMap.set(id, normalizeProductRecord(p));
+      }
+    }
+
+    // 2. Fetch live D1 products across all partitions
+    try {
+      const d1Map = await fetchAllLiveD1Products();
+      for (const [id, p] of d1Map.entries()) {
+        if (deletedProductIds.has(id)) {
+          deletedProductIds.delete(id);
+        }
+        const existing = productsMap.get(id) || {};
+        const isLocallyEdited = editedProductsMap.has(id);
+        const editedData = isLocallyEdited ? editedProductsMap.get(id) : null;
+        productsMap.set(id, normalizeProductRecord({ ...existing, ...p, ...(editedData || {}), _fromD1: true }));
+      }
+    } catch (cfErr) {
+      console.warn("Notice: could not reach remote Cloudflare Worker for authoritative products:", cfErr);
+    }
+
+    // 3. Overlay locally edited products with highest priority
+    for (const [id, editedProd] of editedProductsMap.entries()) {
+      if (!deletedProductIds.has(id)) {
+        const current = productsMap.get(id) || {};
+        productsMap.set(id, normalizeProductRecord({ ...current, ...editedProd }));
+      }
+    }
+
+    return Array.from(productsMap.values()).filter(p => {
+      const id = String(p.product_id || p.id);
+      return id && !deletedProductIds.has(id);
+    });
+  }
+
+  function escapeXml(unsafe?: string | null): string {
+    if (!unsafe) return "";
+    return String(unsafe)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function escapeHtml(unsafe?: string | null): string {
+    if (!unsafe) return "";
+    return String(unsafe)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function generateSitemapXml(products: any[]): string {
+    const baseUrl = "https://enerjoo.com";
+    const now = new Date().toISOString().split("T")[0];
+    const urls: string[] = [];
+
+    // 1. Core Public Routes
+    urls.push(`  <url>
+    <loc>${baseUrl}/</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+    <image:image>
+      <image:loc>${baseUrl}/brand-thumbnail.png</image:loc>
+      <image:title>Enerjoo | عالم الطاقة بين يديك</image:title>
+      <image:caption>منصة وبورصة الطاقة الشمسية في مصر</image:caption>
+    </image:image>
+  </url>`);
+
+    urls.push(`  <url>
+    <loc>${baseUrl}/products</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>`);
+
+    urls.push(`  <url>
+    <loc>${baseUrl}/exchange</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>hourly</changefreq>
+    <priority>0.8</priority>
+  </url>`);
+
+    urls.push(`  <url>
+    <loc>${baseUrl}/calculator</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`);
+
+    urls.push(`  <url>
+    <loc>${baseUrl}/compare</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>`);
+
+    // 2. Individual Published Products
+    const seenIds = new Set<string>();
+
+    for (const product of products) {
+      const pId = String(product.product_id || product.id || "").trim();
+      if (!pId || seenIds.has(pId) || deletedProductIds.has(pId)) continue;
+      seenIds.add(pId);
+
+      const productUrl = `${baseUrl}/product/${encodeURIComponent(pId)}`;
+      let lastModDate = now;
+      if (product.updated_at) {
+        try {
+          lastModDate = new Date(product.updated_at).toISOString().split("T")[0];
+        } catch {
+          lastModDate = now;
+        }
+      } else if (product.created_at) {
+        try {
+          lastModDate = new Date(product.created_at).toISOString().split("T")[0];
+        } catch {
+          lastModDate = now;
+        }
+      }
+
+      const productName = escapeXml((product.nameAr || product.name || `منتج ${pId}`).trim());
+      const imageUrl = product.image_url || product.image;
+
+      let imageTag = "";
+      if (imageUrl && typeof imageUrl === "string" && imageUrl.startsWith("http")) {
+        imageTag = `\n    <image:image>\n      <image:loc>${escapeXml(imageUrl)}</image:loc>\n      <image:title>${productName}</image:title>\n    </image:image>`;
+      }
+
+      urls.push(`  <url>
+    <loc>${productUrl}</loc>
+    <lastmod>${lastModDate}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>${imageTag}
+  </url>`);
+    }
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${urls.join("\n")}
+</urlset>`;
+  }
 
   // =========================================================================
   // PRODUCTS REST API (GET, POST, PUT, DELETE)
@@ -2838,26 +3010,182 @@ async function startServer() {
     res.sendFile(path.join(process.cwd(), "public", "brand-thumbnail.jpg"));
   });
 
+  // High-priority robots.txt handler with strict header
+  app.get("/robots.txt", (req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    const robotsPath = path.join(process.cwd(), "public", "robots.txt");
+    res.sendFile(robotsPath);
+  });
+
+  // Dynamic sitemap.xml endpoint: built directly from live published database & catalog items
+  app.get("/sitemap.xml", async (req, res) => {
+    try {
+      const publishedProducts = await getAuthoritativePublishedProducts();
+      const sitemapXml = generateSitemapXml(publishedProducts);
+
+      // Keep public/sitemap.xml updated synchronously on disk as well
+      try {
+        fs.writeFileSync(path.join(process.cwd(), "public", "sitemap.xml"), sitemapXml, "utf-8");
+      } catch (writeErr) {
+        // Silently continue
+      }
+
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600");
+      res.status(200).send(sitemapXml);
+    } catch (err: any) {
+      console.error("Error generating dynamic sitemap:", err);
+      const fallbackPath = path.join(process.cwd(), "public", "sitemap.xml");
+      if (fs.existsSync(fallbackPath)) {
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        return res.sendFile(fallbackPath);
+      }
+      res.status(500).send("Error generating sitemap");
+    }
+  });
+
+  // High-priority dynamic SSR metadata handler for direct product detail URLs
+  app.get(["/product/:productId", "/products/:productId"], async (req, res, next) => {
+    const { productId } = req.params;
+    const pIdStr = String(productId || "").trim();
+    if (!pIdStr) return next();
+
+    // If marked deleted and not in catalog or cache, pass through
+    if (deletedProductIds.has(pIdStr) && !baselineCatalogIds.has(pIdStr) && !liveD1ProductsCache.has(pIdStr)) {
+      return next();
+    }
+
+    try {
+      const allProducts = await getAuthoritativePublishedProducts();
+      const product = allProducts.find(p => String(p.product_id || p.id) === pIdStr);
+      if (!product) {
+        return next();
+      }
+
+      const isProd = process.env.NODE_ENV === "production";
+      const indexPath = isProd 
+        ? path.join(process.cwd(), "dist", "index.html")
+        : path.join(process.cwd(), "index.html");
+
+      if (!fs.existsSync(indexPath)) {
+        return next();
+      }
+
+      let html = fs.readFileSync(indexPath, "utf-8");
+
+      const name = product.nameAr || product.name || `منتج ${pIdStr}`;
+      const brand = product.brand ? product.brand.trim() : "";
+      const pageTitle = brand ? `${name} - ${brand} | Enerjoo` : `${name} | Enerjoo`;
+
+      const specDetails: string[] = [];
+      if (product.power && product.power > 0) {
+        if (product.category === 'inverters') {
+          specDetails.push(`قدرة ${product.power} ك.و`);
+        } else {
+          specDetails.push(`قدرة ${product.power} وات`);
+        }
+      }
+      if (product.hp) specDetails.push(`قدرة ${product.hp} حصان`);
+      if (product.efficiency && product.efficiency > 0) specDetails.push(`كفاءة ${product.efficiency}%`);
+      if (product.warranty && product.warranty > 0) specDetails.push(`ضمان ${product.warranty} سنة`);
+      const specsText = specDetails.length > 0 ? ` (${specDetails.join(' • ')})` : '';
+
+      const catNameAr = CATEGORY_NAMES_AR[product.category] || product.category || 'معدات طاقة شمسية';
+      const pageDesc = product.description && product.description.trim()
+        ? product.description.trim().slice(0, 300)
+        : `${name} من ماركة ${brand || 'معتمدة'} ضمن فئة ${catNameAr}${specsText}. متاح للمقارنة والشراء عبر منصة Enerjoo للطاقة الشمسية في مصر.`;
+
+      const canonicalUrl = `https://enerjoo.com/product/${encodeURIComponent(pIdStr)}`;
+      const imageUrl = product.image_url || product.image || "https://enerjoo.com/brand-thumbnail.png";
+
+      const ldJson: Record<string, any> = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "@id": `${canonicalUrl}#product`,
+        "name": name,
+        "category": catNameAr,
+        "image": imageUrl,
+        "description": pageDesc,
+        "sku": pIdStr
+      };
+
+      if (brand) {
+        ldJson.brand = {
+          "@type": "Brand",
+          "name": brand
+        };
+      }
+
+      if (typeof product.price === "number" && product.price > 0) {
+        ldJson.offers = {
+          "@type": "Offer",
+          "url": canonicalUrl,
+          "priceCurrency": "EGP",
+          "price": product.price,
+          "itemCondition": "https://schema.org/NewCondition",
+          "availability": product.status === "available"
+            ? "https://schema.org/InStock"
+            : (product.status === "out_of_stock" ? "https://schema.org/OutOfStock" : "https://schema.org/LimitedAvailability")
+        };
+      }
+
+      // Replace metadata
+      html = html
+        .replace(/<title>.*?<\/title>/gi, `<title>${escapeHtml(pageTitle)}</title>`)
+        .replace(/<meta\s+name="description"\s+content=".*?"\s*\/?>/gi, `<meta name="description" content="${escapeHtml(pageDesc)}" />`)
+        .replace(/<link\s+rel="canonical"\s+href=".*?"\s*\/?>/gi, `<link rel="canonical" href="${canonicalUrl}" />`)
+        .replace(/<meta\s+property="og:title"\s+content=".*?"\s*\/?>/gi, `<meta property="og:title" content="${escapeHtml(pageTitle)}" />`)
+        .replace(/<meta\s+property="og:description"\s+content=".*?"\s*\/?>/gi, `<meta property="og:description" content="${escapeHtml(pageDesc)}" />`)
+        .replace(/<meta\s+property="og:url"\s+content=".*?"\s*\/?>/gi, `<meta property="og:url" content="${canonicalUrl}" />`)
+        .replace(/<meta\s+property="og:image"\s+content=".*?"\s*\/?>/gi, `<meta property="og:image" content="${escapeHtml(imageUrl)}" />`)
+        .replace(/<meta\s+property="og:type"\s+content=".*?"\s*\/?>/gi, `<meta property="og:type" content="product" />`)
+        .replace(/<meta\s+name="twitter:title"\s+content=".*?"\s*\/?>/gi, `<meta name="twitter:title" content="${escapeHtml(pageTitle)}" />`)
+        .replace(/<meta\s+name="twitter:description"\s+content=".*?"\s*\/?>/gi, `<meta name="twitter:description" content="${escapeHtml(pageDesc)}" />`)
+        .replace(/<meta\s+name="twitter:image"\s+content=".*?"\s*\/?>/gi, `<meta name="twitter:image" content="${escapeHtml(imageUrl)}" />`);
+
+      const scriptTag = `\n  <script type="application/ld+json" id="enerjoo-product-schema">\n${JSON.stringify(ldJson, null, 2)}\n  </script>\n</head>`;
+      html = html.replace("</head>", scriptTag);
+
+      if (!isProd) {
+        const vite = viteInstance || (await vitePromise);
+        if (vite) {
+          html = await vite.transformIndexHtml(req.originalUrl, html);
+        }
+      }
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.status(200).send(html);
+    } catch (ssrErr) {
+      console.warn("Product SSR HTML enrichment notice:", ssrErr);
+      next();
+    }
+  });
+
   // Static assets from public directory
   app.use(express.static(path.join(process.cwd(), "public")));
 
   // Vite middleware for development or static serving for production
-  if (process.env.NODE_ENV !== "production") {
-    let viteMiddleware: any = null;
-    const vitePromise = createViteServer({
-      server: { middlewareMode: true, hmr: false },
-      appType: "spa",
-    })
-      .then((vite) => {
-        viteMiddleware = vite.middlewares;
-        console.log("Vite development middleware ready");
-        return vite;
+  let viteInstance: any = null;
+  let viteMiddleware: any = null;
+  const vitePromise = process.env.NODE_ENV !== "production"
+    ? createViteServer({
+        server: { middlewareMode: true, hmr: false },
+        appType: "spa",
       })
-      .catch((err) => {
-        console.error("Error creating Vite server:", err);
-        return null;
-      });
+        .then((vite) => {
+          viteInstance = vite;
+          viteMiddleware = vite.middlewares;
+          console.log("Vite development middleware ready");
+          return vite;
+        })
+        .catch((err) => {
+          console.error("Error creating Vite server:", err);
+          return null;
+        })
+    : Promise.resolve(null);
 
+  if (process.env.NODE_ENV !== "production") {
     app.use(async (req, res, next) => {
       if (viteMiddleware) {
         return viteMiddleware(req, res, next);
