@@ -1317,17 +1317,35 @@ async function startServer() {
   function escapeXml(unsafe?: string | null): string {
     if (!unsafe) return "";
     return String(unsafe)
-      .replace(/&/g, "&amp;")
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+      .replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#[xX][0-9a-fA-F]+);)/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&apos;");
   }
 
+  function formatXmlUrl(rawUrl?: string | null): string {
+    if (!rawUrl) return "";
+    let url = String(rawUrl).trim();
+    if (!url) return "";
+    if (!/^https?:\/\//i.test(url)) {
+      if (url.startsWith("/")) {
+        url = `https://enerjoo.com${url}`;
+      } else {
+        url = `https://enerjoo.com/${url}`;
+      }
+    }
+    // Encode unescaped whitespace to %20
+    url = url.replace(/ /g, "%20");
+    // Escape all XML entities idempotently without double-encoding
+    return escapeXml(url);
+  }
+
   function escapeHtml(unsafe?: string | null): string {
     if (!unsafe) return "";
     return String(unsafe)
-      .replace(/&/g, "&amp;")
+      .replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#[xX][0-9a-fA-F]+);)/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
@@ -1346,9 +1364,9 @@ async function startServer() {
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
     <image:image>
-      <image:loc>${baseUrl}/brand-thumbnail.png</image:loc>
-      <image:title>Enerjoo | عالم الطاقة بين يديك</image:title>
-      <image:caption>منصة وبورصة الطاقة الشمسية في مصر</image:caption>
+      <image:loc>${formatXmlUrl(`${baseUrl}/brand-thumbnail.png`)}</image:loc>
+      <image:title>${escapeXml("Enerjoo | عالم الطاقة بين يديك")}</image:title>
+      <image:caption>${escapeXml("منصة وبورصة الطاقة الشمسية في مصر")}</image:caption>
     </image:image>
   </url>`);
 
@@ -1405,11 +1423,14 @@ async function startServer() {
       }
 
       const productName = escapeXml((product.nameAr || product.name || `منتج ${pId}`).trim());
-      const imageUrl = product.image_url || product.image;
+      const rawImageUrl = product.image_url || product.image;
 
       let imageTag = "";
-      if (imageUrl && typeof imageUrl === "string" && imageUrl.startsWith("http")) {
-        imageTag = `\n    <image:image>\n      <image:loc>${escapeXml(imageUrl)}</image:loc>\n      <image:title>${productName}</image:title>\n    </image:image>`;
+      if (rawImageUrl && typeof rawImageUrl === "string" && rawImageUrl.trim()) {
+        const formattedImageUrl = formatXmlUrl(rawImageUrl);
+        if (formattedImageUrl) {
+          imageTag = `\n    <image:image>\n      <image:loc>${formattedImageUrl}</image:loc>\n      <image:title>${productName}</image:title>\n    </image:image>`;
+        }
       }
 
       urls.push(`  <url>
@@ -3024,9 +3045,13 @@ ${urls.join("\n")}
       const publishedProducts = await getAuthoritativePublishedProducts();
       const sitemapXml = generateSitemapXml(publishedProducts);
 
-      // Keep public/sitemap.xml updated synchronously on disk as well
+      // Keep public/sitemap.xml and dist/sitemap.xml updated synchronously on disk as well
       try {
         fs.writeFileSync(path.join(process.cwd(), "public", "sitemap.xml"), sitemapXml, "utf-8");
+        const distDir = path.join(process.cwd(), "dist");
+        if (fs.existsSync(distDir)) {
+          fs.writeFileSync(path.join(distDir, "sitemap.xml"), sitemapXml, "utf-8");
+        }
       } catch (writeErr) {
         // Silently continue
       }
