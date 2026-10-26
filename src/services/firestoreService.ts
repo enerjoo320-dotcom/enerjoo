@@ -40,10 +40,7 @@ export const getDeletedProductIds = (): Set<string> => {
     if (raw) {
       const arr = JSON.parse(raw);
       if (Array.isArray(arr)) {
-        // Protect all baseline products: baseline catalog items must never be suppressed by stale local keys
-        const baselineIds = new Set(productsData.map(p => String(p.id)));
-        const validDeletes = arr.filter(id => !baselineIds.has(String(id)));
-        return new Set(validDeletes.map(String));
+        return new Set(arr.map(String));
       }
     }
   } catch (err) {
@@ -840,16 +837,11 @@ export const getProducts = async (): Promise<Product[]> => {
         rawD1List = Array.from(partMap.values());
       }
 
-      // Any product returned actively by D1 / API is authoritative; unmark if erroneously blacklisted
-      for (const p of rawD1List) {
-        const pId = String(p.product_id || p.id);
-        if (deletedSet.has(pId)) {
-          unmarkProductAsDeleted(pId);
-          deletedSet.delete(pId);
-        }
-      }
-
       const mappedD1 = rawD1List
+        .filter(p => {
+          const pId = String(p.product_id || p.id);
+          return !deletedSet.has(pId);
+        })
         .map(mapD1ProductToProduct)
         .filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
 

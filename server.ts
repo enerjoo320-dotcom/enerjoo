@@ -951,14 +951,6 @@ async function startServer() {
     console.warn("Could not load deleted-products.json:", e);
   }
 
-  // Baseline catalog products and live D1 items must never be suppressed by stale test runs
-  const baselineCatalogIds = new Set(D1_CATALOG_PRODUCTS.map(p => String(p.product_id || p.id)));
-  for (const id of Array.from(deletedProductIds)) {
-    if (baselineCatalogIds.has(id)) {
-      deletedProductIds.delete(id);
-    }
-  }
-
   const saveDeletedProducts = async () => {
     try {
       const fs = await import("fs");
@@ -998,7 +990,8 @@ async function startServer() {
     }
   };
 
-  const activeCatalogProducts: any[] = [...D1_CATALOG_PRODUCTS];
+  // Never purge user-deleted products on startup
+  const activeCatalogProducts: any[] = D1_CATALOG_PRODUCTS.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
   for (const [id, editedProd] of editedProductsMap.entries()) {
     const idx = activeCatalogProducts.findIndex(p => String(p.product_id || p.id) === id);
     if (idx >= 0) {
@@ -1095,8 +1088,8 @@ async function startServer() {
     }
 
     let price = Number(p.price ?? p.price_egp ?? (baseMatch ? baseMatch.price : 0));
-    // Fix D1 shorthand thousands entry (e.g. Veichi 8kW entered as 55 -> 55000 EGP, 6kW entered as 37 -> 37000 EGP)
-    if (normCat === 'inverters' && price > 0 && price < 500) {
+    // Fix D1 shorthand thousands entry ONLY when not explicitly set by user
+    if (normCat === 'inverters' && price > 0 && price < 500 && !p.price && !p.price_egp) {
       price = baseMatch?.price && baseMatch.price >= 1000 ? baseMatch.price : price * 1000;
     }
 
@@ -1114,8 +1107,9 @@ async function startServer() {
       rawModel = `Eastman Off-Grid Inverter ${kwDisplay}kW`;
     }
 
-    const name = baseMatch?.name || rawModel;
-    let nameAr = p.nameAr || p.name_ar || baseMatch?.nameAr || '';
+    // Explicit user edits take precedence over baseline catalog name
+    const name = (p.name && p.name !== baseMatch?.name ? p.name : null) || (p.model && p.model !== (baseMatch as any)?.model ? p.model : null) || p.name || p.model || baseMatch?.name || rawModel;
+    let nameAr = p.nameAr || p.name_ar || (p.name && p.name !== baseMatch?.name ? p.name : '') || baseMatch?.nameAr || '';
     if (!nameAr || nameAr === rawModel || nameAr === p.model) {
       if (brand === 'Huawei' && kwDisplay > 0) {
         nameAr = `إنفرتر هواوي ${kwDisplay} كيلو وات On-Grid ثلاثي الأطوار (${rawModel.replace(/^Huawei\s*/i, '')})`;
@@ -1141,12 +1135,12 @@ async function startServer() {
     const specs = {
       ...(baseMatch?.specs || {}),
       ...(p.specs || {}),
-      productType: p.product_type || baseMatch?.specs?.productType || '',
-      technology: p.technology || baseMatch?.specs?.technology || '',
+      productType: p.product_type || p.specs?.productType || baseMatch?.specs?.productType || '',
+      technology: p.technology || p.specs?.technology || baseMatch?.specs?.technology || '',
       ratedPowerKw: ratedKw || (normCat === 'inverters' && power >= 1000 ? power / 1000 : power / 1000),
-      vmpV: p.vmp_v ?? baseMatch?.specs?.vmpV,
-      impA: p.imp_a ?? baseMatch?.specs?.impA,
-      acVoltageV: p.ac_voltage_v ?? baseMatch?.specs?.acVoltageV
+      vmpV: p.vmp_v ?? p.specs?.vmpV ?? baseMatch?.specs?.vmpV,
+      impA: p.imp_a ?? p.specs?.impA ?? baseMatch?.specs?.impA,
+      acVoltageV: p.ac_voltage_v ?? p.specs?.acVoltageV ?? baseMatch?.specs?.acVoltageV
     };
 
     return {
@@ -1289,7 +1283,7 @@ async function startServer() {
       const d1Map = await fetchAllLiveD1Products();
       for (const [id, p] of d1Map.entries()) {
         if (deletedProductIds.has(id)) {
-          deletedProductIds.delete(id);
+          continue;
         }
         const existing = productsMap.get(id) || {};
         const isLocallyEdited = editedProductsMap.has(id);
@@ -1471,7 +1465,7 @@ ${urls.join("\n")}
         for (const [id, p] of d1Map.entries()) {
           // Live D1 database is authoritative for new items, but never overrides local edits
           if (deletedProductIds.has(id)) {
-            deletedProductIds.delete(id);
+            continue;
           }
           const existing = productsMap.get(id) || {};
           const isLocallyEdited = editedProductsMap.has(id);
@@ -1578,16 +1572,24 @@ ${urls.join("\n")}
   app.get("/api/products/:productId", async (req, res) => {
     const { productId } = req.params;
     const pIdStr = String(productId);
-    if (deletedProductIds.has(pIdStr) && !baselineCatalogIds.has(pIdStr) && !liveD1ProductsCache.has(pIdStr)) {
+    if (deletedProductIds.has(pIdStr)) {
       return res.status(404).json({ success: false, error: `Product deleted: ${productId}` });
     }
     try {
-      // 1. Check live D1 cache + local catalog merged
+      // 1. Check local edited products first
+      if (editedProductsMap.has(pIdStr)) {
+        return res.json({
+          success: true,
+          ok: true,
+          product: normalizeProductRecord(editedProductsMap.get(pIdStr))
+        });
+      }
+
+      // 2. Check live D1 cache + local catalog merged
       const d1Map = await fetchAllLiveD1Products();
       const foundD1 = d1Map.get(pIdStr);
       const foundLocal = activeCatalogProducts.find(p => String(p.product_id) === pIdStr || String(p.id) === pIdStr);
       if (foundD1 || foundLocal) {
-        if (deletedProductIds.has(pIdStr)) deletedProductIds.delete(pIdStr);
         return res.json({
           success: true,
           ok: true,
@@ -1595,7 +1597,7 @@ ${urls.join("\n")}
         });
       }
 
-      // 2. Fallback: targeted search in remote D1 by product_id query
+      // 3. Fallback: targeted search in remote D1 by product_id query
       try {
         const listRes = await fetch(`${CF_WORKER_API}/products?q=${encodeURIComponent(pIdStr)}`, { signal: AbortSignal.timeout(3500) });
         if (listRes.ok) {
@@ -1603,7 +1605,6 @@ ${urls.join("\n")}
           if (Array.isArray(listData.products)) {
             const foundInList = listData.products.find((p: any) => String(p.product_id) === pIdStr || String(p.id) === pIdStr);
             if (foundInList) {
-              if (deletedProductIds.has(pIdStr)) deletedProductIds.delete(pIdStr);
               liveD1ProductsCache.set(pIdStr, { ...foundInList, _fromD1: true });
               return res.json({ success: true, ok: true, product: normalizeProductRecord({ ...foundInList, _fromD1: true }) });
             }
@@ -1719,44 +1720,58 @@ ${urls.join("\n")}
         await saveDeletedProducts();
       }
 
-      const existing: any = activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) || {};
+      // Find existing product across all sources: edited, active, live D1 cache, baseline catalog
+      const existing: any = 
+        editedProductsMap.get(productId) ||
+        activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) ||
+        liveD1ProductsCache.get(productId) ||
+        productsData.find(p => String(p.id) === productId) ||
+        {};
+
       const safeBody = sanitizeProductPayload(req.body || {});
       
       const mergedPayload = {
         ...existing,
         ...safeBody,
         product_id: productId,
+        id: existing.id || productId,
+        specs: {
+          ...(existing.specs || {}),
+          ...(safeBody.specs || {})
+        },
         updated_at: new Date().toISOString()
       };
+
+      const normalized = normalizeProductRecord(mergedPayload);
 
       // Update local catalog
       const existingIdx = activeCatalogProducts.findIndex(p => String(p.product_id) === productId || String(p.id) === productId);
       if (existingIdx >= 0) {
-        activeCatalogProducts[existingIdx] = mergedPayload;
+        activeCatalogProducts[existingIdx] = normalized;
       } else {
-        activeCatalogProducts.push(mergedPayload);
+        activeCatalogProducts.push(normalized);
       }
 
       // Persist in editedProductsMap
-      editedProductsMap.set(productId, mergedPayload);
+      editedProductsMap.set(productId, normalized);
       await saveEditedProducts();
 
       // Ensure live cache also holds the edited record so remote fetch doesn't overwrite it
-      liveD1ProductsCache.set(productId, { ...mergedPayload, _fromD1: true });
+      liveD1ProductsCache.set(productId, { ...normalized, _fromD1: true });
 
       // Best effort forward to Worker
       try {
         await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(mergedPayload),
+          body: JSON.stringify(safeBody),
           signal: AbortSignal.timeout(3000)
         });
       } catch {
         // Silently ignore worker forward error
       }
 
-      res.json({ success: true, product: mergedPayload });
+      res.json({ success: true, product: normalized });
     } catch (err: any) {
       console.error(`Error in custom PUT /api/products/${productId}:`, err);
       res.status(500).json({ success: false, error: "Failed to update product" });
@@ -1778,6 +1793,9 @@ ${urls.join("\n")}
         editedProductsMap.delete(pId);
         await saveEditedProducts();
       }
+
+      // Purge from live D1 cache immediately
+      liveD1ProductsCache.delete(pId);
 
       const idx = activeCatalogProducts.findIndex(p => String(p.product_id) === pId || String(p.id) === pId);
       if (idx >= 0) {
@@ -1822,7 +1840,7 @@ ${urls.join("\n")}
       try {
         const d1Map = await fetchAllLiveD1Products();
         for (const [id, p] of d1Map.entries()) {
-          if (!deletedProductIds.has(id) || baselineCatalogIds.has(id)) {
+          if (!deletedProductIds.has(id)) {
             const cat = (p.category || p.product_category || '').toLowerCase();
             if (cat.includes('invert') || !cat) {
               const existing = invertersMap.get(id) || {};
@@ -1834,12 +1852,12 @@ ${urls.join("\n")}
         console.warn("Could not fetch remote inverters, using active catalog baseline:", cfErr);
       }
 
-      const rawInverters = Array.from(invertersMap.values()).filter(p => !deletedProductIds.has(String(p.product_id || p.id)) || baselineCatalogIds.has(String(p.product_id || p.id)) || liveD1ProductsCache.has(String(p.product_id || p.id)));
+      const rawInverters = Array.from(invertersMap.values()).filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
       return rawInverters.map(classifyInverter);
     } catch (err) {
       console.warn("Failed to fetch raw inverters from Cloudflare D1:", err);
       return getActiveCatalogProducts()
-        .filter((p: any) => (!deletedProductIds.has(String(p.product_id || p.id)) || baselineCatalogIds.has(String(p.product_id || p.id))) && (p.category || p.product_category || '').toLowerCase().includes('invert'))
+        .filter((p: any) => !deletedProductIds.has(String(p.product_id || p.id)) && (p.category || p.product_category || '').toLowerCase().includes('invert'))
         .map(classifyInverter);
     }
   }
@@ -3076,8 +3094,8 @@ ${urls.join("\n")}
     const pIdStr = String(productId || "").trim();
     if (!pIdStr) return next();
 
-    // If marked deleted and not in catalog or cache, pass through
-    if (deletedProductIds.has(pIdStr) && !baselineCatalogIds.has(pIdStr) && !liveD1ProductsCache.has(pIdStr)) {
+    // If marked deleted, pass through to 404
+    if (deletedProductIds.has(pIdStr)) {
       return next();
     }
 

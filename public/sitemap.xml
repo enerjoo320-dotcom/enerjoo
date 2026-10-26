@@ -267,33 +267,43 @@
     </image:image>
   </url>
   <url>
-    <loc>https://enerjoo.com/product/PROD-1790086186504-9DSIG</loc>
+    <loc>https://enerjoo.com/product/PROD-1790193989586-2U7VJ</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790086186721-qw1fx0mh.webp</image:loc>
-      <image:title>إنفرتر هواوي 40 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-40KTL-M3)</image:title>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790193984026-qhh2ub71.png</image:loc>
+      <image:title>لوح طاقة شمسية جينكو 600 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 600W)</image:title>
     </image:image>
   </url>
   <url>
-    <loc>https://enerjoo.com/product/PROD-1790086750544-LYU3C</loc>
+    <loc>https://enerjoo.com/product/PROD-1789980360131-0N06I</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790086750773-p8x69vrr.jpg</image:loc>
-      <image:title>إنفرتر هواوي 60 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-60KTL-M0)</image:title>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1789980360694-9v1ur6lt.jpg</image:loc>
+      <image:title>إنفرتر هواوي 5 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-5KTL-M0)</image:title>
     </image:image>
   </url>
   <url>
-    <loc>https://enerjoo.com/product/PROD-1790086478120-XPQMN</loc>
+    <loc>https://enerjoo.com/product/PROD-1790081990357-MVC2A</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790086478318-i1x74xbf.png</image:loc>
-      <image:title>إنفرتر هواوي 50 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-50KTL-M3)</image:title>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790081990463-wbaeml7f.jpg</image:loc>
+      <image:title>إنفرتر هواوي 8 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-8KTL-M0)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790082337000-7MUN1</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790082337100-jybk8p5d.webp</image:loc>
+      <image:title>إنفرتر هواوي 10 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-10KTL-M0)</image:title>
     </image:image>
   </url>
   <url>
@@ -337,76 +347,6 @@
     </image:image>
   </url>
   <url>
-    <loc>https://enerjoo.com/product/PROD-1790081990357-MVC2A</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790081990463-wbaeml7f.jpg</image:loc>
-      <image:title>إنفرتر هواوي 8 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-8KTL-M0)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790082337000-7MUN1</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790082337100-jybk8p5d.webp</image:loc>
-      <image:title>إنفرتر هواوي 10 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-10KTL-M0)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1789980360131-0N06I</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1789980360694-9v1ur6lt.jpg</image:loc>
-      <image:title>إنفرتر هواوي 5 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-5KTL-M0)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790193989586-2U7VJ</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790193984026-qhh2ub71.png</image:loc>
-      <image:title>لوح طاقة شمسية جينكو 600 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 600W)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790194607636-1YLL9</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790194602258-b6ojgsks.png</image:loc>
-      <image:title>لوح طاقة شمسية جينكو 620 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 620W)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790194917164-S2YYU</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790194911860-5ra1kc1b.png</image:loc>
-      <image:title>لوح طاقة شمسية جينكو 625 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 625W)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790194250722-VGPFG</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790194245374-kqqsgq94.png</image:loc>
-      <image:title>لوح طاقة شمسية جينكو 610 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 610W)</image:title>
-    </image:image>
-  </url>
-  <url>
     <loc>https://enerjoo.com/product/PROD-1790085092319-L1PZO</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
@@ -437,6 +377,26 @@
     </image:image>
   </url>
   <url>
+    <loc>https://enerjoo.com/product/PROD-1790086186504-9DSIG</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790086186721-qw1fx0mh.webp</image:loc>
+      <image:title>إنفرتر هواوي 40 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-40KTL-M3)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790086750544-LYU3C</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790086750773-p8x69vrr.jpg</image:loc>
+      <image:title>إنفرتر هواوي 60 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-60KTL-M0)</image:title>
+    </image:image>
+  </url>
+  <url>
     <loc>https://enerjoo.com/product/PROD-1790087011731-I9Q2G</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
@@ -457,6 +417,16 @@
     </image:image>
   </url>
   <url>
+    <loc>https://enerjoo.com/product/PROD-1790194607636-1YLL9</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790194602258-b6ojgsks.png</image:loc>
+      <image:title>لوح طاقة شمسية جينكو 620 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 620W)</image:title>
+    </image:image>
+  </url>
+  <url>
     <loc>https://enerjoo.com/product/PROD-1790195174332-O0VSN</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
@@ -464,6 +434,66 @@
     <image:image>
       <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790195169086-ntyv9f9z.png</image:loc>
       <image:title>لوح طاقة شمسية جينكو 615 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 615W)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790194917164-S2YYU</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790194911860-5ra1kc1b.png</image:loc>
+      <image:title>لوح طاقة شمسية جينكو 625 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 625W)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790194250722-VGPFG</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790194245374-kqqsgq94.png</image:loc>
+      <image:title>لوح طاقة شمسية جينكو 610 وات (Jinko Tiger NEO N-type Solar Panel TOPCON 610W)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790086478120-XPQMN</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790086478318-i1x74xbf.png</image:loc>
+      <image:title>إنفرتر هواوي 50 كيلو وات On-Grid ثلاثي الأطوار (SUN2000-50KTL-M3)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790285889545-PP4K1</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790285882740-sxyc0lig.png</image:loc>
+      <image:title>لوح طاقة شمسية لونجي ثنائي الوجه 610 وات (LONGi Hi-MO X7 610W N-Type Bifacial Solar Panel)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790286902592-PY8T7</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790286894241-onl8n9jd.jpg</image:loc>
+      <image:title>لوح طاقة شمسية لونجي ثنائي الوجه 620 وات (LONGi Hi-MO X7 620W N-Type Bifacial Solar Panel)</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://enerjoo.com/product/PROD-1790287268194-1JR0P</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790287261297-v72zzvju.jpg</image:loc>
+      <image:title>لوح طاقة شمسية لونجي ثنائي الوجه 625 وات (LONGi Hi-MO X10 625W N-Type Bifacial Solar Panel)</image:title>
     </image:image>
   </url>
   <url>
@@ -517,6 +547,16 @@
     </image:image>
   </url>
   <url>
+    <loc>https://enerjoo.com/product/PROD-1791393558096-EVHQ8</loc>
+    <lastmod>2026-10-26</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <image:image>
+      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1791393557299-0534l3fw.jpg</image:loc>
+      <image:title>لوح طاقة شمسية ترينا سولار ثنائي الوجه 620 وات (Trina Vertex N 620W Bifacial Dual Glass)</image:title>
+    </image:image>
+  </url>
+  <url>
     <loc>https://enerjoo.com/product/PROD-1790928281074-9NQ3K</loc>
     <lastmod>2026-10-26</lastmod>
     <changefreq>weekly</changefreq>
@@ -554,46 +594,6 @@
     <image:image>
       <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790929457007-2l5l6j13.jpg</image:loc>
       <image:title>إنفرتر إيستمان أوف جريد 6 كيلو وات</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790285889545-PP4K1</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790285882740-sxyc0lig.png</image:loc>
-      <image:title>لوح طاقة شمسية لونجي ثنائي الوجه 610 وات (LONGi Hi-MO X7 610W N-Type Bifacial Solar Panel)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790286902592-PY8T7</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790286894241-onl8n9jd.jpg</image:loc>
-      <image:title>لوح طاقة شمسية لونجي ثنائي الوجه 620 وات (LONGi Hi-MO X7 620W N-Type Bifacial Solar Panel)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1790287268194-1JR0P</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1790287261297-v72zzvju.jpg</image:loc>
-      <image:title>لوح طاقة شمسية لونجي ثنائي الوجه 625 وات (LONGi Hi-MO X10 625W N-Type Bifacial Solar Panel)</image:title>
-    </image:image>
-  </url>
-  <url>
-    <loc>https://enerjoo.com/product/PROD-1791393558096-EVHQ8</loc>
-    <lastmod>2026-10-26</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-    <image:image>
-      <image:loc>https://enerjoo-api.enerjoo320.workers.dev/files/products/1791393557299-0534l3fw.jpg</image:loc>
-      <image:title>لوح طاقة شمسية ترينا سولار ثنائي الوجه 620 وات (Trina Vertex N 620W Bifacial Dual Glass)</image:title>
     </image:image>
   </url>
 </urlset>

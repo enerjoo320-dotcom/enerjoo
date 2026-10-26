@@ -492,10 +492,32 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       return errorJson('Invalid JSON payload in request body', 400, request);
     }
 
-    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ?')
-      .bind(productId)
+    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ? OR id = ?')
+      .bind(productId, productId)
       .first();
     if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
+
+    const brand = body.brand || null;
+    const model = body.model || body.name || null;
+    const productCategory = body.product_category || body.category || null;
+    const productType = body.product_type || body.type || null;
+    const technology = body.technology || null;
+    const powerW = body.power_w !== undefined ? body.power_w : (body.power !== undefined ? body.power : null);
+    const ratedPowerKw = body.rated_power_kw !== undefined ? body.rated_power_kw : null;
+    const priceEgp = body.price_egp !== undefined ? body.price_egp : (body.price !== undefined ? body.price : null);
+    const efficiencyPercent = body.efficiency_percent !== undefined ? body.efficiency_percent : (body.efficiency !== undefined ? body.efficiency : null);
+    const warrantyYears = body.warranty_years !== undefined ? body.warranty_years : (body.warranty !== undefined ? body.warranty : null);
+    const dimensionsMm = body.dimensions_mm || null;
+    const weightKg = body.weight_kg !== undefined ? body.weight_kg : (body.weight !== undefined ? body.weight : null);
+    const notes = body.notes || body.description || null;
+    const imageUrl = body.image_url || body.image || null;
+    const availability = body.availability || (body.status === 'out_of_stock' ? 'Out of Stock' : body.status === 'limited' ? 'Limited' : 'Available');
+    const vmpV = body.vmp_v || null;
+    const impA = body.imp_a || null;
+    const vocV = body.voc_v || null;
+    const iscA = body.isc_a || null;
+    const acVoltageV = body.ac_voltage_v || null;
+    const supplier = body.supplier || body.supplier_id || null;
 
     await env.DB.prepare(
       `UPDATE products SET 
@@ -505,6 +527,7 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         product_type = COALESCE(?, product_type),
         technology = COALESCE(?, technology),
         power_w = COALESCE(?, power_w),
+        rated_power_kw = COALESCE(?, rated_power_kw),
         price_egp = COALESCE(?, price_egp),
         efficiency_percent = COALESCE(?, efficiency_percent),
         warranty_years = COALESCE(?, warranty_years),
@@ -513,24 +536,38 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         notes = COALESCE(?, notes),
         image_url = COALESCE(?, image_url),
         availability = COALESCE(?, availability),
+        vmp_v = COALESCE(?, vmp_v),
+        imp_a = COALESCE(?, imp_a),
+        voc_v = COALESCE(?, voc_v),
+        isc_a = COALESCE(?, isc_a),
+        ac_voltage_v = COALESCE(?, ac_voltage_v),
+        supplier = COALESCE(?, supplier),
         updated_at = datetime('now')
-      WHERE product_id = ?`
+      WHERE product_id = ? OR id = ?`
     )
       .bind(
-        body.brand || null,
-        body.model || null,
-        body.product_category || null,
-        body.product_type || null,
-        body.technology || null,
-        body.power_w || null,
-        body.price_egp || null,
-        body.efficiency_percent || null,
-        body.warranty_years || null,
-        body.dimensions_mm || null,
-        body.weight_kg || null,
-        body.notes || null,
-        body.image_url || null,
-        body.availability || null,
+        brand,
+        model,
+        productCategory,
+        productType,
+        technology,
+        powerW,
+        ratedPowerKw,
+        priceEgp,
+        efficiencyPercent,
+        warrantyYears,
+        dimensionsMm,
+        weightKg,
+        notes,
+        imageUrl,
+        availability,
+        vmpV,
+        impA,
+        vocV,
+        iscA,
+        acVoltageV,
+        supplier,
+        productId,
         productId
       )
       .run();
@@ -541,12 +578,12 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   if (method === 'DELETE') {
     if (!productId) return errorJson('Product ID required in path', 400, request);
 
-    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ?')
-      .bind(productId)
+    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ? OR id = ?')
+      .bind(productId, productId)
       .first();
     if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
 
-    await env.DB.prepare('DELETE FROM products WHERE product_id = ?').bind(productId).run();
+    await env.DB.prepare('DELETE FROM products WHERE product_id = ? OR id = ?').bind(productId, productId).run();
     return successJson({ message: 'Product deleted successfully', product_id: productId }, 200, request);
   }
 
