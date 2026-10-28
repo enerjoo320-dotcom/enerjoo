@@ -255,36 +255,43 @@ export async function uploadProductImage(
     console.warn('Could not convert image to Data URL:', convErr);
   }
 
-  // Tier 1: Try Cloudflare Worker R2 upload
-  try {
-    const formData = new FormData();
-    formData.append('file', readyFile, readyFile.name);
+  // Tier 1: Try Cloudflare Worker R2 upload (when on allowed enerjoo.com origin)
+  const canCallWorkerDirectly =
+    typeof window === 'undefined' ||
+    window.location.hostname === 'enerjoo.com' ||
+    window.location.hostname.endsWith('.enerjoo.com');
 
-    const uploadHeaders: Record<string, string> = {};
-    if (auth?.currentUser && typeof auth.currentUser.getIdToken === 'function') {
-      try {
-        const idToken = await auth.currentUser.getIdToken();
-        if (idToken) uploadHeaders['Authorization'] = `Bearer ${idToken}`;
-      } catch {
-        // Ignore token fetch error for image upload fallback
+  if (canCallWorkerDirectly) {
+    try {
+      const formData = new FormData();
+      formData.append('file', readyFile, readyFile.name);
+
+      const uploadHeaders: Record<string, string> = {};
+      if (auth?.currentUser && typeof auth.currentUser.getIdToken === 'function') {
+        try {
+          const idToken = await auth.currentUser.getIdToken();
+          if (idToken) uploadHeaders['Authorization'] = `Bearer ${idToken}`;
+        } catch {
+          // Ignore token fetch error for image upload fallback
+        }
       }
-    }
 
-    const cfResponse = await fetch(`${CLOUDFLARE_WORKER_API}/upload`, {
-      method: 'POST',
-      headers: uploadHeaders,
-      body: formData,
-      signal: AbortSignal.timeout(6000)
-    });
+      const cfResponse = await fetch(`${CLOUDFLARE_WORKER_API}/upload`, {
+        method: 'POST',
+        headers: uploadHeaders,
+        body: formData,
+        signal: AbortSignal.timeout(6000)
+      });
 
-    if (cfResponse.ok) {
-      const data = await cfResponse.json();
-      if (data && (data.image_url || data.url)) {
-        return data.image_url || data.url;
+      if (cfResponse.ok) {
+        const data = await cfResponse.json();
+        if (data && (data.image_url || data.url)) {
+          return data.image_url || data.url;
+        }
       }
+    } catch (cfErr) {
+      console.warn('Cloudflare R2 worker upload notice, switching to secondary storage tier:', cfErr);
     }
-  } catch (cfErr) {
-    console.warn('Cloudflare R2 worker upload notice, switching to secondary storage tier:', cfErr);
   }
 
   // Tier 2: Try Server local upload endpoint (/api/upload)

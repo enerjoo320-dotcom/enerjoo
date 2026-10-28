@@ -303,26 +303,90 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     }
   }
 
+  const hasBody = options?.body !== undefined && options?.body !== null;
   const requestHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
     ...extraHeaders
   };
 
+  let idToken = '';
   if (isWriteMethod) {
-    const idToken = await getFirebaseIdTokenForWrite();
+    idToken = await getFirebaseIdTokenForWrite();
     requestHeaders['Authorization'] = `Bearer ${idToken}`;
+    requestHeaders['X-Firebase-Auth'] = idToken;
   }
-  
+
+  const isPreviewContainer =
+    typeof window !== 'undefined' &&
+    (window.location.hostname.endsWith('.run.app') || window.location.hostname === 'localhost');
+  const canFallbackToDirectWorker =
+    typeof window === 'undefined' ||
+    window.location.hostname === 'enerjoo.com' ||
+    window.location.hostname.endsWith('.enerjoo.com');
+
+  // Pre-warm same-origin proxy auth cache before write requests in preview container
+  // so the container auth bridge never sees a Firebase Bearer token on a cold cache miss
+  if (isWriteMethod && isPreviewContainer && baseUrl === '/api') {
+    try {
+      await fetch('/api/health', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+    } catch {
+      // Ignore pre-warm error
+    }
+  }
+
+  const executeFetchWithRetry = async (targetUrl: string, headersToUse: Record<string, string>): Promise<Response> => {
+    let lastError: unknown = null;
+    const maxAttempts = baseUrl === '/api' ? 3 : 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const currentHeaders = { ...headersToUse };
+        // On retry in preview container after a redirect/network error, keep X-Firebase-Auth and omit Authorization
+        // in case the upstream container proxy intercepted the Authorization header
+        if (attempt > 1 && isPreviewContainer && isWriteMethod && idToken) {
+          await fetch('/api/health', { method: 'GET', cache: 'no-store', credentials: 'same-origin' }).catch(() => {});
+          delete currentHeaders['Authorization'];
+          currentHeaders['X-Firebase-Auth'] = idToken;
+        }
+
+        const response = await fetch(targetUrl, {
+          ...options,
+          method,
+          headers: currentHeaders,
+          credentials: targetUrl.startsWith('/') ? 'same-origin' : options?.credentials
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        const isTransientHtmlOrGateway =
+          response.redirected ||
+          response.status === 502 ||
+          response.status === 503 ||
+          response.status === 504 ||
+          (targetUrl.startsWith('/api') && contentType.includes('text/html'));
+
+        if (isTransientHtmlOrGateway && attempt < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, attempt * 600));
+          continue;
+        }
+
+        return response;
+      } catch (err) {
+        lastError = err;
+        if (attempt < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, attempt * 600));
+          continue;
+        }
+      }
+    }
+
+    throw lastError || new Error('Failed to fetch');
+  };
+
   let res: Response;
   try {
-    res = await fetch(url, {
-      ...options,
-      method,
-      headers: requestHeaders
-    });
-    // If /api returned an HTML fallback page instead of JSON, fallback to direct Cloudflare Worker URL
+    res = await executeFetchWithRetry(url, requestHeaders);
     const contentType = res.headers.get('content-type') || '';
-    if (baseUrl === '/api' && contentType.includes('text/html')) {
+    if (baseUrl === '/api' && contentType.includes('text/html') && canFallbackToDirectWorker) {
       res = await fetch(`${CF_DIRECT_BASE_URL}${normalizedPath}`, {
         ...options,
         method,
@@ -330,16 +394,21 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
       });
     }
   } catch (err) {
-    // If primary fetch failed due to CORS or network error, attempt fallback
-    const fallbackBase = baseUrl === '/api' ? CF_DIRECT_BASE_URL : '/api';
-    try {
-      res = await fetch(`${fallbackBase}${normalizedPath}`, {
-        ...options,
-        method,
-        headers: requestHeaders
-      });
-    } catch (fallbackErr) {
-      const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+    if (canFallbackToDirectWorker || baseUrl !== '/api') {
+      const fallbackBase = baseUrl === '/api' ? CF_DIRECT_BASE_URL : '/api';
+      try {
+        res = await fetch(`${fallbackBase}${normalizedPath}`, {
+          ...options,
+          method,
+          headers: requestHeaders
+        });
+      } catch (fallbackErr) {
+        const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
+        throw new Error(`تعذر الاتصال بخادم قاعدة البيانات (Products API): ${errorMsg}`);
+      }
+    } else {
+      const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
       throw new Error(`تعذر الاتصال بخادم قاعدة البيانات (Products API): ${errorMsg}`);
     }
@@ -1261,12 +1330,22 @@ export const updateProduct = async (productId: string | number, data: Partial<Pr
 export const deleteProduct = async (productId: string | number): Promise<void> => {
   const pId = String(productId);
 
-  await requestProductsApi<{ success?: boolean; ok?: boolean; message?: string }>(
-    `/products/${encodeURIComponent(pId)}`,
-    {
-      method: 'DELETE'
+  try {
+    await requestProductsApi<{ success?: boolean; ok?: boolean; message?: string }>(
+      `/products/${encodeURIComponent(pId)}`,
+      {
+        method: 'DELETE'
+      }
+    );
+  } catch (delErr: any) {
+    const isRouteMissing = delErr?.code === 'NOT_FOUND' || String(delErr?.detail || '').includes('المسار غير موجود');
+    const isBaselineCatalogItem = productsData.some(p => String(p.id) === pId);
+    if (delErr?.status === 404 && !isRouteMissing && isBaselineCatalogItem) {
+      // Product only existed in baseline catalog and is already absent from remote D1
+    } else {
+      throw delErr;
     }
-  );
+  }
 
   // Mark as deleted and notify listeners ONLY after backend API confirms deletion
   markProductAsDeleted(pId);

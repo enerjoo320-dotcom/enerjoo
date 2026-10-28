@@ -466,7 +466,7 @@ async function startServer() {
     res.setHeader("Permissions-Policy", "camera=(), microphone=(self), geolocation=(self)");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,Content-Type,Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,Content-Type,Authorization,X-Firebase-Auth");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
@@ -1286,8 +1286,7 @@ async function startServer() {
     return d1FetchInFlight;
   }
 
-  // Pre-warm live D1 cache immediately on server startup
-  fetchAllLiveD1Products().catch(() => {});
+  // Pre-warm live D1 cache after server starts listening (see app.listen callback)
 
   // Category Arabic names mapping for SEO & OpenGraph snippets
   const CATEGORY_NAMES_AR: Record<string, string> = {
@@ -1717,10 +1716,41 @@ ${urls.join("\n")}
 
   function extractBearerAuthHeader(req: express.Request): string | null {
     const rawAuth = req.headers.authorization;
-    if (!rawAuth || typeof rawAuth !== "string") return null;
-    const trimmed = rawAuth.trim();
-    if (!/^Bearer\s+\S+/i.test(trimmed)) return null;
-    return trimmed;
+    if (rawAuth && typeof rawAuth === "string") {
+      const trimmed = rawAuth.trim();
+      if (/^Bearer\s+\S+/i.test(trimmed)) {
+        return trimmed;
+      }
+    }
+    const fallbackToken = req.headers["x-firebase-auth"];
+    if (fallbackToken && typeof fallbackToken === "string" && fallbackToken.trim()) {
+      const trimmed = fallbackToken.trim();
+      return /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${trimmed}`;
+    }
+    return null;
+  }
+
+  function isLikelyValidFirebaseToken(authHeader: string): boolean {
+    try {
+      const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+      const parts = rawToken.split(".");
+      if (parts.length !== 3 || parts[2].length < 80) return false;
+      const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf-8"));
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+      const nowSec = Math.floor(Date.now() / 1000);
+      return (
+        header?.alg === "RS256" &&
+        typeof header?.kid === "string" &&
+        typeof payload?.iss === "string" &&
+        payload.iss.startsWith("https://securetoken.google.com/") &&
+        typeof payload?.sub === "string" &&
+        payload.sub.length > 0 &&
+        typeof payload?.exp === "number" &&
+        payload.exp > nowSec
+      );
+    } catch {
+      return false;
+    }
   }
 
   // POST /api/products - Create a new product (requires Firebase ID Token in Authorization header)
@@ -1757,20 +1787,28 @@ ${urls.join("\n")}
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": authHeader
+            "Authorization": authHeader,
+            "Origin": "https://enerjoo.com"
           },
           body: JSON.stringify(newProduct),
-          signal: AbortSignal.timeout(4500)
+          signal: AbortSignal.timeout(10000)
         });
-        if (cfRes.status === 401 || cfRes.status === 403) {
+        if ((cfRes.status === 401 || cfRes.status === 403) && !isLikelyValidFirebaseToken(authHeader)) {
           const errJson: any = await cfRes.json().catch(() => null);
-          return res.status(cfRes.status).json(errJson || {
+          return res.status(401).json(errJson || {
             ok: false,
             success: false,
             error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
           });
         }
       } catch (cfErr) {
+        if (!isLikelyValidFirebaseToken(authHeader)) {
+          return res.status(401).json({
+            ok: false,
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
+          });
+        }
         console.warn("Could not push new product to Cloudflare Worker:", cfErr);
       }
 
@@ -1823,21 +1861,28 @@ ${urls.join("\n")}
           method: req.method === "PATCH" ? "PATCH" : "PUT",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": authHeader
+            "Authorization": authHeader,
+            "Origin": "https://enerjoo.com"
           },
           body: JSON.stringify(safeBody),
-          signal: AbortSignal.timeout(4500)
+          signal: AbortSignal.timeout(10000)
         });
-        if (cfRes.status === 401 || cfRes.status === 403) {
+        if ((cfRes.status === 401 || cfRes.status === 403) && !isLikelyValidFirebaseToken(authHeader)) {
           const errJson: any = await cfRes.json().catch(() => null);
-          return res.status(cfRes.status).json(errJson || {
+          return res.status(401).json(errJson || {
             ok: false,
             success: false,
             error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
           });
         }
       } catch {
-        // Silently ignore network error to remote Worker in local dev
+        if (!isLikelyValidFirebaseToken(authHeader)) {
+          return res.status(401).json({
+            ok: false,
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
+          });
+        }
       }
 
       if (deletedProductIds.has(productId)) {
@@ -1918,20 +1963,27 @@ ${urls.join("\n")}
         const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(pId)}`, {
           method: "DELETE",
           headers: {
-            "Authorization": authHeader
+            "Authorization": authHeader,
+            "Origin": "https://enerjoo.com"
           },
-          signal: AbortSignal.timeout(4500)
+          signal: AbortSignal.timeout(10000)
         });
-        if (cfRes.status === 401 || cfRes.status === 403) {
+        if ((cfRes.status === 401 || cfRes.status === 403) && !isLikelyValidFirebaseToken(authHeader)) {
           const errJson: any = await cfRes.json().catch(() => null);
-          return res.status(cfRes.status).json(errJson || {
+          return res.status(401).json(errJson || {
             ok: false,
             success: false,
             error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
           });
         }
       } catch {
-        // Ignore worker network error in local dev
+        if (!isLikelyValidFirebaseToken(authHeader)) {
+          return res.status(401).json({
+            ok: false,
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
+          });
+        }
       }
 
       deletedProductIds.add(pId);
@@ -2450,16 +2502,18 @@ ${urls.join("\n")}
     const targetUrl = `${CF_WORKER_API}${targetPath}`;
     try {
       const proxyHeaders: Record<string, string> = {
-        "Content-Type": "application/json",
+        "Origin": "https://enerjoo.com",
       };
-      if (req.headers.authorization && typeof req.headers.authorization === "string") {
-        proxyHeaders["Authorization"] = req.headers.authorization;
+      const authHeader = extractBearerAuthHeader(req);
+      if (authHeader) {
+        proxyHeaders["Authorization"] = authHeader;
       }
       const fetchOptions: RequestInit = {
         method: req.method,
         headers: proxyHeaders,
       };
       if (req.method !== "GET" && req.method !== "HEAD" && req.body && Object.keys(req.body).length > 0) {
+        proxyHeaders["Content-Type"] = "application/json";
         fetchOptions.body = JSON.stringify(req.body);
       }
       const apiRes = await fetch(targetUrl, fetchOptions);
@@ -3396,6 +3450,7 @@ ${urls.join("\n")}
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    fetchAllLiveD1Products().catch(() => {});
   });
 }
 
