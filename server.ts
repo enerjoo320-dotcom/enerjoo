@@ -2528,12 +2528,13 @@ ${urls.join("\n")}
     }
   });
 
-  // Cloudflare Worker AI Chat Endpoint (/chat & /api/chat)
-  app.all(["/chat", "/api/chat", "/chat/", "/api/chat/"], async (req, res) => {
-    // 0. Prevent HTTP 405 Method Not Allowed by handling CORS and preflight cleanly
+  // n8n Production AI Agent Chat Endpoint (/chat, /api/chat, and /api/n8n-chat)
+  const N8N_CHAT_WEBHOOK_URL = "https://fiyg.app.n8n.cloud/webhook/enerjoo-chat";
+
+  app.all(["/chat", "/api/chat", "/chat/", "/api/chat/", "/api/n8n-chat"], async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept");
 
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
@@ -2543,228 +2544,117 @@ ${urls.join("\n")}
       return res.status(200).json({
         ok: true,
         status: "online",
-        message: "Enerjoo AI Chat API proxy endpoint. Send a POST request with message and sessionId."
+        message: "Enerjoo AI Agent (n8n Cloud) chat endpoint. Send a POST request with message and sessionId."
       });
     }
 
-    const { message, history, sessionId, messageId, selectedProductIds } = req.body || {};
-    const userText = typeof message === "string" ? message.trim() : (typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "");
+    const { message, chatInput, history, sessionId, messageId, selectedProductIds } = req.body || {};
+    const userText = typeof message === "string" ? message.trim() : (typeof chatInput === "string" ? chatInput.trim() : (typeof req.body?.prompt === "string" ? req.body.prompt.trim() : ""));
     const activeSessionId = (sessionId && typeof sessionId === "string" && sessionId.trim())
       ? sessionId.trim()
       : `session-${Date.now()}`;
 
-    // Cloudflare Worker POST payload with message and sessionId
-    const cfPayload: Record<string, any> = {
-      message: userText,
-      sessionId: activeSessionId
-    };
-
-    if (Array.isArray(history) && history.length > 0) {
-      cfPayload.history = history;
-    }
     const effectiveMessageId = (messageId && typeof messageId === "string" && messageId.trim())
       ? messageId.trim()
       : `msg-${Date.now()}`;
-    cfPayload.messageId = effectiveMessageId;
 
-    if (Array.isArray(selectedProductIds) && selectedProductIds.length > 0) {
-      cfPayload.selectedProductIds = selectedProductIds;
+    // Standard n8n chat payload matching frontend specification
+    const n8nPayload: Record<string, any> = {
+      message: userText,
+      chatInput: userText,
+      sessionId: activeSessionId,
+      messageId: effectiveMessageId
+    };
+
+    if (Array.isArray(history) && history.length > 0) {
+      n8nPayload.history = history;
     }
 
-    // 1. Forward to Cloudflare Worker via POST with Content-Type: application/json
+    if (Array.isArray(selectedProductIds) && selectedProductIds.length > 0) {
+      n8nPayload.selectedProductIds = selectedProductIds;
+    }
+
     try {
-      const cfRes = await fetch("https://enerjoo-api.enerjoo320.workers.dev/chat", {
+      const n8nRes = await fetch(N8N_CHAT_WEBHOOK_URL, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        body: JSON.stringify(cfPayload),
+        body: JSON.stringify(n8nPayload),
         signal: AbortSignal.timeout(60000)
       });
 
-      if (cfRes.ok) {
-        const data: any = await cfRes.json();
-        const replyText = typeof data?.reply === "string" ? data.reply.trim() : (typeof data?.message === "string" ? data.message.trim() : "");
-        if (replyText) {
+      if (!n8nRes.ok) {
+        const errorText = await n8nRes.text().catch(() => "");
+        return res.status(n8nRes.status).json({
+          success: false,
+          ok: false,
+          error: `n8n Webhook returned status ${n8nRes.status}`,
+          details: errorText.slice(0, 500)
+        });
+      }
+
+      const rawText = await n8nRes.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        // Plain text fallback
+        if (rawText && rawText.trim()) {
           return res.status(200).json({
+            success: true,
             ok: true,
-            reply: replyText,
-            products: Array.isArray(data.products) ? data.products : undefined,
-            recommendation: data.recommendation || undefined,
-            session_id: data.session_id || data.sessionId || activeSessionId,
-            sessionId: data.sessionId || data.session_id || activeSessionId
+            reply: rawText.trim(),
+            sessionId: activeSessionId
           });
         }
-      } else {
-        console.warn(`Cloudflare Worker chat returned status ${cfRes.status}, switching to resilient advisor fallback.`);
+        return res.status(502).json({
+          success: false,
+          ok: false,
+          error: "Empty or invalid response from n8n webhook"
+        });
       }
-    } catch (cfErr) {
-      console.warn("Cloudflare Worker chat request failed or timed out, executing local fallback:", cfErr);
-    }
 
-    // 2. Intelligent local consultant fallback if worker returns 404, 500, or fails
-    try {
-      const allInverters = await fetchAllStructuredInverters();
-      const chatResult = await processConversationalChat(
-        activeSessionId,
-        userText || "",
-        allInverters,
-        "ar"
-      );
-
-      const recommendedProducts: any[] = [];
-      if (chatResult.recommendation?.best_match?.full_product) {
-        recommendedProducts.push(chatResult.recommendation.best_match.full_product);
+      // Extract valid reply safely
+      let replyText = "";
+      if (typeof data?.reply === "string" && data.reply.trim()) {
+        replyText = data.reply.trim();
+      } else if (typeof data?.output === "string" && data.output.trim()) {
+        replyText = data.output.trim();
+      } else if (typeof data?.message === "string" && data.message.trim()) {
+        replyText = data.message.trim();
+      } else if (typeof data?.text === "string" && data.text.trim()) {
+        replyText = data.text.trim();
+      } else if (Array.isArray(data) && data.length > 0) {
+        const first = data[0];
+        replyText = typeof first?.reply === "string" ? first.reply.trim() : (typeof first?.output === "string" ? first.output.trim() : "");
       }
-      if (chatResult.recommendation?.alternative?.full_product) {
-        recommendedProducts.push(chatResult.recommendation.alternative.full_product);
+
+      if (!replyText) {
+        return res.status(502).json({
+          success: false,
+          ok: false,
+          error: "No valid reply received from n8n AI Agent"
+        });
       }
 
       return res.status(200).json({
+        success: true,
         ok: true,
-        reply: chatResult.reply,
-        products: recommendedProducts.length > 0 ? recommendedProducts : undefined,
-        recommendation: chatResult.recommendation || undefined,
-        session_id: activeSessionId,
-        sessionId: activeSessionId
+        reply: replyText,
+        products: Array.isArray(data.products) ? data.products : undefined,
+        recommendation: data.recommendation || undefined,
+        sessionId: data.sessionId || data.session_id || activeSessionId
       });
-    } catch (fallbackErr) {
-      console.warn("Local chat fallback error:", fallbackErr);
-      return res.status(200).json({
-        ok: true,
-        reply: "أهلاً بك في Enerjoo! أنا مهندسك الاستشاري لأنظمة الطاقة الشمسية في مصر ⚡\n\nأقدر أساعدك في اختيار أنسب الألواح والإنفرترات والبطاريات وطلمبات الري وحساب السعات بدقة. ما هو نوع مشروعك (منزل، مصنع، أم مزرعة) والقدرة المطلوبة؟",
-        session_id: activeSessionId,
-        sessionId: activeSessionId
+    } catch (err: any) {
+      console.error("Error communicating with n8n chat webhook:", err);
+      return res.status(502).json({
+        success: false,
+        ok: false,
+        error: "Failed to connect to n8n AI Agent webhook",
+        details: err?.message || "Network error"
       });
-    }
-  });
-
-  // Production n8n AI Agent Proxy (bypasses browser CORS & iframe origin restrictions)
-  app.post("/api/n8n-chat", async (req, res) => {
-    const N8N_PROD_URL = "https://enerjoo.app.n8n.cloud/webhook/798b6fd0-317b-47fc-9def-7fcf9dd04509/chat";
-    const N8N_TEST_URL = "https://enerjoo.app.n8n.cloud/webhook-test/798b6fd0-317b-47fc-9def-7fcf9dd04509/chat";
-
-    try {
-      const { action, sessionId, chatInput } = req.body;
-
-      if (chatInput && (typeof chatInput !== "string" || chatInput.length > 5000)) {
-        return res.status(400).json({ error: "chatInput exceeds maximum allowed size" });
-      }
-      if (sessionId && (typeof sessionId !== "string" || sessionId.length > 128)) {
-        return res.status(400).json({ error: "Invalid sessionId format" });
-      }
-
-      const payload = {
-        action: action || "sendMessage",
-        sessionId: sessionId || "default-session",
-        chatInput: chatInput || ""
-      };
-
-      // Call the production n8n webhook URL
-      let n8nRes: Response | null = null;
-      try {
-        n8nRes = await fetch(N8N_PROD_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-
-        // If the workflow is currently running in test mode on the n8n canvas, attempt fallback to the test URL (with 3s timeout)
-        if (n8nRes.status === 404) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000);
-            const testRes = await fetch(N8N_TEST_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-              signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            if (testRes.ok) {
-              n8nRes = testRes;
-            }
-          } catch {
-            // Ignore and continue
-          }
-        }
-      } catch (fetchErr) {
-        console.warn("Direct fetch to n8n webhook failed:", fetchErr);
-      }
-
-      if (n8nRes && n8nRes.ok) {
-        const responseText = await n8nRes.text();
-        try {
-          const json = JSON.parse(responseText);
-          return res.status(n8nRes.status).json(json);
-        } catch {
-          return res.status(n8nRes.status).send(responseText);
-        }
-      }
-
-      // If n8n agent webhook is inactive or returned 404/error, seamlessly answer via Enerjoo Conversational Intelligence Engine
-      console.warn("n8n agent offline or unavailable, routing to Enerjoo Conversational Intelligence Engine.");
-      
-      try {
-        const allInverters = await fetchAllStructuredInverters();
-        const sId = sessionId || `session-${Date.now()}`;
-        const chatResult = await processConversationalChat(
-          sId, 
-          chatInput || '', 
-          allInverters, 
-          req.body?.lang || 'ar'
-        );
-        return res.json({
-          output: chatResult.reply,
-          text: chatResult.reply,
-          message: chatResult.reply,
-          reply: chatResult.reply,
-          recommendation: chatResult.recommendation || null,
-          intent: chatResult.intent,
-          fallback: false
-        });
-      } catch (convErr) {
-        console.error("Error in processConversationalChat for /api/n8n-chat:", convErr);
-        const advisorReply = fallbackSolarChat([], true, { message: chatInput }, memoryExchangePrices);
-        return res.json({
-          output: advisorReply,
-          text: advisorReply,
-          message: advisorReply,
-          reply: advisorReply,
-          fallback: true
-        });
-      }
-    } catch (error: any) {
-      console.error("Error proxying request to n8n webhook:", error);
-      try {
-        const allInverters = await fetchAllStructuredInverters();
-        const sId = req.body?.sessionId || `session-${Date.now()}`;
-        const chatResult = await processConversationalChat(
-          sId, 
-          req.body?.chatInput || '', 
-          allInverters, 
-          req.body?.lang || 'ar'
-        );
-        return res.json({
-          output: chatResult.reply,
-          text: chatResult.reply,
-          message: chatResult.reply,
-          reply: chatResult.reply,
-          recommendation: chatResult.recommendation || null,
-          intent: chatResult.intent,
-          fallback: false
-        });
-      } catch (innerErr) {
-        const advisorReply = fallbackSolarChat([], true, { message: req.body?.chatInput || "" }, memoryExchangePrices);
-        return res.json({
-          output: advisorReply,
-          text: advisorReply,
-          message: advisorReply,
-          reply: advisorReply,
-          fallback: true
-        });
-      }
     }
   });
 

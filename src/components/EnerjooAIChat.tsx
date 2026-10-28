@@ -57,7 +57,7 @@ interface EnerjooAIChatProps {
   activeProductId?: string;
 }
 
-const CF_CHAT_URL = 'https://enerjoo-api.enerjoo320.workers.dev/chat';
+const N8N_CHAT_WEBHOOK_URL = 'https://fiyg.app.n8n.cloud/webhook/enerjoo-chat';
 const STORAGE_SESSION_KEY = 'enerjoo_ai_chat_session_id';
 const STORAGE_MESSAGES_KEY = 'enerjoo_ai_chat_history';
 
@@ -611,10 +611,11 @@ export default function EnerjooAIChat({
           content: m.text
         }));
 
-      // Format payload with message, sessionId, messageId, and history
-      // Guaranteed POST payload matching Cloudflare Worker specifications
+      // Format payload with message, chatInput, sessionId, messageId, and history
+      // Matches n8n Webhook specifications
       const payload: Record<string, any> = {
         message: text,
+        chatInput: text,
         sessionId: sessionId,
         messageId: userMessage.id,
         history
@@ -625,98 +626,115 @@ export default function EnerjooAIChat({
         payload.selectedProductIds = selectedProductIds;
       }
 
-      let response: Response;
-
-      // Send POST request with Content-Type: application/json to proxy
-      try {
-        response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-
-        // Fallback to /chat if /api/chat is not available or rejected with 404/405
-        if (!response.ok && (response.status === 404 || response.status === 405)) {
-          response = await fetch('/chat', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify(payload)
-          });
-        }
-      } catch {
-        // Direct local proxy fallback
-        response = await fetch('/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-      }
+      // Send POST request directly to the n8n Cloud production webhook
+      const response = await fetch(N8N_CHAT_WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
 
       const responseText = await response.text();
       let data: any = null;
       try {
         data = JSON.parse(responseText);
       } catch {
-        // Non-JSON response
+        // Non-JSON or HTML response
       }
 
-      const returnedSessionId = data?.session_id || data?.sessionId;
-      if (typeof returnedSessionId === 'string' && returnedSessionId.trim()) {
-        const nextId = returnedSessionId.trim();
-        setSessionId(nextId);
-        try { localStorage.setItem(STORAGE_SESSION_KEY, nextId); } catch { /* Ignore storage errors */ }
-      }
+      // n8n response item can be an object or single item in an array
+      const responseItem = Array.isArray(data) ? data[0] : data;
 
-      const workerReply = (typeof data?.reply === 'string' && data.reply.trim())
-        ? data.reply.trim()
-        : (typeof data?.message === 'string' && data.message.trim() ? data.message.trim() : null);
+      // Extract and strictly validate reply text (must be non-empty string)
+      const rawReplyCandidate = responseItem?.reply ?? responseItem?.output ?? responseItem?.message ?? responseItem?.text;
+      const validReply = typeof rawReplyCandidate === 'string' && rawReplyCandidate.trim().length > 0
+        ? rawReplyCandidate.trim()
+        : null;
 
-      if (response.ok && workerReply) {
+      if (response.ok && validReply) {
+        // Update session ID if n8n returned a new or synchronized sessionId
+        const returnedSessionId = responseItem?.session_id || responseItem?.sessionId;
+        if (typeof returnedSessionId === 'string' && returnedSessionId.trim()) {
+          const nextId = returnedSessionId.trim();
+          setSessionId(nextId);
+          try { localStorage.setItem(STORAGE_SESSION_KEY, nextId); } catch { /* Ignore storage errors */ }
+        }
+
+        // Optional compatible catalog products from n8n response
+        const productsList = Array.isArray(responseItem?.products) && responseItem.products.length > 0
+          ? responseItem.products
+          : undefined;
+
+        // Optional structured inverter recommendation from n8n response
+        const recommendationObj = responseItem?.recommendation && typeof responseItem.recommendation === 'object'
+          ? responseItem.recommendation
+          : undefined;
+
         const botReply: ChatMessage = {
           id: `reply-${Date.now()}`,
           sender: 'assistant',
-          text: workerReply,
+          text: validReply,
           timestamp: new Date().toISOString(),
-          products: Array.isArray(data.products) && data.products.length ? data.products : undefined,
-          recommendation: data.recommendation && typeof data.recommendation === 'object' ? data.recommendation : undefined
+          products: productsList,
+          recommendation: recommendationObj
         };
         setMessages(prev => [...prev, botReply]);
       } else {
-        const fallbackText = workerReply || 'أهلاً بك في Enerjoo! أنا مستشارك الذكي للطاقة الشمسية في مصر ⚡\n\nأقدر أساعدك في اختيار أفضل الإنفرترات والألواح والبطاريات وطلمبات الري وحساب السعات بدقة. ما هو نوع مشروعك (منزل، مصنع، أم مزرعة) والقدرة المطلوبة؟';
+        // If n8n returns an error status (e.g. 404 inactive workflow, 500) or missing reply,
+        // display a clear and friendly message in the UI with retry support.
+        // Never show a fake AI answer or pretend the request succeeded.
+        let errorMsg = '';
+        if (response.status === 404) {
+          errorMsg = lang === 'ar'
+            ? 'وكيل الذكاء الاصطناعي (n8n Webhook) غير مفعّل أو قيد التحديث حالياً. يرجى تفعيل الـ Workflow في n8n والمحاولة مرة أخرى.'
+            : 'The AI Agent (n8n Webhook) is currently inactive or being updated. Please verify the workflow is active in n8n and try again.';
+        } else if (response.status >= 500) {
+          errorMsg = lang === 'ar'
+            ? `تعذر معالجة الطلب في خادم الذكاء الاصطناعي (رمز الاستجابة: ${response.status}). يرجى إعادة المحاولة بعد لحظات.`
+            : `Unable to process request on the AI server (Status: ${response.status}). Please try again in a moment.`;
+        } else if (!validReply) {
+          errorMsg = lang === 'ar'
+            ? 'لم يتم استلام رد صالح من وكيل الذكاء الاصطناعي. يرجى إعادة المحاولة.'
+            : 'Received an empty or invalid response from the AI Agent. Please try again.';
+        } else {
+          errorMsg = lang === 'ar'
+            ? `حدث خطأ أثناء التواصل مع الذكاء الاصطناعي (${response.status}). يرجى المحاولة مرة أخرى.`
+            : `An error occurred while communicating with the AI Agent (${response.status}). Please try again.`;
+        }
 
-        const botReply: ChatMessage = {
-          id: `reply-${Date.now()}`,
+        const errorReply: ChatMessage = {
+          id: `reply-error-${Date.now()}`,
           sender: 'assistant',
-          text: fallbackText,
+          text: errorMsg,
           timestamp: new Date().toISOString(),
-          products: Array.isArray(data?.products) && data.products.length ? data.products : undefined,
-          recommendation: data?.recommendation && typeof data.recommendation === 'object' ? data.recommendation : undefined
+          isError: true,
+          failedPrompt: text
         };
-        setMessages(prev => [...prev, botReply]);
+        setMessages(prev => [...prev, errorReply]);
       }
     } catch (error) {
-      console.warn('[Enerjoo AI Chat] Network notice:', error);
+      console.warn('[Enerjoo AI Chat] n8n request failed:', error);
       const errorDetails = error instanceof Error ? error.message : String(error);
-      const isCors = /failed to fetch|networkerror|cors/i.test(errorDetails);
-      const errorText = isCors
-        ? 'أهلاً بك في Enerjoo! جاري إعادة الاتصال بمستشارك الذكي. بإمكانك أيضاً تصفح كتالوج الإنفرترات والألواح في الموقع مباشرة أو استخدام حاسبة الطاقة الشمسية.'
-        : 'أهلاً بك في Enerjoo! أنا مستشارك الهندسي لأنظمة الطاقة الشمسية. كيف يمكنني مساعدتك في حساب وتصميم محطتك اليوم؟';
+      const isCorsOrNetwork = /failed to fetch|networkerror|cors|load failed/i.test(errorDetails);
+
+      const errorText = isCorsOrNetwork
+        ? (lang === 'ar'
+            ? 'تعذر الاتصال بمحرك الذكاء الاصطناعي (n8n Cloud Webhook). يرجى التأكد من تشغيل الـ Workflow والسماح بالنطاق (CORS: https://enerjoo.com) في إعدادات n8n.'
+            : 'Unable to connect to the n8n Cloud Webhook. Please verify the workflow is active and CORS is allowed in n8n settings.')
+        : (lang === 'ar'
+            ? 'حدث خطأ في الاتصال بمحرك الذكاء الاصطناعي. يرجى المحاولة مرة أخرى.'
+            : 'Connection error while contacting the AI Agent. Please try again.');
+
       setMessages(prev => [
         ...prev,
         {
-          id: `reply-fallback-${Date.now()}`,
+          id: `reply-error-${Date.now()}`,
           sender: 'assistant',
           text: errorText,
           timestamp: new Date().toISOString(),
+          isError: true,
           failedPrompt: text
         }
       ]);
