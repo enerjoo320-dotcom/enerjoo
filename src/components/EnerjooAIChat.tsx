@@ -80,6 +80,108 @@ function isValidUUID(id: string | null | undefined): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
+/**
+ * Decodes common HTML entities safely without using DOM or dangerouslySetInnerHTML
+ */
+export function decodeCommonHtmlEntities(str: string): string {
+  return str
+    .replace(/&#x20;|&#32;|&nbsp;/gi, ' ')
+    .replace(/&#x09;|&#9;|&Tab;/gi, ' ')
+    .replace(/&quot;|&#34;|&#x22;/gi, '"')
+    .replace(/&apos;|&#39;|&#x27;/gi, "'")
+    .replace(/&lt;|&#60;|&#x3c;/gi, '<')
+    .replace(/&gt;|&#62;|&#x3e;/gi, '>')
+    .replace(/&bull;|&#8226;|&#x2022;/gi, '•')
+    .replace(/&mdash;|&#8212;/gi, '—')
+    .replace(/&ndash;|&#8211;/gi, '–')
+    .replace(/&amp;|&#38;|&#x26;/gi, '&');
+}
+
+/**
+ * Normalizes assistant AI response text into clean, human-readable text.
+ * - Converts literal escape sequences (\\n, \\r\\n) to real line breaks
+ * - Converts HTML entities (&#x20;, &nbsp;, &amp;, etc.) to proper characters
+ * - Strips redundant backslash escapes before punctuation (\\., \\-, \\[, \\])
+ * - Normalizes lists (- item, * item) to clean bullets (• item) and fixes numbered lists
+ * - Removes unneeded markdown syntax (###, **)
+ * - Strips product image URLs (/files/products/...) and markdown image codes
+ * - Keeps informative text from standard markdown links without showing raw URLs
+ * - Trims excess whitespace while preserving paragraph structure
+ */
+export function normalizeAssistantMessage(rawText: string): string {
+  if (!rawText || typeof rawText !== 'string') return '';
+
+  // 1. Convert literal line breaks (\\r\\n, \\n) to real newlines
+  let text = rawText
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\r\n/g, '\n');
+
+  // 2. Decode HTML entities
+  text = decodeCommonHtmlEntities(text);
+
+  // 3. Remove nested image codes or markdown image patterns with escapes, e.g.:
+  // \\- [صورة المنتج]\\([https://.../files/products/...](https://.../files/products/...))
+  text = text.replace(/!?\\?\[(?:صورة|image|img|photo|رابط صورة)[^\]]*\\?\]\\?\(\\?\[?https?:\/\/[^\s\)]+?\)?\\?\)/gi, '');
+  // Standard Markdown images ![alt](url)
+  text = text.replace(/!\\?\[[^\]]*\\?\]\\?\([^\)]*\\?\)/g, '');
+
+  // 4. Remove standalone product image URLs, especially /files/products/ or image file types
+  text = text.replace(/https?:\/\/[^\s\)\"\'<>]+(?:\/files\/products\/[^\s\)\"\'<>]+|\.(?:webp|png|jpe?g|gif|svg))/gi, '');
+
+  // 5. Replace regular Markdown links [Text](URL) with Text (unless text is just empty or image label)
+  text = text.replace(/\\?\[([^\]]+)\\?\]\\?\([^\)]*\\?\)/g, (_, linkText) => {
+    const cleanLabel = linkText.trim();
+    if (/^(?:صورة|image|img|photo|رابط|link|https?:\/\/)/i.test(cleanLabel)) {
+      return '';
+    }
+    return cleanLabel;
+  });
+
+  // 6. Unescape markdown punctuation: \\., \\-, \\*, \\_, \\[, \\], \\(, \\), \\#, \\+, \\!, \\`, \\~, \\|
+  text = text.replace(/\\([.\-_*\[\]()#+!`~|>])/g, '$1');
+
+  // 7. Strip markdown header markers (###, ##, #) at start of lines
+  text = text.replace(/^#{1,6}\s+/gm, '');
+
+  // 8. Strip bold/italic markdown (**text**, *text*, __text__)
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+  text = text.replace(/__([^_]+)__/g, '$1');
+  text = text.replace(/\*\*/g, ''); // remaining stray double asterisks
+
+  // 9. Process line by line for clean bullets, lists, and empty line cleanup
+  const lines = text.split('\n');
+  const cleanedLines: string[] = [];
+
+  for (let line of lines) {
+    let trimmed = line.trim();
+
+    // If line became an empty bullet or was an image link line
+    if (!trimmed || trimmed === '•' || trimmed === '-' || trimmed === '*' || trimmed === '• :') {
+      continue;
+    }
+
+    // Convert bullet lists (- item, * item, + item) to • item
+    if (/^[-*+•–—]\s*/.test(trimmed)) {
+      trimmed = '• ' + trimmed.replace(/^[-*+•–—]\s*/, '');
+    }
+    // Convert numbered lists: 1. item, 2. item
+    else if (/^(\d+)[\.\)]\s*/.test(trimmed)) {
+      trimmed = trimmed.replace(/^(\d+)[\.\)]\s*/, '$1. ');
+    }
+
+    // Check if the trimmed line is only punctuation or empty image leftovers
+    if (/^[•\-–—\s:()\[\]]*$/.test(trimmed)) {
+      continue;
+    }
+
+    cleanedLines.push(trimmed);
+  }
+
+  // Join lines with clean spacing
+  return cleanedLines.join('\n');
+}
+
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
     id: 'init-1',
@@ -653,7 +755,10 @@ export default function EnerjooAIChat({
         ? rawReplyCandidate.trim()
         : null;
 
-      if (response.ok && validReply) {
+      // Clean assistant reply from markdown codes, escaped characters, HTML entities, and image URLs
+      const cleanReply = validReply ? normalizeAssistantMessage(validReply) : '';
+
+      if (response.ok && cleanReply) {
         // Update session ID if n8n returned a new or synchronized sessionId
         const returnedSessionId = responseItem?.session_id || responseItem?.sessionId;
         if (typeof returnedSessionId === 'string' && returnedSessionId.trim()) {
@@ -675,7 +780,7 @@ export default function EnerjooAIChat({
         const botReply: ChatMessage = {
           id: `reply-${Date.now()}`,
           sender: 'assistant',
-          text: validReply,
+          text: cleanReply,
           timestamp: new Date().toISOString(),
           products: productsList,
           recommendation: recommendationObj
@@ -763,10 +868,12 @@ export default function EnerjooAIChat({
     }
   };
 
-  // Helper to format messages with bold text and line breaks cleanly
-  const renderMessageContent = (text: string) => {
+  // Helper to format messages with clean bullets, paragraphs, and safe bold text
+  const renderMessageContent = (rawText: string, isAssistant: boolean = false) => {
+    // If assistant message, ensure normalized text (idempotent if already cleaned)
+    const text = isAssistant ? normalizeAssistantMessage(rawText) : rawText;
     return text.split('\n').map((line, lineIdx) => {
-      // Handle bold markdown **text**
+      // Handle bold markdown **text** if any remains or in user messages
       const parts = line.split(/(\*\*[^*]+\*\*)/g);
       return (
         <p key={lineIdx} className={lineIdx > 0 ? 'mt-1.5' : ''}>
@@ -976,8 +1083,8 @@ export default function EnerjooAIChat({
                         : 'bg-white text-slate-800 border border-slate-200/80 rounded-tr-xs'
                     }`}
                   >
-                    <div className="leading-relaxed whitespace-pre-wrap">
-                      {renderMessageContent(msg.text)}
+                    <div className="leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                      {renderMessageContent(msg.text, !isUser)}
                     </div>
 
                     {/* Customer Retry Button on Error */}
