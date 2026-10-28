@@ -4,6 +4,7 @@
  */
 
 import { ensureCompressedImage, MAX_FINAL_IMAGE_SIZE_BYTES } from '../utils/imageCompression';
+import { auth } from '../lib/firebase';
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const MAX_IMAGE_SIZE_BYTES = MAX_FINAL_IMAGE_SIZE_BYTES; // 5 MB
@@ -259,8 +260,19 @@ export async function uploadProductImage(
     const formData = new FormData();
     formData.append('file', readyFile, readyFile.name);
 
+    const uploadHeaders: Record<string, string> = {};
+    if (auth?.currentUser && typeof auth.currentUser.getIdToken === 'function') {
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        if (idToken) uploadHeaders['Authorization'] = `Bearer ${idToken}`;
+      } catch {
+        // Ignore token fetch error for image upload fallback
+      }
+    }
+
     const cfResponse = await fetch(`${CLOUDFLARE_WORKER_API}/upload`, {
       method: 'POST',
+      headers: uploadHeaders,
       body: formData,
       signal: AbortSignal.timeout(6000)
     });

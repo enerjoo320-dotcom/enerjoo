@@ -243,32 +243,90 @@ const notifyProductListeners = async () => {
 };
 
 /**
+ * Extracts the Firebase ID Token for the currently signed-in user.
+ * Blocks write operations if the user is not authenticated with Firebase Auth.
+ */
+export async function getFirebaseIdTokenForWrite(): Promise<string> {
+  if (typeof (auth as any)?.authStateReady === 'function') {
+    try {
+      await (auth as any).authStateReady();
+    } catch {
+      // Ignore authStateReady error
+    }
+  }
+
+  const currentUser = auth?.currentUser;
+  if (!currentUser || typeof currentUser.getIdToken !== 'function') {
+    const unauthErr: any = new Error('يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من إضافة أو تعديل أو حذف المنتجات.');
+    unauthErr.status = 401;
+    unauthErr.code = 'UNAUTHORIZED';
+    throw unauthErr;
+  }
+
+  try {
+    const idToken = await currentUser.getIdToken();
+    if (!idToken || typeof idToken !== 'string' || !idToken.trim()) {
+      throw new Error('Empty Firebase ID Token');
+    }
+    return idToken.trim();
+  } catch {
+    const tokenErr: any = new Error('انتهت صلاحية جلسة تسجيل الدخول. يرجى تسجيل الدخول مرة أخرى ثم إعادة المحاولة.');
+    tokenErr.status = 401;
+    tokenErr.code = 'UNAUTHORIZED';
+    throw tokenErr;
+  }
+}
+
+/**
  * Internal helper for Cloudflare Worker D1 Products API requests.
+ * Automatically attaches `Authorization: Bearer <Firebase ID Token>` on POST, PUT, PATCH, and DELETE requests.
  */
 async function requestProductsApi<T>(path: string, options?: RequestInit): Promise<T> {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const method = (options?.method || 'GET').toUpperCase();
+  const isWriteMethod = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
   const baseUrl = getProductsApiBaseUrl();
   const url = `${baseUrl}${normalizedPath}`;
+
+  const extraHeaders: Record<string, string> = {};
+  if (options?.headers) {
+    if (options.headers instanceof Headers) {
+      options.headers.forEach((value, key) => {
+        extraHeaders[key] = value;
+      });
+    } else if (Array.isArray(options.headers)) {
+      for (const [key, value] of options.headers) {
+        extraHeaders[key] = value;
+      }
+    } else {
+      Object.assign(extraHeaders, options.headers);
+    }
+  }
+
+  const requestHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...extraHeaders
+  };
+
+  if (isWriteMethod) {
+    const idToken = await getFirebaseIdTokenForWrite();
+    requestHeaders['Authorization'] = `Bearer ${idToken}`;
+  }
   
   let res: Response;
   try {
     res = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options?.headers || {})
-      }
+      method,
+      headers: requestHeaders
     });
     // If /api returned an HTML fallback page instead of JSON, fallback to direct Cloudflare Worker URL
     const contentType = res.headers.get('content-type') || '';
     if (baseUrl === '/api' && contentType.includes('text/html')) {
       res = await fetch(`${CF_DIRECT_BASE_URL}${normalizedPath}`, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options?.headers || {})
-        }
+        method,
+        headers: requestHeaders
       });
     }
   } catch (err) {
@@ -277,10 +335,8 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     try {
       res = await fetch(`${fallbackBase}${normalizedPath}`, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(options?.headers || {})
-        }
+        method,
+        headers: requestHeaders
       });
     } catch (fallbackErr) {
       const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
@@ -314,6 +370,16 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
       }
     } catch {
       // Ignore JSON parse error on non-ok responses
+    }
+    if (res.status === 401) {
+      const authErrorMsg = errorDetail && !errorDetail.startsWith('Status 401')
+        ? errorDetail
+        : 'يرجى تسجيل الدخول إلى Enerjoo ثم إعادة المحاولة.';
+      const apiErr: any = new Error(authErrorMsg);
+      apiErr.status = 401;
+      apiErr.code = errorCode || 'UNAUTHORIZED';
+      apiErr.detail = authErrorMsg;
+      throw apiErr;
     }
     const apiErr: any = new Error(`فشل حفظ التغيير في قاعدة البيانات (${res.status}): ${errorDetail}`);
     apiErr.status = res.status;

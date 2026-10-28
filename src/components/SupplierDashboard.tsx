@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Product, Supplier, ViewType } from '../types';
 import { uploadSupplierProfileImage } from '../services/uploadService';
 import { updateSupplierProfileImage } from '../services/firestoreService';
+import { auth } from '../lib/firebase';
 
 interface SupplierDashboardProps {
   lang: 'ar' | 'en';
@@ -44,6 +45,15 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
 
   const handleConfirmDelete = async () => {
     if (!productToDelete) return;
+    if (!user || !auth.currentUser) {
+      setDeleteError(
+        isAr
+          ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من حذف المنتج.'
+          : 'Please sign in to your Enerjoo account first to delete this product.'
+      );
+      return;
+    }
+
     try {
       setIsDeleting(true);
       setDeleteError(null);

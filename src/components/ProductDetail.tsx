@@ -61,6 +61,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const isOwner = user?.uid === product.supplierId || user?.type === 'admin';
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Always ensure the product details page opens and renders from the top
   useLayoutEffect(() => {
@@ -77,15 +78,29 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
 
   const handleConfirmDelete = async () => {
     if (!onDelete) return;
+    if (!user || !auth.currentUser) {
+      setDeleteError(
+        isAr
+          ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من حذف المنتج.'
+          : 'Please sign in to your Enerjoo account first to delete this product.'
+      );
+      return;
+    }
+
     try {
       setIsDeleting(true);
+      setDeleteError(null);
       await onDelete(product.id);
+      setShowDeleteModal(false);
       onBack();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete product from detail view:', err);
+      const errMsg = (err instanceof Error && err.message)
+        ? err.message
+        : (isAr ? 'تعذر حذف المنتج من قاعدة البيانات.' : 'Failed to delete product from database.');
+      setDeleteError(errMsg);
     } finally {
       setIsDeleting(false);
-      setShowDeleteModal(false);
     }
   };
 
@@ -1727,7 +1742,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
               </p>
 
               {/* Product Info Preview */}
-              <div className="flex items-center gap-3 p-3 bg-solar-bg rounded-2xl border border-solar-border mb-6">
+              <div className="flex items-center gap-3 p-3 bg-solar-bg rounded-2xl border border-solar-border mb-4">
                 <div className="w-12 h-12 rounded-xl bg-white overflow-hidden border border-solar-border shrink-0">
                   <img src={product.image || DEFAULT_PRODUCT_IMAGE} alt={product.name} className="w-full h-full object-cover" />
                 </div>
@@ -1741,11 +1756,17 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
                 </div>
               </div>
 
+              {deleteError && (
+                <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold leading-relaxed">
+                  {deleteError}
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   disabled={isDeleting}
-                  onClick={() => setShowDeleteModal(false)}
+                  onClick={() => { setShowDeleteModal(false); setDeleteError(null); }}
                   className="flex-1 py-3 px-4 rounded-xl border border-solar-border text-solar-text font-bold text-sm hover:bg-solar-bg transition active:scale-95 disabled:opacity-50"
                 >
                   {isAr ? 'إلغاء' : 'Cancel'}

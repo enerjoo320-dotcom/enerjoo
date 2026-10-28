@@ -606,6 +606,14 @@ export default function App() {
   };
 
   const handleProductAction = async (productData: Omit<Product, 'id'>) => {
+    if (!user || !auth.currentUser) {
+      throw new Error(
+        isAr
+          ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من إضافة أو تعديل المنتجات.'
+          : 'Please sign in to your Enerjoo account first to add or edit products.'
+      );
+    }
+
     try {
       if (editingProduct) {
         const prodId = editingProduct.id.toString();
@@ -659,6 +667,15 @@ export default function App() {
 
   const handleConfirmDeleteProduct = async () => {
     if (!productToDelete) return;
+    if (!user || !auth.currentUser) {
+      setDeleteError(
+        isAr
+          ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من حذف المنتج.'
+          : 'Please sign in to your Enerjoo account first to delete this product.'
+      );
+      return;
+    }
+
     const pId = productToDelete.id.toString();
     try {
       setIsDeletingProduct(true);
@@ -719,17 +736,20 @@ export default function App() {
                 navigateToView('add');
               }}
               onDelete={async (id) => {
+                if (!user || !auth.currentUser) {
+                  throw new Error(
+                    isAr
+                      ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من حذف المنتج.'
+                      : 'Please sign in to your Enerjoo account first to delete this product.'
+                  );
+                }
                 const pId = id.toString();
+                await deleteProduct(pId);
                 setProducts(prev => prev.filter(p => p.id.toString() !== pId));
                 setCompareList(prev => prev.filter(p => p.id.toString() !== pId));
                 setWishlist(prev => prev.filter(p => p.id.toString() !== pId));
                 setSelectedProduct(null);
                 navigateBack('home');
-                try {
-                  await deleteProduct(pId);
-                } catch (e) {
-                  console.error('Failed to delete product from ProductDetail:', e);
-                }
               }}
             />
           );

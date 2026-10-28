@@ -1715,20 +1715,34 @@ ${urls.join("\n")}
     return typeof id === "string" && id.trim().length > 0 && id.length <= 128 && /^[a-zA-Z0-9_\-.]+$/.test(id);
   }
 
-  // POST /api/products - Create a new product
+  function extractBearerAuthHeader(req: express.Request): string | null {
+    const rawAuth = req.headers.authorization;
+    if (!rawAuth || typeof rawAuth !== "string") return null;
+    const trimmed = rawAuth.trim();
+    if (!/^Bearer\s+\S+/i.test(trimmed)) return null;
+    return trimmed;
+  }
+
+  // POST /api/products - Create a new product (requires Firebase ID Token in Authorization header)
   app.post("/api/products", async (req, res) => {
+    const authHeader = extractBearerAuthHeader(req);
+    if (!authHeader) {
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+        }
+      });
+    }
+
     try {
       const body = sanitizeProductPayload(req.body || {});
       const rawId = body.product_id ? String(body.product_id).trim() : "";
       const newId = isValidProductId(rawId)
         ? rawId
         : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
-      
-      // If this ID was previously marked as deleted, unmark it
-      if (deletedProductIds.has(newId)) {
-        deletedProductIds.delete(newId);
-        await saveDeletedProducts();
-      }
 
       const newProduct = {
         ...body,
@@ -1737,16 +1751,33 @@ ${urls.join("\n")}
         updated_at: new Date().toISOString()
       };
 
-      // Attempt to forward to Worker
+      // Forward to Cloudflare Worker with Authorization Bearer header
       try {
-        await fetch(`${CF_WORKER_API}/products`, {
+        const cfRes = await fetch(`${CF_WORKER_API}/products`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": authHeader
+          },
           body: JSON.stringify(newProduct),
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(4500)
         });
+        if (cfRes.status === 401 || cfRes.status === 403) {
+          const errJson: any = await cfRes.json().catch(() => null);
+          return res.status(cfRes.status).json(errJson || {
+            ok: false,
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
+          });
+        }
       } catch (cfErr) {
         console.warn("Could not push new product to Cloudflare Worker:", cfErr);
+      }
+
+      // If this ID was previously marked as deleted, unmark it
+      if (deletedProductIds.has(newId)) {
+        deletedProductIds.delete(newId);
+        await saveDeletedProducts();
       }
 
       // Add to local catalog
@@ -1757,21 +1788,58 @@ ${urls.join("\n")}
         activeCatalogProducts.unshift(newProduct);
       }
 
-      res.status(201).json({ success: true, product_id: newId, product: newProduct });
+      res.status(201).json({ success: true, ok: true, product_id: newId, product: newProduct });
     } catch (err: any) {
       console.error("Error in POST /api/products:", err);
       res.status(500).json({ success: false, error: "Failed to create product" });
     }
   });
 
-  // Specialized PUT handler for /api/products/:productId
-  app.put("/api/products/:productId", async (req, res) => {
+  // Specialized PUT & PATCH handler for /api/products/:productId (requires Firebase ID Token in Authorization header)
+  const handleUpdateProductRoute = async (req: express.Request, res: express.Response) => {
+    const authHeader = extractBearerAuthHeader(req);
+    if (!authHeader) {
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+        }
+      });
+    }
+
     const { productId } = req.params;
     if (!isValidProductId(productId)) {
       return res.status(400).json({ success: false, error: "Invalid productId format" });
     }
 
     try {
+      const safeBody = sanitizeProductPayload(req.body || {});
+
+      // Forward to Cloudflare Worker with Authorization Bearer header
+      try {
+        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
+          method: req.method === "PATCH" ? "PATCH" : "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": authHeader
+          },
+          body: JSON.stringify(safeBody),
+          signal: AbortSignal.timeout(4500)
+        });
+        if (cfRes.status === 401 || cfRes.status === 403) {
+          const errJson: any = await cfRes.json().catch(() => null);
+          return res.status(cfRes.status).json(errJson || {
+            ok: false,
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
+          });
+        }
+      } catch {
+        // Silently ignore network error to remote Worker in local dev
+      }
+
       if (deletedProductIds.has(productId)) {
         deletedProductIds.delete(productId);
         await saveDeletedProducts();
@@ -1784,8 +1852,6 @@ ${urls.join("\n")}
         liveD1ProductsCache.get(productId) ||
         productsData.find(p => String(p.id) === productId) ||
         {};
-
-      const safeBody = sanitizeProductPayload(req.body || {});
       
       const mergedPayload = {
         ...existing,
@@ -1816,33 +1882,58 @@ ${urls.join("\n")}
       // Ensure live cache also holds the edited record so remote fetch doesn't overwrite it
       liveD1ProductsCache.set(productId, { ...normalized, _fromD1: true });
 
-      // Best effort forward to Worker
-      try {
-        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(safeBody),
-          signal: AbortSignal.timeout(3000)
-        });
-      } catch {
-        // Silently ignore worker forward error
-      }
-
-      res.json({ success: true, product: normalized });
+      res.json({ success: true, ok: true, product: normalized });
     } catch (err: any) {
-      console.error(`Error in custom PUT /api/products/${productId}:`, err);
+      console.error(`Error in ${req.method} /api/products/${productId}:`, err);
       res.status(500).json({ success: false, error: "Failed to update product" });
     }
-  });
+  };
 
-  // DELETE /api/products/:productId
+  app.put("/api/products/:productId", handleUpdateProductRoute);
+  app.patch("/api/products/:productId", handleUpdateProductRoute);
+
+  // DELETE /api/products/:productId (requires Firebase ID Token in Authorization header)
   app.delete("/api/products/:productId", async (req, res) => {
+    const authHeader = extractBearerAuthHeader(req);
+    if (!authHeader) {
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+        }
+      });
+    }
+
     const { productId } = req.params;
     if (!isValidProductId(productId)) {
       return res.status(400).json({ success: false, error: "Invalid productId format" });
     }
     try {
       const pId = String(productId);
+
+      // Forward to Cloudflare Worker with Authorization Bearer header
+      try {
+        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(pId)}`, {
+          method: "DELETE",
+          headers: {
+            "Authorization": authHeader
+          },
+          signal: AbortSignal.timeout(4500)
+        });
+        if (cfRes.status === 401 || cfRes.status === 403) {
+          const errJson: any = await cfRes.json().catch(() => null);
+          return res.status(cfRes.status).json(errJson || {
+            ok: false,
+            success: false,
+            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
+          });
+        }
+      } catch {
+        // Ignore worker network error in local dev
+      }
+
       deletedProductIds.add(pId);
       await saveDeletedProducts();
 
@@ -1859,16 +1950,7 @@ ${urls.join("\n")}
         activeCatalogProducts.splice(idx, 1);
       }
 
-      try {
-        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(pId)}`, {
-          method: "DELETE",
-          signal: AbortSignal.timeout(3000)
-        });
-      } catch {
-        // Ignore worker delete error
-      }
-
-      res.json({ success: true, product_id: pId });
+      res.json({ success: true, ok: true, product_id: pId });
     } catch (err: any) {
       res.status(500).json({ success: false, error: "Failed to delete product" });
     }
@@ -2367,11 +2449,15 @@ ${urls.join("\n")}
     const targetPath = req.originalUrl.replace(/^\/api/, "");
     const targetUrl = `${CF_WORKER_API}${targetPath}`;
     try {
+      const proxyHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (req.headers.authorization && typeof req.headers.authorization === "string") {
+        proxyHeaders["Authorization"] = req.headers.authorization;
+      }
       const fetchOptions: RequestInit = {
         method: req.method,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: proxyHeaders,
       };
       if (req.method !== "GET" && req.method !== "HEAD" && req.body && Object.keys(req.body).length > 0) {
         fetchOptions.body = JSON.stringify(req.body);

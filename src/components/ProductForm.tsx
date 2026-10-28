@@ -7,6 +7,7 @@ import { Product } from '../types';
 import { parseDimensionsString } from '../services/firestoreService';
 import { classifyInverterType, classifyInverterPhase, classifyInverter } from '../utils/inverterClassification';
 import { useAuth } from '../context/AuthContext';
+import { auth } from '../lib/firebase';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
 import { formatCleanNumber, cleanDecimal, calculateMetricArea } from '../utils/dimensionUtils';
@@ -603,9 +604,22 @@ export const ProductForm: React.FC<{
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!user || !auth.currentUser) {
+      setUploadError(
+        lang === 'ar'
+          ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من إضافة أو تعديل المنتجات.'
+          : 'Please sign in to your Enerjoo account first to add or edit products.'
+      );
+      return;
+    }
     
     if (user?.type === 'supplier' && !user?.verified) {
-      alert(lang === 'ar' ? 'بصفتك مورداً، يجب التحقق من حسابك والموافقة عليه قبل التمكن من نشر المنتجات.' : 'As a supplier, your account must be verified and approved by admin before you can publish products.');
+      setUploadError(
+        lang === 'ar'
+          ? 'بصفتك مورداً، يجب التحقق من حسابك والموافقة عليه قبل التمكن من نشر المنتجات.'
+          : 'As a supplier, your account must be verified and approved by admin before you can publish products.'
+      );
       return;
     }
 
