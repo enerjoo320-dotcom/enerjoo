@@ -245,8 +245,9 @@ const notifyProductListeners = async () => {
 /**
  * Extracts the Firebase ID Token for the currently signed-in user.
  * Blocks write operations if the user is not authenticated with Firebase Auth.
+ * Supports forceRefresh to exchange expired tokens for fresh ones.
  */
-export async function getFirebaseIdTokenForWrite(): Promise<string> {
+export async function getFirebaseIdTokenForWrite(forceRefresh = false): Promise<string> {
   if (typeof (auth as any)?.authStateReady === 'function') {
     try {
       await (auth as any).authStateReady();
@@ -264,7 +265,7 @@ export async function getFirebaseIdTokenForWrite(): Promise<string> {
   }
 
   try {
-    const idToken = await currentUser.getIdToken();
+    const idToken = await currentUser.getIdToken(forceRefresh);
     if (!idToken || typeof idToken !== 'string' || !idToken.trim()) {
       throw new Error('Empty Firebase ID Token');
     }
@@ -280,6 +281,7 @@ export async function getFirebaseIdTokenForWrite(): Promise<string> {
 /**
  * Internal helper for Cloudflare Worker D1 Products API requests.
  * Automatically attaches `Authorization: Bearer <Firebase ID Token>` on POST, PUT, PATCH, and DELETE requests.
+ * Automatically refreshes expired tokens on 401 and retries once.
  */
 async function requestProductsApi<T>(path: string, options?: RequestInit): Promise<T> {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
@@ -309,13 +311,6 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     ...extraHeaders
   };
 
-  let idToken = '';
-  if (isWriteMethod) {
-    idToken = await getFirebaseIdTokenForWrite();
-    requestHeaders['Authorization'] = `Bearer ${idToken}`;
-    requestHeaders['X-Firebase-Auth'] = idToken;
-  }
-
   const isPreviewContainer =
     typeof window !== 'undefined' &&
     (window.location.hostname.endsWith('.run.app') || window.location.hostname === 'localhost');
@@ -324,8 +319,18 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     window.location.hostname === 'enerjoo.com' ||
     window.location.hostname.endsWith('.enerjoo.com');
 
+  let idToken = '';
+  if (isWriteMethod) {
+    idToken = await getFirebaseIdTokenForWrite(false);
+    requestHeaders['Authorization'] = `Bearer ${idToken}`;
+    // Only send X-Firebase-Auth on same-origin proxy in preview container to prevent Cloud Run GFE interception
+    // NEVER send it to Cloudflare Worker directly because its CORS policy strictly permits 'Content-Type, Authorization'
+    if (isPreviewContainer && baseUrl === '/api') {
+      requestHeaders['X-Firebase-Auth'] = idToken;
+    }
+  }
+
   // Pre-warm same-origin proxy auth cache before write requests in preview container
-  // so the container auth bridge never sees a Firebase Bearer token on a cold cache miss
   if (isWriteMethod && isPreviewContainer && baseUrl === '/api') {
     try {
       await fetch('/api/health', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
@@ -387,20 +392,26 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     res = await executeFetchWithRetry(url, requestHeaders);
     const contentType = res.headers.get('content-type') || '';
     if (baseUrl === '/api' && contentType.includes('text/html') && canFallbackToDirectWorker) {
+      const directWorkerHeaders = { ...requestHeaders };
+      delete directWorkerHeaders['X-Firebase-Auth'];
       res = await fetch(`${CF_DIRECT_BASE_URL}${normalizedPath}`, {
         ...options,
         method,
-        headers: requestHeaders
+        headers: directWorkerHeaders
       });
     }
   } catch (err) {
     if (canFallbackToDirectWorker || baseUrl !== '/api') {
       const fallbackBase = baseUrl === '/api' ? CF_DIRECT_BASE_URL : '/api';
+      const fallbackHeaders = { ...requestHeaders };
+      if (fallbackBase === CF_DIRECT_BASE_URL) {
+        delete fallbackHeaders['X-Firebase-Auth'];
+      }
       try {
         res = await fetch(`${fallbackBase}${normalizedPath}`, {
           ...options,
           method,
-          headers: requestHeaders
+          headers: fallbackHeaders
         });
       } catch (fallbackErr) {
         const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
@@ -411,6 +422,30 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
       throw new Error(`تعذر الاتصال بخادم قاعدة البيانات (Products API): ${errorMsg}`);
+    }
+  }
+
+  // Automatic retry on 401 with force-refreshed Firebase ID token
+  if (res.status === 401 && isWriteMethod && auth?.currentUser) {
+    try {
+      const refreshedToken = await getFirebaseIdTokenForWrite(true);
+      if (refreshedToken) {
+        idToken = refreshedToken;
+        requestHeaders['Authorization'] = `Bearer ${idToken}`;
+        if (isPreviewContainer && baseUrl === '/api') {
+          requestHeaders['X-Firebase-Auth'] = idToken;
+        } else {
+          delete requestHeaders['X-Firebase-Auth'];
+        }
+        res = await fetch(url, {
+          ...options,
+          method,
+          headers: requestHeaders,
+          credentials: url.startsWith('/') ? 'same-origin' : options?.credentials
+        });
+      }
+    } catch {
+      // If refresh fails, proceed to standard error parsing below
     }
   }
 
@@ -440,17 +475,30 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     } catch {
       // Ignore JSON parse error on non-ok responses
     }
+
     if (res.status === 401) {
       const authErrorMsg = errorDetail && !errorDetail.startsWith('Status 401')
         ? errorDetail
-        : 'يرجى تسجيل الدخول إلى Enerjoo ثم إعادة المحاولة.';
+        : 'يرجى تسجيل الدخول إلى Enerjoo أولاً لتتمكن من تعديل أو حذف المنتجات.';
       const apiErr: any = new Error(authErrorMsg);
       apiErr.status = 401;
       apiErr.code = errorCode || 'UNAUTHORIZED';
       apiErr.detail = authErrorMsg;
       throw apiErr;
     }
-    const apiErr: any = new Error(`فشل حفظ التغيير في قاعدة البيانات (${res.status}): ${errorDetail}`);
+
+    if (res.status === 403) {
+      const forbiddenMsg = errorDetail && !errorDetail.startsWith('Status 403')
+        ? errorDetail
+        : 'هذا الحساب غير مخوّل لإضافة المنتجات أو تعديلها أو حذفها.';
+      const apiErr: any = new Error(forbiddenMsg);
+      apiErr.status = 403;
+      apiErr.code = errorCode || 'PRODUCT_ADMIN_FORBIDDEN';
+      apiErr.detail = forbiddenMsg;
+      throw apiErr;
+    }
+
+    const apiErr: any = new Error(errorDetail ? `فشل حفظ التغيير في قاعدة البيانات: ${errorDetail}` : `فشل حفظ التغيير في قاعدة البيانات (${res.status})`);
     apiErr.status = res.status;
     apiErr.code = errorCode;
     apiErr.detail = errorDetail;

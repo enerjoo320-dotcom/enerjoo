@@ -447,8 +447,24 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
               </div>
 
               {deleteError && (
-                <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold leading-relaxed">
-                  {deleteError}
+                <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold leading-relaxed flex flex-col gap-1.5">
+                  <div className="flex items-start gap-1.5">
+                    <span className="shrink-0 text-red-600">⚠️</span>
+                    <span>{deleteError}</span>
+                  </div>
+                  {(!user || !auth.currentUser || deleteError.includes('تسجيل الدخول') || deleteError.includes('sign in')) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductToDelete(null);
+                        setDeleteError(null);
+                        setView('login');
+                      }}
+                      className="self-start text-[11px] font-black text-red-700 underline hover:text-red-900 cursor-pointer pt-1"
+                    >
+                      {isAr ? 'الانتقال إلى صفحة تسجيل الدخول ←' : 'Go to Login Page →'}
+                    </button>
+                  )}
                 </div>
               )}
 

@@ -1715,14 +1715,14 @@ ${urls.join("\n")}
   }
 
   function extractBearerAuthHeader(req: express.Request): string | null {
-    const rawAuth = req.headers.authorization;
+    const rawAuth = Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization;
     if (rawAuth && typeof rawAuth === "string") {
       const trimmed = rawAuth.trim();
       if (/^Bearer\s+\S+/i.test(trimmed)) {
         return trimmed;
       }
     }
-    const fallbackToken = req.headers["x-firebase-auth"];
+    const fallbackToken = Array.isArray(req.headers["x-firebase-auth"]) ? req.headers["x-firebase-auth"][0] : req.headers["x-firebase-auth"];
     if (fallbackToken && typeof fallbackToken === "string" && fallbackToken.trim()) {
       const trimmed = fallbackToken.trim();
       return /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${trimmed}`;
@@ -1746,7 +1746,7 @@ ${urls.join("\n")}
         typeof payload?.sub === "string" &&
         payload.sub.length > 0 &&
         typeof payload?.exp === "number" &&
-        payload.exp > nowSec
+        payload.exp > (nowSec - 120)
       );
     } catch {
       return false;
