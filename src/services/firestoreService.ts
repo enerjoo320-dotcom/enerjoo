@@ -130,6 +130,40 @@ export const removeEditedProduct = (productId: string | number): void => {
   }
 };
 
+/**
+ * Returns the initial local catalog with deleted items removed and locally edited products overlaid.
+ * Used as initial React state so reloads immediately reflect user edits and deletions without flicker.
+ */
+export const getInitialLocalProducts = (): Product[] => {
+  const deletedSet = getDeletedProductIds();
+  const editedMap = getEditedProducts();
+  const resultMap = new Map<string, Product>();
+
+  for (const baseProd of productsData) {
+    const id = String(baseProd.id);
+    if (!deletedSet.has(id)) {
+      resultMap.set(id, baseProd);
+    }
+  }
+
+  for (const [id, editedProd] of Object.entries(editedMap)) {
+    if (!deletedSet.has(id)) {
+      const existing = resultMap.get(id);
+      resultMap.set(id, {
+        ...(existing || {}),
+        ...editedProd,
+        id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
+        specs: {
+          ...(existing?.specs || {}),
+          ...(editedProd.specs || {})
+        }
+      } as Product);
+    }
+  }
+
+  return Array.from(resultMap.values());
+};
+
 const PRODUCTS_COLLECTION = 'products';
 const USERS_COLLECTION = 'users';
 const SOLAR_REQUESTS_COLLECTION = 'solarRequests';
@@ -177,11 +211,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 // Cloudflare D1 Products API
 const CF_DIRECT_BASE_URL = 'https://enerjoo-api.enerjoo320.workers.dev';
 const getProductsApiBaseUrl = () => {
+  const envUrl = (import.meta as any).env?.VITE_PRODUCTS_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
   if (typeof window !== 'undefined') {
-    // In preview or sandbox environments, use the local proxy to prevent browser CORS blocks
-    if (window.location.hostname !== 'enerjoo.com') {
-      return '/api';
-    }
+    // Use same-origin /api (handled by server.ts or vercel.json rewrites to Cloudflare Worker)
+    return '/api';
   }
   return CF_DIRECT_BASE_URL;
 };
@@ -211,6 +247,7 @@ const notifyProductListeners = async () => {
  */
 async function requestProductsApi<T>(path: string, options?: RequestInit): Promise<T> {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const method = (options?.method || 'GET').toUpperCase();
   const baseUrl = getProductsApiBaseUrl();
   const url = `${baseUrl}${normalizedPath}`;
   
@@ -223,32 +260,37 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
         ...(options?.headers || {})
       }
     });
+    // If /api returned an HTML fallback page instead of JSON, fallback to direct Cloudflare Worker URL
+    const contentType = res.headers.get('content-type') || '';
+    if (baseUrl === '/api' && contentType.includes('text/html')) {
+      res = await fetch(`${CF_DIRECT_BASE_URL}${normalizedPath}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options?.headers || {})
+        }
+      });
+    }
   } catch (err) {
-    // If direct worker fetch failed due to CORS or network error, attempt fallback through proxy
-    if (baseUrl !== '/api') {
-      try {
-        const fallbackUrl = `/api${normalizedPath}`;
-        res = await fetch(fallbackUrl, {
-          ...options,
-          headers: {
-            'Content-Type': 'application/json',
-            ...(options?.headers || {})
-          }
-        });
-      } catch (fallbackErr) {
-        const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-        console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
-        throw new Error(`Network error connecting to Products API: ${errorMsg}`);
-      }
-    } else {
-      const errorMsg = err instanceof Error ? err.message : String(err);
+    // If primary fetch failed due to CORS or network error, attempt fallback
+    const fallbackBase = baseUrl === '/api' ? CF_DIRECT_BASE_URL : '/api';
+    try {
+      res = await fetch(`${fallbackBase}${normalizedPath}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options?.headers || {})
+        }
+      });
+    } catch (fallbackErr) {
+      const errorMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
       console.error(`Network error connecting to Products API at ${url}:`, errorMsg);
-      throw new Error(`Network error connecting to Products API: ${errorMsg}`);
+      throw new Error(`تعذر الاتصال بخادم قاعدة البيانات (Products API): ${errorMsg}`);
     }
   }
 
-  // Handle 404 cleanly without throwing fatal errors
-  if (res.status === 404) {
+  // Handle 404 cleanly ONLY for GET requests
+  if (res.status === 404 && method === 'GET') {
     if (normalizedPath === '/products' || normalizedPath.startsWith('/products?')) {
       return { success: true, count: 0, products: [] } as T;
     }
@@ -257,9 +299,11 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
 
   if (!res.ok) {
     let errorDetail = `Status ${res.status} ${res.statusText}`;
+    let errorCode = '';
     try {
       const errJson: any = await res.json();
       if (errJson) {
+        errorCode = errJson.error?.code || errJson.code || '';
         if (typeof errJson.error === 'string') {
           errorDetail = errJson.error;
         } else if (errJson.error?.message && typeof errJson.error.message === 'string') {
@@ -271,15 +315,26 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     } catch {
       // Ignore JSON parse error on non-ok responses
     }
-    throw new Error(`Products API error (${res.status}): ${errorDetail}`);
+    const apiErr: any = new Error(`فشل حفظ التغيير في قاعدة البيانات (${res.status}): ${errorDetail}`);
+    apiErr.status = res.status;
+    apiErr.code = errorCode;
+    apiErr.detail = errorDetail;
+    throw apiErr;
   }
 
   try {
-    const json = await res.json();
+    const json: any = await res.json();
+    if (method !== 'GET' && json && (json.success === false || json.ok === false)) {
+      const detail = json.error?.message || json.error || json.message || 'رفض الخادم تنفيذ العملية';
+      throw new Error(`فشل حفظ التغيير في قاعدة البيانات: ${detail}`);
+    }
     return json as T;
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith('فشل حفظ التغيير')) {
+      throw err;
+    }
     console.error(`Invalid JSON received from Products API at ${url}:`, err);
-    throw new Error('Invalid JSON response from Products API');
+    throw new Error('استجابة غير صالحة من خادم المنتجات (Invalid JSON response)');
   }
 }
 
@@ -403,6 +458,14 @@ function normalizeD1Brand(rawBrand?: string | null, model?: string | null): stri
 function mapD1ProductToProduct(d1Item: any): Product {
   const id = d1Item.product_id || d1Item.id || '';
   const baseMatch = productsData.find(b => String(b.id) === String(id));
+  const localEdited = getEditedProducts()[String(id)];
+  const isEdited = Boolean(
+    d1Item._isEdited ||
+    localEdited ||
+    (d1Item.name && baseMatch && d1Item.name !== baseMatch.name) ||
+    (d1Item.nameAr && baseMatch && d1Item.nameAr !== baseMatch.nameAr)
+  );
+
   const category = mapD1CategoryToCategory(d1Item.product_category || d1Item.category || baseMatch?.category);
   const ratedKw = Number(d1Item.rated_power_kw ?? d1Item.specs?.ratedPowerKw ?? 0);
   let power = Number(d1Item.power_w ?? d1Item.power ?? baseMatch?.power ?? 0);
@@ -411,7 +474,7 @@ function mapD1ProductToProduct(d1Item: any): Product {
   }
 
   let price = Number(d1Item.price_egp ?? d1Item.price ?? baseMatch?.price ?? 0);
-  if (category === 'inverters' && price > 0 && price < 500) {
+  if (!isEdited && category === 'inverters' && price > 0 && price < 500) {
     price = baseMatch?.price && baseMatch.price >= 1000 ? baseMatch.price : price * 1000;
   }
 
@@ -421,15 +484,18 @@ function mapD1ProductToProduct(d1Item: any): Product {
 
   let rawModel = String(d1Item.model || d1Item.name || baseMatch?.name || `Product ${id}`).trim();
   const kwDisplay = ratedKw > 0 ? ratedKw : (power >= 1000 ? power / 1000 : 0);
-  if (brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
-    rawModel = `Felicity Off-Grid Inverter ${kwDisplay}kW`;
-  } else if (brand === 'Eastman' && /^inverter\b/i.test(rawModel) && kwDisplay > 0) {
-    rawModel = `Eastman Off-Grid Inverter ${kwDisplay}kW`;
+  if (!isEdited) {
+    if (brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
+      rawModel = `Felicity Off-Grid Inverter ${kwDisplay}kW`;
+    } else if (brand === 'Eastman' && /^inverter\b/i.test(rawModel) && kwDisplay > 0) {
+      rawModel = `Eastman Off-Grid Inverter ${kwDisplay}kW`;
+    }
   }
 
-  const name = baseMatch?.name || d1Item.name || rawModel;
-  let nameAr = d1Item.nameAr || d1Item.name_ar || baseMatch?.nameAr || '';
-  if (!nameAr || nameAr === rawModel || nameAr === d1Item.model) {
+  // Prioritize explicit d1Item.name over baseMatch.name so user edits to product name are never discarded
+  const name = d1Item.name || baseMatch?.name || rawModel;
+  let nameAr = d1Item.nameAr || d1Item.name_ar || (!isEdited ? baseMatch?.nameAr : '') || '';
+  if (!isEdited && (!nameAr || nameAr === rawModel || nameAr === d1Item.model)) {
     if (brand === 'Huawei' && kwDisplay > 0) {
       nameAr = `إنفرتر هواوي ${kwDisplay} كيلو وات On-Grid ثلاثي الأطوار (${rawModel.replace(/^Huawei\s*/i, '')})`;
     } else if (brand === 'Felicity' && kwDisplay > 0) {
@@ -445,6 +511,8 @@ function mapD1ProductToProduct(d1Item: any): Product {
     } else {
       nameAr = name;
     }
+  } else if (!nameAr) {
+    nameAr = name;
   }
 
   // Parse raw specs if stored as string or object
@@ -641,6 +709,7 @@ function mapD1ProductToProduct(d1Item: any): Product {
     brand,
     category,
     power,
+    hp: d1Item.hp ?? specs.hp ?? baseMatch?.hp,
     area,
     length,
     width,
@@ -653,8 +722,11 @@ function mapD1ProductToProduct(d1Item: any): Product {
     updatedAt,
     image,
     image_url: image,
+    additionalImages: d1Item.additionalImages || specs.additionalImages || baseMatch?.additionalImages,
     supplierId,
     datasheetUrl,
+    description,
+    notes,
     specs,
     suppliers,
     max_pv_open_circuit_voltage_v: d1Item.max_pv_open_circuit_voltage_v !== undefined && d1Item.max_pv_open_circuit_voltage_v !== null && d1Item.max_pv_open_circuit_voltage_v !== '' ? Number(d1Item.max_pv_open_circuit_voltage_v) : undefined,
@@ -666,25 +738,49 @@ function mapD1ProductToProduct(d1Item: any): Product {
  * Maps frontend Product data to Cloudflare D1 Product payload.
  */
 function mapProductToD1Payload(product: Partial<Product> & { product_id?: string }): Record<string, any> {
-  const payload: Record<string, any> = {};
+  const payload: Record<string, any> = {
+    _isEdited: true
+  };
 
   if (product.product_id) payload.product_id = product.product_id;
   if (product.name) {
     payload.name = product.name;
     payload.model = product.name;
   }
-  if (product.nameAr) payload.nameAr = product.nameAr;
+  if (product.nameAr) {
+    payload.nameAr = product.nameAr;
+    payload.name_ar = product.nameAr;
+  }
   if (product.brand) payload.brand = product.brand;
-  if (product.category) payload.product_category = mapCategoryToD1Category(product.category);
-  if (product.power !== undefined) payload.power_w = Number(product.power);
-  if (product.price !== undefined) payload.price_egp = Number(product.price);
-  if (product.efficiency !== undefined) payload.efficiency_percent = Number(product.efficiency);
-  if (product.warranty !== undefined) payload.warranty_years = Number(product.warranty);
+  if (product.category) {
+    payload.product_category = mapCategoryToD1Category(product.category);
+    payload.category = product.category;
+  }
+  if (product.power !== undefined) {
+    payload.power_w = Number(product.power);
+    payload.power = Number(product.power);
+  }
+  if (product.hp !== undefined) {
+    payload.hp = product.hp;
+  }
+  if (product.price !== undefined) {
+    payload.price_egp = Number(product.price);
+    payload.price = Number(product.price);
+  }
+  if (product.efficiency !== undefined) {
+    payload.efficiency_percent = Number(product.efficiency);
+    payload.efficiency = Number(product.efficiency);
+  }
+  if (product.warranty !== undefined) {
+    payload.warranty_years = Number(product.warranty);
+    payload.warranty = Number(product.warranty);
+  }
   if (product.area !== undefined) payload.area = Number(product.area);
   if (product.length !== undefined) payload.length = Number(product.length);
   if (product.width !== undefined) payload.width = Number(product.width);
   if (product.thickness !== undefined) payload.thickness = Number(product.thickness);
   if (product.dimensionUnit !== undefined) payload.dimensionUnit = product.dimensionUnit;
+  if (product.additionalImages !== undefined) payload.additionalImages = product.additionalImages;
 
   // Format dimensions_mm for D1 database column
   const lengthVal = product.length ?? product.specs?.length;
@@ -810,12 +906,20 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
 export const getProducts = async (): Promise<Product[]> => {
   const deletedSet = getDeletedProductIds();
   try {
-    const data = await requestProductsApi<{ success?: boolean; ok?: boolean; products: any[] }>('/products');
+    const data = await requestProductsApi<{ success?: boolean; ok?: boolean; d1_count?: number; deleted_ids?: string[]; products: any[] }>('/products');
+    if (data && Array.isArray(data.deleted_ids)) {
+      for (const delId of data.deleted_ids) {
+        const dStr = String(delId);
+        deletedSet.add(dStr);
+        markProductAsDeleted(dStr);
+      }
+    }
+
     if (data && Array.isArray(data.products) && data.products.length > 0) {
       let rawD1List = [...data.products];
 
-      // If calling the deployed Cloudflare Worker directly (which caps each response at 10 items), harvest all partitions
-      if (rawD1List.length <= 10 && getProductsApiBaseUrl() === CF_DIRECT_BASE_URL) {
+      // If response comes directly from the deployed Cloudflare Worker (which caps each response at 10 items), harvest all partitions
+      if (rawD1List.length <= 10 && !data.d1_count) {
         const partitions = [
           'PROD-1789',
           'PROD-1790081', 'PROD-1790082', 'PROD-1790083', 'PROD-1790085', 'PROD-1790086', 'PROD-1790087',
@@ -862,7 +966,7 @@ export const getProducts = async (): Promise<Product[]> => {
         }
       }
 
-      // Overlay locally edited products (user/admin edits take highest priority)
+      // Overlay locally edited products (confirmed edits take highest priority)
       const editedMap = getEditedProducts();
       for (const [id, editedProd] of Object.entries(editedMap)) {
         if (!deletedSet.has(id)) {
@@ -882,44 +986,10 @@ export const getProducts = async (): Promise<Product[]> => {
       return Array.from(productsMap.values());
     }
 
-    const editedMap = getEditedProducts();
-    const fallbackMap = new Map<string, Product>();
-    for (const p of productsData) {
-      const id = String(p.id);
-      if (!deletedSet.has(id)) fallbackMap.set(id, p);
-    }
-    for (const [id, editedProd] of Object.entries(editedMap)) {
-      if (!deletedSet.has(id)) {
-        const existing = fallbackMap.get(id);
-        fallbackMap.set(id, {
-          ...(existing || {}),
-          ...editedProd,
-          id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
-          specs: { ...(existing?.specs || {}), ...(editedProd.specs || {}) }
-        } as Product);
-      }
-    }
-    return Array.from(fallbackMap.values());
+    return getInitialLocalProducts();
   } catch (error) {
     console.warn('Could not fetch products from Cloudflare D1, using catalog baseline:', error);
-    const editedMap = getEditedProducts();
-    const fallbackMap = new Map<string, Product>();
-    for (const p of productsData) {
-      const id = String(p.id);
-      if (!deletedSet.has(id)) fallbackMap.set(id, p);
-    }
-    for (const [id, editedProd] of Object.entries(editedMap)) {
-      if (!deletedSet.has(id)) {
-        const existing = fallbackMap.get(id);
-        fallbackMap.set(id, {
-          ...(existing || {}),
-          ...editedProd,
-          id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
-          specs: { ...(existing?.specs || {}), ...(editedProd.specs || {}) }
-        } as Product);
-      }
-    }
-    return Array.from(fallbackMap.values());
+    return getInitialLocalProducts();
   }
 };
 
@@ -936,11 +1006,25 @@ export const getProductById = async (productId: string | number): Promise<Produc
   // Check locally edited overrides first
   const editedMap = getEditedProducts();
   if (editedMap[pId] && !getDeletedProductIds().has(pId)) {
-    return editedMap[pId];
+    const baseMatch = productsData.find(p => String(p.id) === pId);
+    return {
+      ...(baseMatch || {}),
+      ...editedMap[pId],
+      id: baseMatch ? baseMatch.id : editedMap[pId].id,
+      specs: {
+        ...(baseMatch?.specs || {}),
+        ...(editedMap[pId].specs || {})
+      }
+    } as Product;
   }
 
   try {
     const data = await requestProductsApi<{ success?: boolean; ok?: boolean; product: any; notFound?: boolean }>(`/products/${productId}`);
+    if (data && data.notFound) {
+      if (getProductsApiBaseUrl() === '/api') {
+        return null;
+      }
+    }
     if (data && data.product) {
       const prod = mapD1ProductToProduct(data.product);
       if (getDeletedProductIds().has(String(prod.id))) return null;
@@ -1010,13 +1094,13 @@ export const matchCatalogInverters = async (
 export const subscribeToProducts = (callback: (products: Product[]) => void): (() => void) => {
   let isSubscribed = true;
 
-  // Immediate synchronous invocation with filtered baseline products so the UI never starts empty or with deleted items
-  const initial = filterDeletedProducts(productsData);
+  // Immediate synchronous invocation with filtered baseline + local edits so the UI never starts stale or with deleted items
+  const initial = getInitialLocalProducts();
   if (initial && initial.length > 0) {
     callback(initial);
   }
 
-  // Initial load from Cloudflare D1
+  // Initial load from Cloudflare D1 / Backend API
   getProducts().then(products => {
     if (isSubscribed && products) {
       callback(products);
@@ -1024,7 +1108,7 @@ export const subscribeToProducts = (callback: (products: Product[]) => void): ((
   }).catch(error => {
     console.warn('Cloudflare D1 Products Initial Load Notice:', error);
     if (isSubscribed) {
-      callback(filterDeletedProducts(productsData));
+      callback(getInitialLocalProducts());
     }
   });
 
@@ -1045,114 +1129,82 @@ export const subscribeToProducts = (callback: (products: Product[]) => void): ((
 
 /**
  * Add a new product to Cloudflare D1 via Worker API (POST /products).
- * Uses product_id as the D1 identifier and returns product_id upon success.
+ * Uses product_id as the D1 identifier and returns product_id upon confirmed database save.
  */
 export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | number }): Promise<string> => {
-  try {
-    // Generate a unique product_id for Cloudflare D1 if not provided
-    const newProductId = (product.id ? String(product.id) : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`).toUpperCase();
-    unmarkProductAsDeleted(newProductId);
-    const payload = {
-      ...mapProductToD1Payload(product),
-      product_id: newProductId
-    };
+  const newProductId = (product.id ? String(product.id) : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`).toUpperCase();
+  const payload = {
+    ...mapProductToD1Payload(product),
+    product_id: newProductId
+  };
 
-    const res = await requestProductsApi<{ success: boolean; message?: string; product_id?: string }>('/products', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
+  const res = await requestProductsApi<{ success?: boolean; ok?: boolean; message?: string; product_id?: string }>('/products', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
 
-    const createdId = res.product_id || newProductId;
-    unmarkProductAsDeleted(createdId);
-    // Notify active subscribers
-    await notifyProductListeners();
-    return createdId;
-  } catch (error) {
-    console.error('Failed to add product to Cloudflare D1:', error);
-    throw error;
-  }
+  const createdId = res.product_id || newProductId;
+  unmarkProductAsDeleted(createdId);
+  saveEditedProduct(createdId, { ...product, id: createdId });
+  await notifyProductListeners();
+  return createdId;
 };
 
 /**
- * Update an existing product in Cloudflare D1 and local storage.
- * Guarantees that any edited product (whether baseline or custom) immediately reflects in the UI
- * and survives page refreshes and API delays.
+ * Update an existing product in Cloudflare D1 via Worker API (PUT /products/:id).
+ * Strictly verifies that the API operation succeeded before persisting local state or reporting success.
  */
 export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
   const pId = String(productId);
+  const payload = mapProductToD1Payload(data);
+  payload.product_id = pId;
+  payload.updated_at = new Date().toISOString();
 
   try {
-    unmarkProductAsDeleted(pId);
-
-    // 1. Immediately persist full product to local edited overrides
-    saveEditedProduct(pId, data);
-
-    // 2. Map fields for Cloudflare D1 / backend API payload
-    const payload = mapProductToD1Payload(data);
-    payload.product_id = pId;
-    payload.updated_at = new Date().toISOString();
-
-    // 3. Update backend API / Cloudflare D1: Try PUT first
-    try {
-      const putRes = await requestProductsApi<{ success?: boolean; notFound?: boolean; error?: string }>(
-        `/products/${encodeURIComponent(pId)}`,
-        {
-          method: 'PUT',
-          body: JSON.stringify(payload)
-        }
-      );
-
-      // If PUT returned 404 (e.g., baseline product not yet inserted into D1), upsert via POST
-      if (putRes && putRes.notFound) {
-        await requestProductsApi<{ success?: boolean }>(`/products`, {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
+    await requestProductsApi<{ success?: boolean; ok?: boolean; error?: string }>(
+      `/products/${encodeURIComponent(pId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload)
       }
-    } catch (putErr) {
-      console.warn(`Backend PUT /products/${pId} notice:`, putErr);
-      // Fallback: try POST /products if PUT errored (e.g. baseline product creation)
-      try {
-        await requestProductsApi<{ success?: boolean }>(`/products`, {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
-      } catch (postErr) {
-        console.warn(`Backend POST fallback notice for product ${pId}:`, postErr);
-      }
+    );
+  } catch (putErr: any) {
+    // Only fallback to POST /products if PUT returned 404 specifically because a baseline product row is not yet in D1
+    // (NOT when the PUT endpoint route itself is missing on the Worker, which returns code === 'NOT_FOUND' / 'المسار غير موجود.')
+    const isRouteMissing = putErr?.code === 'NOT_FOUND' || String(putErr?.detail || '').includes('المسار غير موجود');
+    if (putErr?.status === 404 && !isRouteMissing) {
+      await requestProductsApi<{ success?: boolean; ok?: boolean }>(`/products`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    } else {
+      throw putErr;
     }
-
-    // 4. Notify all active listeners so UI components immediately re-render with the updated product
-    await notifyProductListeners();
-  } catch (error) {
-    console.error(`Failed to update product ${productId}:`, error);
-    // Ensure subscribers are still updated with the local override
-    await notifyProductListeners();
   }
+
+  // Persist locally and notify listeners ONLY after backend API confirms success
+  unmarkProductAsDeleted(pId);
+  saveEditedProduct(pId, data);
+  await notifyProductListeners();
 };
 
 /**
  * Delete a product from Cloudflare D1 via Worker API (DELETE /products/:id).
- * Guaranteed persistent removal across reloads and catalog updates.
+ * Strictly verifies that the API operation succeeded before removing the product or reporting success.
  */
 export const deleteProduct = async (productId: string | number): Promise<void> => {
   const pId = String(productId);
 
-  // 1. Mark as permanently deleted in persistent client storage first
+  await requestProductsApi<{ success?: boolean; ok?: boolean; message?: string }>(
+    `/products/${encodeURIComponent(pId)}`,
+    {
+      method: 'DELETE'
+    }
+  );
+
+  // Mark as deleted and notify listeners ONLY after backend API confirms deletion
   markProductAsDeleted(pId);
   removeEditedProduct(pId);
-
-  // 2. Request deletion from Cloudflare Worker / backend API
-  try {
-    await requestProductsApi<{ success: boolean; message?: string }>(`/products/${encodeURIComponent(pId)}`, {
-      method: 'DELETE'
-    });
-  } catch (error) {
-    // Non-blocking log: even if live worker returns 404 or fails, product is permanently excluded locally
-    console.warn(`Products API deletion notice for ${productId}:`, error);
-  }
-
-  // 3. Immediately notify all active product subscribers with filtered products
   await notifyProductListeners();
 };
 

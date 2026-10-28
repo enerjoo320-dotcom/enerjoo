@@ -137,9 +137,14 @@ export default {
       }
 
       // ----------------------------------------------------------------------
-      // /products (Preserved existing endpoint)
+      // /products & /api/products (Preserved existing endpoint)
       // ----------------------------------------------------------------------
-      if (path === '/products' || path.startsWith('/products/')) {
+      if (
+        path === '/products' ||
+        path.startsWith('/products/') ||
+        path === '/api/products' ||
+        path.startsWith('/api/products/')
+      ) {
         return await handleProducts(request, env, path, method);
       }
 
@@ -322,8 +327,9 @@ ${consultantResult.reply}
 // 1. /products Handler (Preserved Existing Implementation)
 // ============================================================================
 async function handleProducts(request: Request, env: Env, path: string, method: string): Promise<Response> {
-  const parts = path.split('/').filter(Boolean);
-  const productId = parts[1]; // /products/:id
+  const cleanPath = path.replace(/^\/api/, '');
+  const parts = cleanPath.split('/').filter(Boolean);
+  const productId = parts[1] ? decodeURIComponent(parts[1]) : undefined; // /products/:id
 
   if (method === 'GET') {
     if (productId) {

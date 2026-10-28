@@ -31,7 +31,8 @@ import {
   addProduct,
   updateProduct,
   deleteProduct,
-  toggleSupplierVerification
+  toggleSupplierVerification,
+  getInitialLocalProducts
 } from './services/firestoreService';
 import { 
   getInitialExchangePrices, 
@@ -69,7 +70,7 @@ export default function App() {
   const [view, setView] = useState<ViewType>(initialNav.view);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [exchangePrices, setExchangePrices] = useState<Record<string, number>>(getInitialExchangePrices);
-  const [rawProducts, setRawProducts] = useState<Product[]>(productsData);
+  const [rawProducts, setRawProducts] = useState<Product[]>(getInitialLocalProducts);
   const setProducts = setRawProducts;
   const products = useMemo(() => {
     return applySolarPanelPricingToProducts(rawProducts, exchangePrices);
@@ -112,6 +113,7 @@ export default function App() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeletingProduct, setIsDeletingProduct] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [adminSearch, setAdminSearch] = useState('');
   const [adminFilterId, setAdminFilterId] = useState<string | number | null>(null);
   const [supplierFilterId, setSupplierFilterId] = useState<string | number | null>(initialNav.supplierFilterId || null);
@@ -450,11 +452,13 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize selected product if exchange price updates in real time
+  // Synchronize selected product if any product fields or exchange prices update in real time, or clear if deleted
   useEffect(() => {
     if (selectedProduct && products.length > 0) {
       const updated = products.find(p => p.id.toString() === selectedProduct.id.toString());
-      if (updated && (updated.price !== selectedProduct.price || updated.pricePerWatt !== selectedProduct.pricePerWatt)) {
+      if (!updated) {
+        setSelectedProduct(null);
+      } else if (updated !== selectedProduct) {
         setSelectedProduct(updated);
       }
     }
@@ -614,14 +618,14 @@ export default function App() {
             ...(productData.specs || {})
           }
         };
-        // Optimistically update products state immediately
+        // Wait for confirmed database update before updating UI state or navigating away
+        await updateProduct(prodId, mergedProduct);
         setProducts(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
         setCompareList(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
         setWishlist(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
         if (selectedProduct && selectedProduct.id.toString() === prodId) {
           setSelectedProduct(mergedProduct);
         }
-        await updateProduct(prodId, mergedProduct);
         setEditingProduct(null);
       } else {
         const newId = await addProduct(productData);
@@ -658,7 +662,9 @@ export default function App() {
     const pId = productToDelete.id.toString();
     try {
       setIsDeletingProduct(true);
-      // Optimistically remove from state, compareList, and wishlist immediately
+      setDeleteError(null);
+      // Wait for confirmed database deletion before removing from UI state
+      await deleteProduct(pId);
       setProducts(prev => prev.filter(p => p.id.toString() !== pId));
       setCompareList(prev => prev.filter(p => p.id.toString() !== pId));
       setWishlist(prev => prev.filter(p => p.id.toString() !== pId));
@@ -667,12 +673,12 @@ export default function App() {
         navigateBack('home');
       }
       setProductToDelete(null);
-      await deleteProduct(pId);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete product:', err);
+      const errMsg = (err instanceof Error && err.message) ? err.message : (isAr ? 'تعذر حذف المنتج من قاعدة البيانات.' : 'Failed to delete product from database.');
+      setDeleteError(errMsg);
     } finally {
       setIsDeletingProduct(false);
-      setProductToDelete(null);
     }
   };
 
@@ -1076,14 +1082,10 @@ export default function App() {
             suppliers={suppliers}
             onDelete={async (id) => {
               const pId = id.toString();
+              await deleteProduct(pId);
               setProducts(prev => prev.filter(p => p.id.toString() !== pId));
               setCompareList(prev => prev.filter(p => p.id.toString() !== pId));
               setWishlist(prev => prev.filter(p => p.id.toString() !== pId));
-              try {
-                await deleteProduct(pId);
-              } catch (e) {
-                console.error('Failed to delete product from SupplierDashboard:', e);
-              }
             }}
             onEdit={(p) => { setEditingProduct(p); navigateToView('add'); }}
             adminSearch={adminSearch}
@@ -1279,7 +1281,7 @@ export default function App() {
                   <AlertTriangle size={24} />
                 </div>
                 <button 
-                  onClick={() => setProductToDelete(null)}
+                  onClick={() => { setProductToDelete(null); setDeleteError(null); }}
                   disabled={isDeletingProduct}
                   className="p-2 text-solar-muted hover:text-solar-text rounded-xl transition cursor-pointer"
                 >
@@ -1291,16 +1293,22 @@ export default function App() {
                 {isAr ? 'تأكيد حذف المنتج' : 'Confirm Delete Product'}
               </h3>
               
-              <p className="text-solar-muted text-sm leading-relaxed mb-6 font-medium">
+              <p className="text-solar-muted text-sm leading-relaxed mb-4 font-medium">
                 {isAr 
                   ? `هل أنت متأكد من رغبتك في حذف "${productToDelete.nameAr || productToDelete.name}" نهائياً من منصة Enerjoo؟ لا يمكن التراجع عن هذا الإجراء.`
                   : `Are you sure you want to permanently delete "${productToDelete.name}" from Enerjoo? This action cannot be undone.`
                 }
               </p>
 
+              {deleteError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold leading-relaxed">
+                  {deleteError}
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setProductToDelete(null)}
+                  onClick={() => { setProductToDelete(null); setDeleteError(null); }}
                   disabled={isDeletingProduct}
                   className="flex-1 py-3 px-4 rounded-xl border border-solar-border text-solar-text font-bold text-sm hover:bg-solar-light transition cursor-pointer"
                 >

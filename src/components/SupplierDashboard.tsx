@@ -40,15 +40,19 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleConfirmDelete = async () => {
     if (!productToDelete) return;
     try {
       setIsDeleting(true);
+      setDeleteError(null);
       await onDelete(productToDelete.id);
       setProductToDelete(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete product:', err);
+      const errMsg = (err instanceof Error && err.message) ? err.message : (isAr ? 'تعذر حذف المنتج من قاعدة البيانات.' : 'Failed to delete product from database.');
+      setDeleteError(errMsg);
     } finally {
       setIsDeleting(false);
     }
@@ -396,7 +400,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
               className="bg-solar-card w-full max-w-md rounded-3xl p-6 sm:p-8 border border-solar-border shadow-2xl relative text-left"
             >
               <button 
-                onClick={() => !isDeleting && setProductToDelete(null)}
+                onClick={() => { if (!isDeleting) { setProductToDelete(null); setDeleteError(null); } }}
                 className="absolute top-5 right-5 p-2 rounded-xl text-solar-muted hover:text-solar-text hover:bg-solar-bg transition"
                 aria-label="Close"
               >
@@ -418,7 +422,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
               </p>
 
               {/* Product Info Preview */}
-              <div className="flex items-center gap-3 p-3 bg-solar-bg rounded-2xl border border-solar-border mb-6">
+              <div className="flex items-center gap-3 p-3 bg-solar-bg rounded-2xl border border-solar-border mb-4">
                 <div className="w-12 h-12 rounded-xl bg-white overflow-hidden border border-solar-border shrink-0">
                   <img src={productToDelete.image} alt={productToDelete.name} className="w-full h-full object-cover" />
                 </div>
@@ -432,11 +436,17 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
                 </div>
               </div>
 
+              {deleteError && (
+                <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold leading-relaxed">
+                  {deleteError}
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   disabled={isDeleting}
-                  onClick={() => setProductToDelete(null)}
+                  onClick={() => { setProductToDelete(null); setDeleteError(null); }}
                   className="flex-1 py-3 px-4 rounded-xl border border-solar-border text-solar-text font-bold text-sm hover:bg-solar-bg transition active:scale-95 disabled:opacity-50"
                 >
                   {isAr ? 'إلغاء' : 'Cancel'}

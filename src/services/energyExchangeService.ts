@@ -89,6 +89,24 @@ export function applySolarPanelPricing(
     return product;
   }
 
+  // If the admin explicitly edited/overrode this panel's price, preserve the custom price
+  const customPrice = Number(product.specs?.customPrice ?? (product as any).customPrice ?? 0);
+  if (customPrice > 0) {
+    const updatedSuppliers = (product.suppliers && product.suppliers.length > 0)
+      ? product.suppliers.map(s => ({
+          ...s,
+          price: customPrice
+        }))
+      : product.suppliers;
+    return {
+      ...product,
+      price: customPrice,
+      pricePerWatt,
+      exchangeBrand: matchedBrand,
+      suppliers: updatedSuppliers
+    };
+  }
+
   const wattage = getSolarPanelWattage(product);
   if (wattage <= 0) {
     return {

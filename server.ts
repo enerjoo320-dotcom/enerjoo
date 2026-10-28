@@ -1081,15 +1081,36 @@ async function startServer() {
     const normCat = normalizeCategoryKey(rawCat);
     const titleCat = formatCategoryTitle(normCat);
 
-    const ratedKw = Number(p.rated_power_kw ?? p.specs?.ratedPowerKw ?? 0);
+    let parsedSpecs: Record<string, any> = {};
+    if (typeof p.specs === 'string') {
+      try {
+        parsedSpecs = JSON.parse(p.specs);
+      } catch {
+        parsedSpecs = {};
+      }
+    } else if (p.specs && typeof p.specs === 'object' && !Array.isArray(p.specs)) {
+      parsedSpecs = p.specs;
+    }
+
+    let parsedSuppliers: any = p.suppliers;
+    if (typeof parsedSuppliers === 'string') {
+      try {
+        parsedSuppliers = JSON.parse(parsedSuppliers);
+      } catch {
+        parsedSuppliers = undefined;
+      }
+    }
+
+    const ratedKw = Number(p.rated_power_kw ?? parsedSpecs.ratedPowerKw ?? 0);
     let power = Number(p.power ?? p.power_w ?? (baseMatch ? baseMatch.power : 0));
     if ((!power || isNaN(power)) && ratedKw > 0) {
       power = ratedKw <= 200 ? ratedKw * 1000 : ratedKw;
     }
 
+    const isEdited = editedProductsMap.has(id) || Boolean(p._isEdited);
     let price = Number(p.price ?? p.price_egp ?? (baseMatch ? baseMatch.price : 0));
     // Fix D1 shorthand thousands entry ONLY when not explicitly set by user
-    if (normCat === 'inverters' && price > 0 && price < 500 && !p.price && !p.price_egp) {
+    if (normCat === 'inverters' && price > 0 && price < 500 && !isEdited && !p.price) {
       price = baseMatch?.price && baseMatch.price >= 1000 ? baseMatch.price : price * 1000;
     }
 
@@ -1101,16 +1122,27 @@ async function startServer() {
     const kwDisplay = ratedKw > 0 ? ratedKw : (power >= 1000 ? power / 1000 : 0);
 
     // Disambiguate generic Felicity / Eastman model strings in D1 using rated power
-    if (brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
+    if (!isEdited && brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
       rawModel = `Felicity Off-Grid Inverter ${kwDisplay}kW`;
-    } else if (brand === 'Eastman' && /^inverter\b/i.test(rawModel) && kwDisplay > 0) {
+    } else if (!isEdited && brand === 'Eastman' && /^inverter\b/i.test(rawModel) && kwDisplay > 0) {
       rawModel = `Eastman Off-Grid Inverter ${kwDisplay}kW`;
     }
 
-    // Explicit user edits take precedence over baseline catalog name
-    const name = (p.name && p.name !== baseMatch?.name ? p.name : null) || (p.model && p.model !== (baseMatch as any)?.model ? p.model : null) || p.name || p.model || baseMatch?.name || rawModel;
-    let nameAr = p.nameAr || p.name_ar || (p.name && p.name !== baseMatch?.name ? p.name : '') || baseMatch?.nameAr || '';
-    if (!nameAr || nameAr === rawModel || nameAr === p.model) {
+    const hasExplicitName = Boolean(
+      isEdited ||
+      (p.name && p.name !== baseMatch?.name) ||
+      (p.nameAr && p.nameAr !== baseMatch?.nameAr) ||
+      (p.name_ar && p.name_ar !== baseMatch?.nameAr)
+    );
+
+    const name = hasExplicitName
+      ? (p.name || p.nameAr || p.model || baseMatch?.name || rawModel)
+      : (baseMatch?.name || p.name || rawModel);
+    let nameAr = hasExplicitName
+      ? (p.nameAr || p.name_ar || p.name || baseMatch?.nameAr || '')
+      : (p.nameAr || p.name_ar || baseMatch?.nameAr || '');
+
+    if (!nameAr || (!hasExplicitName && (nameAr === rawModel || nameAr === p.model))) {
       if (brand === 'Huawei' && kwDisplay > 0) {
         nameAr = `إنفرتر هواوي ${kwDisplay} كيلو وات On-Grid ثلاثي الأطوار (${rawModel.replace(/^Huawei\s*/i, '')})`;
       } else if (brand === 'Felicity' && kwDisplay > 0) {
@@ -1131,17 +1163,21 @@ async function startServer() {
     const image = p.image || p.image_url || baseMatch?.image || resolveDefaultProductImage(normCat, brand, name);
     const availability = p.availability || (p.status === 'out_of_stock' ? 'Out of Stock' : p.status === 'limited' ? 'Limited' : 'Available');
     const status = p.status || (availability.toLowerCase().includes('out') ? 'out_of_stock' : availability.toLowerCase().includes('limit') ? 'limited' : 'available');
-    const notes = p.notes || p.description || baseMatch?.notes || nameAr;
+    const notes = p.notes || p.description || parsedSpecs.notes || parsedSpecs.description || baseMatch?.notes || nameAr;
     const specs = {
       ...(baseMatch?.specs || {}),
-      ...(p.specs || {}),
-      productType: p.product_type || p.specs?.productType || baseMatch?.specs?.productType || '',
-      technology: p.technology || p.specs?.technology || baseMatch?.specs?.technology || '',
+      ...parsedSpecs,
+      productType: p.product_type || parsedSpecs.productType || parsedSpecs.type || baseMatch?.specs?.productType || '',
+      technology: p.technology || parsedSpecs.technology || baseMatch?.specs?.technology || '',
       ratedPowerKw: ratedKw || (normCat === 'inverters' && power >= 1000 ? power / 1000 : power / 1000),
-      vmpV: p.vmp_v ?? p.specs?.vmpV ?? baseMatch?.specs?.vmpV,
-      impA: p.imp_a ?? p.specs?.impA ?? baseMatch?.specs?.impA,
-      acVoltageV: p.ac_voltage_v ?? p.specs?.acVoltageV ?? baseMatch?.specs?.acVoltageV
+      vmpV: p.vmp_v ?? parsedSpecs.vmpV ?? baseMatch?.specs?.vmpV,
+      impA: p.imp_a ?? parsedSpecs.impA ?? baseMatch?.specs?.impA,
+      acVoltageV: p.ac_voltage_v ?? parsedSpecs.acVoltageV ?? baseMatch?.specs?.acVoltageV
     };
+
+    const suppliers = Array.isArray(parsedSuppliers) && parsedSuppliers.length > 0
+      ? parsedSuppliers
+      : (baseMatch?.suppliers || []);
 
     return {
       ...p,
@@ -1169,6 +1205,8 @@ async function startServer() {
       notes,
       description: notes,
       specs,
+      suppliers,
+      _isEdited: isEdited,
       source: p._fromD1 ? 'd1' : (baseMatch ? 'catalog' : 'd1')
     };
   }
@@ -1220,8 +1258,9 @@ async function startServer() {
           const prods = Array.isArray(d.products) ? d.products : [];
           for (const item of prods) {
             const id = String(item.product_id || item.id || '');
-            if (id) {
-              discovered.set(id, { ...item, _fromD1: true });
+            if (id && !deletedProductIds.has(id)) {
+              const edited = editedProductsMap.get(id);
+              discovered.set(id, { ...item, ...(edited || {}), _fromD1: true });
             }
           }
           // If a prefix partition hits the Worker's 10-item cap, subdivide by digits 0-9
@@ -1553,6 +1592,7 @@ ${urls.join("\n")}
         count: mergedProducts.length,
         total: totalCount,
         d1_count: liveD1ProductsCache.size,
+        deleted_ids: Array.from(deletedProductIds),
         products: mergedProducts
       });
     } catch (err: any) {
@@ -1563,6 +1603,7 @@ ${urls.join("\n")}
         ok: true,
         count: activeFiltered.length,
         total: activeFiltered.length,
+        deleted_ids: Array.from(deletedProductIds),
         products: activeFiltered
       });
     }
@@ -1625,12 +1666,13 @@ ${urls.join("\n")}
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
     const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
     const URL_KEYS = new Set(["image_url", "image", "datasheet_url", "datasheetUrl"]);
+    const JSON_STRUCT_KEYS = new Set(["specs", "suppliers", "additionalImages"]);
     const clean: Record<string, any> = {};
 
     for (const [key, val] of Object.entries(raw)) {
       if (DANGEROUS_KEYS.has(key)) continue;
       if (typeof val === "string") {
-        let str = val.trim().slice(0, 4000);
+        let str = val.trim().slice(0, 12000);
         // Strip script tags and inline event handlers
         str = str
           .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
@@ -1640,7 +1682,22 @@ ${urls.join("\n")}
             str = "";
           }
         }
-        clean[key] = str;
+        // Automatically parse JSON-stringified specs / suppliers / additionalImages sent by mapProductToD1Payload
+        if (JSON_STRUCT_KEYS.has(key) && (str.startsWith("{") || str.startsWith("["))) {
+          try {
+            const parsed = JSON.parse(str);
+            if (Array.isArray(parsed)) {
+              clean[key] = parsed.slice(0, 50);
+              continue;
+            } else if (parsed && typeof parsed === "object") {
+              clean[key] = sanitizeProductPayload(parsed);
+              continue;
+            }
+          } catch {
+            // Keep string if not valid JSON
+          }
+        }
+        clean[key] = str.slice(0, 4000);
       } else if (typeof val === "number") {
         clean[key] = Number.isFinite(val) ? val : 0;
       } else if (typeof val === "boolean" || val === null) {

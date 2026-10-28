@@ -663,13 +663,17 @@ export const ProductForm: React.FC<{
         effectivePower = parseInt(formData.power) || (formData.powerKw ? Math.round(parseFloat(formData.powerKw) * 1000) : initialData?.power || 0);
       }
 
+      const parsedPrice = parseInt(formData.price) || (initialData?.price ?? 0);
+      const isPriceManuallySet = parsedPrice > 0 && (!initialData || parsedPrice !== initialData.price || Boolean(initialData.specs?.customPrice));
+
       const newProduct: any = {
         ...(initialData || {}),
         name: formData.name,
         nameAr: formData.name,
         brand: formData.brand,
         category: formData.category as any,
-        price: parseInt(formData.price) || (initialData?.price ?? 0),
+        price: parsedPrice,
+        customPrice: isPriceManuallySet ? parsedPrice : undefined,
         power: effectivePower,
         hp: cleanHp,
         efficiency: parseFloat(formData.efficiency) || (initialData?.efficiency ?? 0),
@@ -692,6 +696,7 @@ export const ProductForm: React.FC<{
         notes: formData.description,
         specs: {
           ...(initialData?.specs || {}),
+          customPrice: isPriceManuallySet ? parsedPrice : undefined,
           description: formData.description,
           notes: formData.description,
           power: effectivePower,
