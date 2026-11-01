@@ -2575,7 +2575,11 @@ ${urls.join("\n")}
       if (!isEnergyExchangeAdminAuthorized(req, callerEmail)) {
         return res.status(403).json({
           success: false,
-          error: "Forbidden: Only authorized Enerjoo administrators can modify Energy Exchange prices."
+          ok: false,
+          error: {
+            code: "FORBIDDEN",
+            message: "عذراً، تعديل أسعار بورصة الطاقة مخصص للمسؤولين المعتمدين فقط."
+          }
         });
       }
 
@@ -2583,7 +2587,11 @@ ${urls.join("\n")}
       if (!Number.isFinite(rawPrice) || rawPrice <= 0 || rawPrice > 200) {
         return res.status(400).json({
           success: false,
-          error: "Invalid price per watt. Must be a valid positive number between 0 and 200."
+          ok: false,
+          error: {
+            code: "INVALID_PRICE",
+            message: "يرجى إدخال سعر صحيح أكبر من الصفر وأقل من 200 جنيه/وات."
+          }
         });
       }
 
@@ -2663,7 +2671,11 @@ ${urls.join("\n")}
       if (!isEnergyExchangeAdminAuthorized(req, callerEmail)) {
         return res.status(403).json({
           success: false,
-          error: "Forbidden: Only authorized Enerjoo administrators can modify Energy Exchange prices."
+          ok: false,
+          error: {
+            code: "FORBIDDEN",
+            message: "عذراً، تعديل أسعار بورصة الطاقة مخصص للمسؤولين المعتمدين فقط."
+          }
         });
       }
 
@@ -2674,7 +2686,11 @@ ${urls.join("\n")}
         if (!Number.isFinite(rawPrice) || rawPrice <= 0 || rawPrice > 200) {
           return res.status(400).json({
             success: false,
-            error: "Invalid price per watt. Must be a valid positive number between 0 and 200."
+            ok: false,
+            error: {
+              code: "INVALID_PRICE",
+              message: "يرجى إدخال سعر صحيح أكبر من الصفر وأقل من 200 جنيه/وات."
+            }
           });
         }
         const roundedPrice = parseFloat(rawPrice.toFixed(2));

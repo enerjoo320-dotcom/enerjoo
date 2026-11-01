@@ -20,22 +20,6 @@
       "destination": "https://fiyg.app.n8n.cloud/webhook/enerjoo-chat"
     },
     {
-      "source": "/api/energy-exchange/prices/:path*",
-      "destination": "https://enerjoo-api.enerjoo320.workers.dev/energy-exchange/prices/:path*"
-    },
-    {
-      "source": "/api/energy-exchange/prices",
-      "destination": "https://enerjoo-api.enerjoo320.workers.dev/energy-exchange/prices"
-    },
-    {
-      "source": "/api/energy-exchange/:path*",
-      "destination": "https://enerjoo-api.enerjoo320.workers.dev/energy-exchange/:path*"
-    },
-    {
-      "source": "/api/energy-exchange",
-      "destination": "https://enerjoo-api.enerjoo320.workers.dev/energy-exchange"
-    },
-    {
       "source": "/api/products/:path*",
       "destination": "https://enerjoo-api.enerjoo320.workers.dev/products/:path*"
     },
