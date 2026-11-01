@@ -197,6 +197,18 @@ export default {
         return await handleProductReviews(request, env, path, method);
       }
 
+      // ----------------------------------------------------------------------
+      // /energy-exchange & /energy-exchange/prices (Centralized Energy Exchange Prices)
+      // ----------------------------------------------------------------------
+      if (
+        path === '/energy-exchange' ||
+        path.startsWith('/energy-exchange/') ||
+        path === '/api/energy-exchange' ||
+        path.startsWith('/api/energy-exchange/')
+      ) {
+        return await handleEnergyExchange(request, env, path, method);
+      }
+
       // Endpoint Not Found
       return errorJson('Endpoint not found', 404, request);
     } catch (err: any) {
@@ -1658,4 +1670,271 @@ async function handleProductReviews(request: Request, env: Env, path: string, me
   }
 
   return errorJson(`Method ${method} not allowed for /reviews`, 405, request);
+}
+
+// ============================================================================
+// 8. /energy-exchange Handler (Cloudflare D1 Single Source of Truth)
+// ============================================================================
+const DEFAULT_EXCHANGE_RECORDS = [
+  { price_id: 'PRICE_PANEL_JINKO', category: 'panels', brand: 'Jinko', product_type: 'Solar Panel', price_per_watt: 12.00, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_LONGI', category: 'panels', brand: 'LONGi Solar', product_type: 'Solar Panel', price_per_watt: 12.20, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_AIKO', category: 'panels', brand: 'AIKO', product_type: 'Solar Panel', price_per_watt: 12.50, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_TRINA', category: 'panels', brand: 'Trina Solar', product_type: 'Solar Panel', price_per_watt: 11.90, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_JA_SOLAR', category: 'panels', brand: 'JA Solar', product_type: 'Solar Panel', price_per_watt: 11.95, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_RISEN', category: 'panels', brand: 'Risen', product_type: 'Solar Panel', price_per_watt: 11.80, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_GCL', category: 'panels', brand: 'GCL', product_type: 'Solar Panel', price_per_watt: 11.75, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_SUNTECH', category: 'panels', brand: 'Suntech', product_type: 'Solar Panel', price_per_watt: 11.85, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_ASTRONERGY', category: 'panels', brand: 'Astronergy', product_type: 'Solar Panel', price_per_watt: 11.90, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_GOKIN', category: 'panels', brand: 'Gokin', product_type: 'Solar Panel', price_per_watt: 11.70, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_QUANTUM', category: 'panels', brand: 'Quantum Solar', product_type: 'Solar Panel', price_per_watt: 11.80, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_ULICA', category: 'panels', brand: 'Ulica Solar', product_type: 'Solar Panel', price_per_watt: 11.75, currency: 'EGP' },
+  { price_id: 'PRICE_PANEL_ZNSHINE', category: 'panels', brand: 'ZNShine Solar', product_type: 'Solar Panel', price_per_watt: 11.80, currency: 'EGP' },
+];
+
+function normalizeBrandToPriceId(brand: string): string {
+  const clean = brand.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  return `PRICE_PANEL_${clean}`;
+}
+
+async function ensureEnergyExchangeTable(db: D1Database): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS energy_exchange_prices (
+      price_id TEXT PRIMARY KEY,
+      category TEXT NOT NULL DEFAULT 'panels',
+      brand TEXT NOT NULL,
+      product_type TEXT DEFAULT 'Solar Panel',
+      price_per_watt REAL NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'EGP',
+      effective_date TEXT DEFAULT (DATE('now')),
+      updated_at TEXT DEFAULT (DATETIME('now')),
+      updated_by TEXT DEFAULT 'system'
+    );
+  `);
+
+  try {
+    const row = await db.prepare('SELECT COUNT(*) as count FROM energy_exchange_prices').first<{ count: number }>();
+    if (!row || row.count === 0) {
+      for (const item of DEFAULT_EXCHANGE_RECORDS) {
+        await db.prepare(`
+          INSERT INTO energy_exchange_prices (
+            price_id, category, brand, product_type, price_per_watt, currency, effective_date, updated_at, updated_by
+          ) VALUES (?, ?, ?, ?, ?, ?, DATE('now'), DATETIME('now'), 'system')
+          ON CONFLICT(price_id) DO NOTHING
+        `).bind(
+          item.price_id,
+          item.category,
+          item.brand,
+          item.product_type,
+          item.price_per_watt,
+          item.currency
+        ).run();
+      }
+    }
+  } catch (seedErr) {
+    console.warn('Energy exchange initial table check notice:', seedErr);
+  }
+}
+
+async function handleEnergyExchange(request: Request, env: Env, path: string, method: string): Promise<Response> {
+  await ensureEnergyExchangeTable(env.DB);
+
+  // Normalize path: /energy-exchange/prices/:id or /api/energy-exchange/prices/:id
+  const cleanPath = path.replace(/^\/api/, '');
+  const parts = cleanPath.split('/').filter(Boolean); // ['energy-exchange', 'prices', ':id'] or ['energy-exchange', ':id']
+  let resourceId: string | undefined;
+
+  if (parts.length >= 3 && parts[1] === 'prices') {
+    resourceId = decodeURIComponent(parts[2]);
+  } else if (parts.length >= 2 && parts[1] !== 'prices') {
+    resourceId = decodeURIComponent(parts[1]);
+  }
+
+  // 1. GET (List all prices or get specific price)
+  if (method === 'GET') {
+    if (resourceId) {
+      const row = await env.DB.prepare(
+        'SELECT * FROM energy_exchange_prices WHERE price_id = ? OR brand = ? COLLATE NOCASE'
+      ).bind(resourceId, resourceId).first();
+
+      if (!row) return errorJson(`Price record not found: ${resourceId}`, 404, request);
+      return successJson({ price: row }, 200, request);
+    }
+
+    const { results } = await env.DB.prepare(
+      'SELECT * FROM energy_exchange_prices ORDER BY category, brand'
+    ).all<any>();
+
+    const pricesMap: Record<string, number> = {};
+    if (Array.isArray(results)) {
+      for (const r of results) {
+        if (r.brand && typeof r.price_per_watt === 'number') {
+          pricesMap[r.brand] = r.price_per_watt;
+        }
+      }
+    }
+
+    return json({
+      success: true,
+      ok: true,
+      count: results.length,
+      prices: pricesMap,
+      data: results
+    }, 200, request);
+  }
+
+  // 2. PUT (Update specific price by ID or brand)
+  if (method === 'PUT') {
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return errorJson('Invalid JSON payload in request body', 400, request);
+    }
+
+    const targetId = resourceId || body.price_id || body.brand;
+    if (!targetId) {
+      return errorJson('Price ID or Brand required for update', 400, request);
+    }
+
+    const pricePerWatt = Number(body.price_per_watt ?? body.pricePerWatt);
+    if (!Number.isFinite(pricePerWatt) || pricePerWatt <= 0 || pricePerWatt > 200) {
+      return errorJson('Invalid price_per_watt. Must be a valid positive number between 0 and 200.', 400, request);
+    }
+
+    const roundedPrice = parseFloat(pricePerWatt.toFixed(2));
+    const updatedBy = body.updated_by || body.adminEmail || 'admin';
+    const nowIso = new Date().toISOString();
+
+    // Check if record exists
+    const existing = await env.DB.prepare(
+      'SELECT * FROM energy_exchange_prices WHERE price_id = ? OR brand = ? COLLATE NOCASE'
+    ).bind(targetId, targetId).first<any>();
+
+    let finalPriceId = existing?.price_id;
+    const finalBrand = existing?.brand || body.brand || targetId;
+
+    if (existing) {
+      await env.DB.prepare(`
+        UPDATE energy_exchange_prices SET
+          price_per_watt = ?,
+          effective_date = DATE('now'),
+          updated_at = datetime('now'),
+          updated_by = ?
+        WHERE price_id = ?
+      `).bind(roundedPrice, updatedBy, existing.price_id).run();
+    } else {
+      // Upsert new record with deterministic price_id
+      finalPriceId = body.price_id || normalizeBrandToPriceId(finalBrand);
+      await env.DB.prepare(`
+        INSERT INTO energy_exchange_prices (
+          price_id, category, brand, product_type, price_per_watt, currency, effective_date, updated_at, updated_by
+        ) VALUES (?, ?, ?, ?, ?, ?, DATE('now'), datetime('now'), ?)
+        ON CONFLICT(price_id) DO UPDATE SET
+          price_per_watt = excluded.price_per_watt,
+          updated_at = datetime('now'),
+          updated_by = excluded.updated_by
+      `).bind(
+        finalPriceId,
+        body.category || 'panels',
+        finalBrand,
+        body.product_type || 'Solar Panel',
+        roundedPrice,
+        body.currency || 'EGP',
+        updatedBy
+      ).run();
+    }
+
+    return successJson({
+      message: 'Price updated successfully in Cloudflare D1',
+      price_id: finalPriceId,
+      brand: finalBrand,
+      price_per_watt: roundedPrice,
+      updated_at: nowIso,
+      updated_by: updatedBy
+    }, 200, request);
+  }
+
+  // 3. POST (Create or Bulk Update prices)
+  if (method === 'POST') {
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return errorJson('Invalid JSON payload in request body', 400, request);
+    }
+
+    const updatedBy = body.updated_by || body.adminEmail || 'admin';
+
+    // Support single brand update via POST
+    if (body.brand && (body.price_per_watt !== undefined || body.pricePerWatt !== undefined)) {
+      const pricePerWatt = Number(body.price_per_watt ?? body.pricePerWatt);
+      if (!Number.isFinite(pricePerWatt) || pricePerWatt <= 0 || pricePerWatt > 200) {
+        return errorJson('Invalid pricePerWatt. Must be a valid positive number between 0 and 200.', 400, request);
+      }
+      const roundedPrice = parseFloat(pricePerWatt.toFixed(2));
+      const brand = body.brand.trim();
+      const priceId = body.price_id || normalizeBrandToPriceId(brand);
+
+      await env.DB.prepare(`
+        INSERT INTO energy_exchange_prices (
+          price_id, category, brand, product_type, price_per_watt, currency, effective_date, updated_at, updated_by
+        ) VALUES (?, ?, ?, ?, ?, ?, DATE('now'), datetime('now'), ?)
+        ON CONFLICT(price_id) DO UPDATE SET
+          price_per_watt = excluded.price_per_watt,
+          updated_at = datetime('now'),
+          updated_by = excluded.updated_by
+      `).bind(
+        priceId,
+        body.category || 'panels',
+        brand,
+        body.product_type || 'Solar Panel',
+        roundedPrice,
+        body.currency || 'EGP',
+        updatedBy
+      ).run();
+
+      return successJson({
+        message: 'Price record created/updated successfully in Cloudflare D1',
+        price_id: priceId,
+        brand,
+        price_per_watt: roundedPrice
+      }, 200, request);
+    }
+
+    // Support bulk prices object: { prices: { 'Jinko': 13.5, ... } }
+    if (body.prices && typeof body.prices === 'object') {
+      for (const [brand, price] of Object.entries(body.prices)) {
+        const numPrice = Number(price);
+        if (Number.isFinite(numPrice) && numPrice > 0 && numPrice <= 200) {
+          const roundedPrice = parseFloat(numPrice.toFixed(2));
+          const priceId = normalizeBrandToPriceId(brand);
+          await env.DB.prepare(`
+            INSERT INTO energy_exchange_prices (
+              price_id, category, brand, product_type, price_per_watt, currency, effective_date, updated_at, updated_by
+            ) VALUES (?, ?, ?, ?, ?, ?, DATE('now'), datetime('now'), ?)
+            ON CONFLICT(price_id) DO UPDATE SET
+              price_per_watt = excluded.price_per_watt,
+              updated_at = datetime('now'),
+              updated_by = excluded.updated_by
+          `).bind(
+            priceId,
+            'panels',
+            brand,
+            'Solar Panel',
+            roundedPrice,
+            'EGP',
+            updatedBy
+          ).run();
+        }
+      }
+
+      return successJson({
+        message: 'Prices updated successfully in Cloudflare D1'
+      }, 200, request);
+    }
+
+    return errorJson('Missing valid brand or prices object', 400, request);
+  }
+
+  return errorJson(`Method ${method} not allowed for /energy-exchange`, 405, request);
 }

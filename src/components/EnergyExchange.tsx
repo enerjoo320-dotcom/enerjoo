@@ -52,7 +52,7 @@ export const EnergyExchange: React.FC<EnergyExchangeProps> = ({
       setSaveSuccessBrand(brand);
       setTimeout(() => setSaveSuccessBrand(null), 3000);
     } catch (err: any) {
-      setErrorMsg(isAr ? 'فشل حفظ السعر، يرجى المحاولة مجدداً' : 'Failed to save price, please try again');
+      setErrorMsg(err?.message || (isAr ? 'فشل حفظ السعر، يرجى المحاولة مجدداً' : 'Failed to save price, please try again'));
     } finally {
       setIsSaving(false);
     }

@@ -27,7 +27,6 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const EXCLUDED_ADMIN_EMAILS = [
-  'enerjoo320@gmail.com',
   'eng.faressnasser@gmail.com',
   'faressnasser12@gmail.com'
 ];
@@ -38,7 +37,7 @@ const checkIsAdminEmail = (emailStr: string | null | undefined): boolean => {
   if (EXCLUDED_ADMIN_EMAILS.includes(clean)) {
     return false;
   }
-  return clean === 'enerjoo365@gmail.com';
+  return clean === 'enerjoo365@gmail.com' || clean === 'enerjoo320@gmail.com';
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
