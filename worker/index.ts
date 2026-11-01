@@ -582,7 +582,14 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'DELETE') {
-    if (!productId) return errorJson('Product ID required in path', 400, request);
+    if (!productId || productId === 'all') {
+      try {
+        await env.DB.prepare('DELETE FROM products').run();
+        return successJson({ message: 'All products deleted successfully', statement: 'DELETE FROM products;' }, 200, request);
+      } catch (err: any) {
+        return errorJson(`Failed to delete all products: ${err?.message || err}`, 500, request);
+      }
+    }
 
     const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ? OR id = ?')
       .bind(productId, productId)

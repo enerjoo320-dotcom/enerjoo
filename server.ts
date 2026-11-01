@@ -939,21 +939,23 @@ async function startServer() {
   const DELETED_PRODUCTS_FILE = path.join(process.cwd(), "deleted-products.json");
   const deletedProductIds = new Set<string>();
 
-  try {
-    const fs = await import("fs");
-    if (fs.existsSync(DELETED_PRODUCTS_FILE)) {
-      const saved = JSON.parse(fs.readFileSync(DELETED_PRODUCTS_FILE, "utf-8"));
-      if (Array.isArray(saved)) {
-        saved.forEach((id: string) => deletedProductIds.add(String(id)));
+  const loadDeletedProducts = () => {
+    try {
+      if (fs.existsSync(DELETED_PRODUCTS_FILE)) {
+        const saved = JSON.parse(fs.readFileSync(DELETED_PRODUCTS_FILE, "utf-8"));
+        if (Array.isArray(saved)) {
+          deletedProductIds.clear();
+          saved.forEach((id: string) => deletedProductIds.add(String(id)));
+        }
       }
+    } catch (e) {
+      console.warn("Could not load deleted-products.json:", e);
     }
-  } catch (e) {
-    console.warn("Could not load deleted-products.json:", e);
-  }
+  };
+  loadDeletedProducts();
 
   const saveDeletedProducts = async () => {
     try {
-      const fs = await import("fs");
       fs.writeFileSync(DELETED_PRODUCTS_FILE, JSON.stringify(Array.from(deletedProductIds), null, 2), "utf-8");
     } catch (e) {
       console.warn("Could not save deleted-products.json:", e);
@@ -1306,6 +1308,7 @@ async function startServer() {
 
   // Retrieve all authoritative, published, non-deleted products from Cloudflare D1 + local catalog + local edits
   async function getAuthoritativePublishedProducts(): Promise<any[]> {
+    loadDeletedProducts();
     const productsMap = new Map<string, any>();
 
     // 1. Initialize with activeCatalogProducts
@@ -1487,6 +1490,7 @@ ${urls.join("\n")}
   // GET /api/products - List all products with full D1 partition harvesting, catalog resilience, and filter support
   app.get("/api/products", async (req, res) => {
     try {
+      loadDeletedProducts();
       const productsMap = new Map<string, any>();
 
       // 1. Initialize with activeCatalogProducts (baseline categories + locally created/updated products)
@@ -1936,6 +1940,63 @@ ${urls.join("\n")}
 
   app.put("/api/products/:productId", handleUpdateProductRoute);
   app.patch("/api/products/:productId", handleUpdateProductRoute);
+
+  // DELETE /api/products or /api/products/all (Purge all products: DELETE FROM products;)
+  app.delete(["/api/products", "/api/products/all"], async (req, res) => {
+    const authHeader = extractBearerAuthHeader(req);
+    if (!authHeader) {
+      return res.status(401).json({
+        ok: false,
+        success: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+        }
+      });
+    }
+
+    try {
+      try {
+        await fetch(`${CF_WORKER_API}/products`, {
+          method: "DELETE",
+          headers: {
+            "Authorization": authHeader,
+            "Origin": "https://enerjoo.com"
+          },
+          signal: AbortSignal.timeout(10000)
+        });
+      } catch (cfErr) {
+        console.warn("Could not push bulk delete to Cloudflare Worker:", cfErr);
+      }
+
+      loadDeletedProducts();
+      for (const p of activeCatalogProducts) {
+        deletedProductIds.add(String(p.product_id || p.id));
+      }
+      for (const p of productsData) {
+        deletedProductIds.add(String(p.id));
+      }
+      for (const id of liveD1ProductsCache.keys()) {
+        deletedProductIds.add(id);
+      }
+      await saveDeletedProducts();
+
+      editedProductsMap.clear();
+      await saveEditedProducts();
+
+      liveD1ProductsCache.clear();
+      activeCatalogProducts.length = 0;
+
+      res.json({
+        success: true,
+        ok: true,
+        message: "تم حذف جميع المنتجات بنجاح (DELETE FROM products;)",
+        deleted_count: deletedProductIds.size
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: "Failed to purge products" });
+    }
+  });
 
   // DELETE /api/products/:productId (requires Firebase ID Token in Authorization header)
   app.delete("/api/products/:productId", async (req, res) => {
