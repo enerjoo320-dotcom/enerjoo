@@ -1,10 +1,9 @@
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 import { Product, SOLAR_PANEL_BRANDS, SolarPanelBrand } from '../types';
 import { safeLocalStorage } from '../utils/safeStorage';
 
 export const DEFAULT_SOLAR_PANEL_PRICES: Record<SolarPanelBrand, number> = {
-  'Jinko': 12.00,
+  'Jinko': 8.50,
   'LONGi Solar': 12.20,
   'AIKO': 12.50,
   'Trina Solar': 11.90,
@@ -20,8 +19,6 @@ export const DEFAULT_SOLAR_PANEL_PRICES: Record<SolarPanelBrand, number> = {
 };
 
 const STORAGE_KEY = 'enerjoo_solar_exchange_prices';
-const COLLECTION_NAME = 'energyExchange';
-const DOC_ID = 'solarPanelPrices';
 
 /**
  * Robustly matches an existing product to its approved solar panel brand.
@@ -185,7 +182,8 @@ function notifyListeners(prices: Record<string, number>) {
 }
 
 /**
- * Subscribes to real-time updates from Backend API, LocalStorage, and Firestore.
+ * Subscribes to real-time updates from Backend API and LocalStorage.
+ * Completely independent of Firebase/Firestore to ensure Cloudflare D1 is the single source of truth.
  * Ensures all sessions (guests, customers, suppliers, admins) stay strictly synchronized.
  */
 export function subscribeToEnergyExchange(
@@ -198,7 +196,14 @@ export function subscribeToEnergyExchange(
   const fetchExchangePrices = async () => {
     if (typeof window === 'undefined') return;
     try {
-      const res = await fetch('/api/energy-exchange/prices');
+      // Force non-cached request with timestamp query and Cache-Control headers
+      const res = await fetch(`/api/energy-exchange/prices?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && data.prices) {
@@ -210,17 +215,16 @@ export function subscribeToEnergyExchange(
     }
   };
 
-  let unsubscribeFirestore = () => {};
   let intervalId: any = null;
   let handleFocus: (() => void) | null = null;
   let handleVisibility: (() => void) | null = null;
   let handleStorageChange: ((e: StorageEvent) => void) | null = null;
 
   if (typeof window !== 'undefined') {
-    // 1. Initial fetch from API
+    // 1. Initial fetch from API (immediate upon component mount)
     fetchExchangePrices();
 
-    // 2. Refresh on window focus and document visibility
+    // 2. Immediate re-fetch on window focus and document visibility
     handleFocus = () => fetchExchangePrices();
     handleVisibility = () => {
       if (document.visibilityState === 'visible') fetchExchangePrices();
@@ -228,10 +232,10 @@ export function subscribeToEnergyExchange(
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // 3. Periodic synchronization every 30 seconds
-    intervalId = setInterval(fetchExchangePrices, 30_000);
+    // 3. Periodic synchronization every 10 seconds for real-time consistency
+    intervalId = setInterval(fetchExchangePrices, 10_000);
 
-    // 4. Listen to storage events across browser tabs
+    // 4. Synchronize immediately across multiple open browser tabs/windows
     handleStorageChange = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
@@ -247,39 +251,8 @@ export function subscribeToEnergyExchange(
     window.addEventListener('storage', handleStorageChange);
   }
 
-  // 5. Optional Firestore real-time snapshot sync
-  try {
-    const docRef = doc(db, COLLECTION_NAME, DOC_ID);
-    unsubscribeFirestore = onSnapshot(
-      docRef,
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          let loadedPrices: Record<string, number> = {};
-          if (data.prices && typeof data.prices === 'object') {
-            loadedPrices = data.prices;
-          } else {
-            SOLAR_PANEL_BRANDS.forEach(b => {
-              if (typeof data[b] === 'number') {
-                loadedPrices[b] = data[b];
-              }
-            });
-          }
-          const merged = { ...DEFAULT_SOLAR_PANEL_PRICES, ...currentPrices, ...loadedPrices };
-          notifyListeners(merged);
-        }
-      },
-      (error) => {
-        console.warn('Energy Exchange Firestore onSnapshot notice:', error);
-      }
-    );
-  } catch (e) {
-    console.warn('Firestore subscription notice:', e);
-  }
-
   return () => {
     listeners.delete(callback);
-    unsubscribeFirestore();
     if (typeof window !== 'undefined') {
       if (handleFocus) window.removeEventListener('focus', handleFocus);
       if (handleVisibility) document.removeEventListener('visibilitychange', handleVisibility);
@@ -306,7 +279,9 @@ export async function updateSolarPanelBrandPrice(
   const effectiveEmail = adminEmail || auth.currentUser?.email || 'enerjoo320@gmail.com';
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache'
   };
 
   try {
@@ -322,8 +297,9 @@ export async function updateSolarPanelBrandPrice(
   const encodedBrand = encodeURIComponent(brand);
   let res: Response;
   try {
-    res = await fetch(`/api/energy-exchange/prices/${encodedBrand}`, {
+    res = await fetch(`/api/energy-exchange/prices/${encodedBrand}?_t=${Date.now()}`, {
       method: 'PUT',
+      cache: 'no-store',
       headers,
       body: JSON.stringify({
         brand,
@@ -340,8 +316,9 @@ export async function updateSolarPanelBrandPrice(
   // Fallback: If PUT was not supported by an older proxy, attempt POST /api/energy-exchange
   if (!res.ok && res.status !== 403 && res.status !== 400) {
     try {
-      const fallbackRes = await fetch('/api/energy-exchange', {
+      const fallbackRes = await fetch(`/api/energy-exchange?_t=${Date.now()}`, {
         method: 'POST',
+        cache: 'no-store',
         headers,
         body: JSON.stringify({
           brand,
@@ -379,25 +356,6 @@ export async function updateSolarPanelBrandPrice(
 
   // ONLY after confirmed D1 write, notify listeners and update application state
   notifyListeners(confirmedPrices);
-
-  // 2. Best-effort Firestore sync (non-blocking)
-  try {
-    const docRef = doc(db, COLLECTION_NAME, DOC_ID);
-    await setDoc(
-      docRef,
-      {
-        prices: {
-          [brand]: rounded
-        },
-        [`prices.${brand}`]: rounded,
-        updatedAt: new Date().toISOString(),
-        updatedBy: effectiveEmail
-      },
-      { merge: true }
-    );
-  } catch (firestoreErr) {
-    console.warn('Notice updating Firestore shadow document:', firestoreErr);
-  }
 
   return { success: true, brand, pricePerWatt: rounded };
 }

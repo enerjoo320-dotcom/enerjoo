@@ -1773,13 +1773,17 @@ async function handleEnergyExchange(request: Request, env: Env, path: string, me
       }
     }
 
-    return json({
+    const res = json({
       success: true,
       ok: true,
       count: results.length,
       prices: pricesMap,
       data: results
     }, 200, request);
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.headers.set('Pragma', 'no-cache');
+    res.headers.set('Expires', '0');
+    return res;
   }
 
   // 2. PUT (Update specific price by ID or brand)

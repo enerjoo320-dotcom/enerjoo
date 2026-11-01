@@ -2524,6 +2524,11 @@ ${urls.join("\n")}
 
   // GET /api/energy-exchange and /api/energy-exchange/prices
   app.get(["/api/energy-exchange", "/api/energy-exchange/prices", "/energy-exchange/prices"], async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+
     loadExchangePricesFromFile();
 
     // Sync from remote Cloudflare Worker D1 if available

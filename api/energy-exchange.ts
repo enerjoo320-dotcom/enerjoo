@@ -19,13 +19,48 @@ const DEFAULT_SOLAR_PANEL_PRICES: Record<string, number> = {
   'ZNShine Solar': 11.80,
 };
 
-let cachedPrices: Record<string, number> = { ...DEFAULT_SOLAR_PANEL_PRICES };
+import fs from 'fs';
+import path from 'path';
+
+function loadPersistedPrices(): Record<string, number> {
+  try {
+    const rootPath = path.join(process.cwd(), 'energy-exchange.json');
+    const tmpPath = path.join('/tmp', 'energy-exchange.json');
+    const p = fs.existsSync(tmpPath) ? tmpPath : rootPath;
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (data && typeof data === 'object') {
+        return { ...DEFAULT_SOLAR_PANEL_PRICES, ...data };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { ...DEFAULT_SOLAR_PANEL_PRICES };
+}
+
+function savePersistedPrices(prices: Record<string, number>) {
+  try {
+    const tmpPath = path.join('/tmp', 'energy-exchange.json');
+    fs.writeFileSync(tmpPath, JSON.stringify(prices, null, 2), 'utf-8');
+    const rootPath = path.join(process.cwd(), 'energy-exchange.json');
+    fs.writeFileSync(rootPath, JSON.stringify(prices, null, 2), 'utf-8');
+  } catch {
+    // non-fatal
+  }
+}
+
+let cachedPrices: Record<string, number> = loadPersistedPrices();
 let lastSyncTime = 0;
 
 function setCorsHeaders(res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
 }
 
 export default async function handler(req: any, res: any) {
@@ -37,6 +72,7 @@ export default async function handler(req: any, res: any) {
 
   // 1. GET Request: Return authoritative Energy Exchange prices from Cloudflare D1
   if (req.method === 'GET') {
+    cachedPrices = loadPersistedPrices();
     const now = Date.now();
     // Re-sync from Cloudflare D1 if cache is older than 10 seconds
     if (now - lastSyncTime > 10_000) {
@@ -181,6 +217,7 @@ export default async function handler(req: any, res: any) {
 
         cachedPrices[matchedBrand] = roundedPrice;
         lastSyncTime = Date.now();
+        savePersistedPrices(cachedPrices);
 
         return res.status(200).json({
           success: true,
@@ -203,6 +240,7 @@ export default async function handler(req: any, res: any) {
           }
         }
         lastSyncTime = Date.now();
+        savePersistedPrices(cachedPrices);
 
         return res.status(200).json({
           success: true,
