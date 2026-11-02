@@ -992,16 +992,8 @@ async function startServer() {
     }
   };
 
-  // Never purge user-deleted products on startup
-  const activeCatalogProducts: any[] = D1_CATALOG_PRODUCTS.filter(p => !deletedProductIds.has(String(p.product_id || p.id)));
-  for (const [id, editedProd] of editedProductsMap.entries()) {
-    const idx = activeCatalogProducts.findIndex(p => String(p.product_id || p.id) === id);
-    if (idx >= 0) {
-      activeCatalogProducts[idx] = { ...activeCatalogProducts[idx], ...editedProd };
-    } else {
-      activeCatalogProducts.push(editedProd);
-    }
-  }
+  // Starts empty, populated exclusively from live D1 database
+  const activeCatalogProducts: any[] = [];
 
   function normalizeCategoryKey(catStr?: string | null): string {
     if (!catStr) return 'panels';
@@ -1277,10 +1269,8 @@ async function startServer() {
 
       await Promise.all(D1_PARTITIONS.map(q => fetchPartition(q)));
 
-      if (discovered.size > 0) {
-        liveD1ProductsCache = discovered;
-        lastD1CacheTime = Date.now();
-      }
+      liveD1ProductsCache = discovered;
+      lastD1CacheTime = Date.now();
       d1FetchInFlight = null;
       return liveD1ProductsCache;
     })();
@@ -1311,33 +1301,24 @@ async function startServer() {
     loadDeletedProducts();
     const productsMap = new Map<string, any>();
 
-    // 1. Initialize with activeCatalogProducts
-    for (const p of activeCatalogProducts) {
-      const id = String(p.product_id || p.id);
-      if (!deletedProductIds.has(id)) {
-        productsMap.set(id, normalizeProductRecord(p));
-      }
-    }
-
-    // 2. Fetch live D1 products across all partitions
+    // 1. Fetch live D1 products across all partitions
     try {
       const d1Map = await fetchAllLiveD1Products();
       for (const [id, p] of d1Map.entries()) {
         if (deletedProductIds.has(id)) {
           continue;
         }
-        const existing = productsMap.get(id) || {};
         const isLocallyEdited = editedProductsMap.has(id);
         const editedData = isLocallyEdited ? editedProductsMap.get(id) : null;
-        productsMap.set(id, normalizeProductRecord({ ...existing, ...p, ...(editedData || {}), _fromD1: true }));
+        productsMap.set(id, normalizeProductRecord({ ...p, ...(editedData || {}), _fromD1: true }));
       }
     } catch (cfErr) {
       console.warn("Notice: could not reach remote Cloudflare Worker for authoritative products:", cfErr);
     }
 
-    // 3. Overlay locally edited products with highest priority
+    // 2. Overlay locally edited products only if they exist in live D1
     for (const [id, editedProd] of editedProductsMap.entries()) {
-      if (!deletedProductIds.has(id)) {
+      if (!deletedProductIds.has(id) && productsMap.has(id)) {
         const current = productsMap.get(id) || {};
         productsMap.set(id, normalizeProductRecord({ ...current, ...editedProd }));
       }
@@ -1487,40 +1468,30 @@ ${urls.join("\n")}
   // PRODUCTS REST API (GET, POST, PUT, DELETE)
   // =========================================================================
 
-  // GET /api/products - List all products with full D1 partition harvesting, catalog resilience, and filter support
+  // GET /api/products - List all products with full D1 partition harvesting and filter support
   app.get("/api/products", async (req, res) => {
     try {
       loadDeletedProducts();
       const productsMap = new Map<string, any>();
 
-      // 1. Initialize with activeCatalogProducts (baseline categories + locally created/updated products)
-      for (const p of activeCatalogProducts) {
-        const id = String(p.product_id || p.id);
-        if (!deletedProductIds.has(id)) {
-          productsMap.set(id, normalizeProductRecord(p));
-        }
-      }
-
-      // 2. Fetch ALL live products from Cloudflare Worker D1 (across all partitions)
+      // 1. Fetch ALL live products from Cloudflare Worker D1 (across all partitions)
       try {
         const d1Map = await fetchAllLiveD1Products();
         for (const [id, p] of d1Map.entries()) {
-          // Live D1 database is authoritative for new items, but never overrides local edits
           if (deletedProductIds.has(id)) {
             continue;
           }
-          const existing = productsMap.get(id) || {};
           const isLocallyEdited = editedProductsMap.has(id);
           const editedData = isLocallyEdited ? editedProductsMap.get(id) : null;
-          productsMap.set(id, normalizeProductRecord({ ...existing, ...p, ...(editedData || {}), _fromD1: true }));
+          productsMap.set(id, normalizeProductRecord({ ...p, ...(editedData || {}), _fromD1: true }));
         }
       } catch (cfErr) {
-        console.warn("Notice: could not reach remote Cloudflare Worker, using active catalog:", cfErr);
+        console.warn("Notice: could not reach remote Cloudflare Worker:", cfErr);
       }
 
-      // 3. Always apply locally edited products with highest priority
+      // 2. Only overlay locally edited products that exist in live D1
       for (const [id, editedProd] of editedProductsMap.entries()) {
-        if (!deletedProductIds.has(id)) {
+        if (!deletedProductIds.has(id) && productsMap.has(id)) {
           const current = productsMap.get(id) || {};
           productsMap.set(id, normalizeProductRecord({ ...current, ...editedProd }));
         }
@@ -1600,14 +1571,13 @@ ${urls.join("\n")}
       });
     } catch (err: any) {
       console.warn("Error in GET /api/products:", err);
-      const activeFiltered = activeCatalogProducts.filter(p => !deletedProductIds.has(String(p.product_id || p.id))).map(normalizeProductRecord);
       return res.json({
         success: true,
         ok: true,
-        count: activeFiltered.length,
-        total: activeFiltered.length,
+        count: 0,
+        total: 0,
         deleted_ids: Array.from(deletedProductIds),
-        products: activeFiltered
+        products: []
       });
     }
   });

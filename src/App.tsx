@@ -51,7 +51,6 @@ import { auth } from './lib/firebase';
 import { safeLocalStorage } from './utils/safeStorage';
 import { CUSTOMER_SERVICE_PHONE_DISPLAY, getCustomerServiceWhatsAppUrl, SUPPLIER_CONTACT_PHONE_DISPLAY, getSupplierWhatsAppUrl } from './constants/contact';
 import { AppNavState, parseUrlToNavState, navStateToUrl } from './utils/navigation';
-import { productsData } from './data/mockData';
 
 export default function App() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -70,7 +69,7 @@ export default function App() {
   const [view, setView] = useState<ViewType>(initialNav.view);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [exchangePrices, setExchangePrices] = useState<Record<string, number>>(getInitialExchangePrices);
-  const [rawProducts, setRawProducts] = useState<Product[]>(getInitialLocalProducts);
+  const [rawProducts, setRawProducts] = useState<Product[]>([]);
   const setProducts = setRawProducts;
   const products = useMemo(() => {
     return applySolarPanelPricingToProducts(rawProducts, exchangePrices);
@@ -117,6 +116,22 @@ export default function App() {
   const [adminSearch, setAdminSearch] = useState('');
   const [adminFilterId, setAdminFilterId] = useState<string | number | null>(null);
   const [supplierFilterId, setSupplierFilterId] = useState<string | number | null>(initialNav.supplierFilterId || null);
+
+  // One-time cleanup of legacy product cache keys without affecting auth, cart, or user session
+  useEffect(() => {
+    const staleKeys = [
+      'enerjoo_cached_products',
+      'enerjoo_products',
+      'enerjoo_mock_products',
+      'cached_products'
+    ];
+    for (const key of staleKeys) {
+      safeLocalStorage.removeItem(key);
+      try {
+        sessionStorage.removeItem(key);
+      } catch {}
+    }
+  }, []);
 
   // Initialize initial browser history state if not present (step: 0)
   useEffect(() => {

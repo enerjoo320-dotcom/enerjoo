@@ -1098,11 +1098,11 @@ export const getProducts = async (): Promise<Product[]> => {
       }
     }
 
-    if (data && Array.isArray(data.products) && data.products.length > 0) {
+    if (data && Array.isArray(data.products)) {
       let rawD1List = [...data.products];
 
       // If response comes directly from the deployed Cloudflare Worker (which caps each response at 10 items), harvest all partitions
-      if (rawD1List.length <= 10 && !data.d1_count) {
+      if (rawD1List.length > 0 && rawD1List.length <= 10 && !data.d1_count) {
         const partitions = [
           'PROD-1789',
           'PROD-1790081', 'PROD-1790082', 'PROD-1790083', 'PROD-1790085', 'PROD-1790086', 'PROD-1790087',
@@ -1132,32 +1132,22 @@ export const getProducts = async (): Promise<Product[]> => {
         .map(mapD1ProductToProduct)
         .filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
 
-      // Merge: start with baseline productsData (all categories)
+      // D1 is the sole Single Source of Truth - only live database records are kept
       const productsMap = new Map<string, Product>();
-      for (const baseProd of productsData) {
-        const id = String(baseProd.id);
-        if (!deletedSet.has(id)) {
-          productsMap.set(id, baseProd);
-        }
-      }
-      // Overlay live D1 products (live D1 properties take precedence and enrich)
       for (const d1Prod of mappedD1) {
         const id = String(d1Prod.id);
-        if (!deletedSet.has(id)) {
-          const existing = productsMap.get(id);
-          productsMap.set(id, existing ? { ...existing, ...d1Prod, specs: { ...(existing.specs || {}), ...(d1Prod.specs || {}) } } : d1Prod);
-        }
+        productsMap.set(id, d1Prod);
       }
 
-      // Overlay locally edited products (confirmed edits take highest priority)
+      // Overlay locally edited products for records existing in D1
       const editedMap = getEditedProducts();
       for (const [id, editedProd] of Object.entries(editedMap)) {
-        if (!deletedSet.has(id)) {
-          const existing = productsMap.get(id);
+        if (!deletedSet.has(id) && productsMap.has(id)) {
+          const existing = productsMap.get(id)!;
           productsMap.set(id, {
-            ...(existing || {}),
+            ...existing,
             ...editedProd,
-            id: existing ? existing.id : (isNaN(Number(id)) ? id : Number(id)),
+            id: existing.id,
             specs: {
               ...(existing?.specs || {}),
               ...(editedProd.specs || {})
@@ -1169,10 +1159,10 @@ export const getProducts = async (): Promise<Product[]> => {
       return Array.from(productsMap.values());
     }
 
-    return getInitialLocalProducts();
+    return [];
   } catch (error) {
-    console.warn('Could not fetch products from Cloudflare D1, using catalog baseline:', error);
-    return getInitialLocalProducts();
+    console.warn('Could not fetch products from Cloudflare D1:', error);
+    return [];
   }
 };
 
@@ -1189,16 +1179,7 @@ export const getProductById = async (productId: string | number): Promise<Produc
   // Check locally edited overrides first
   const editedMap = getEditedProducts();
   if (editedMap[pId] && !getDeletedProductIds().has(pId)) {
-    const baseMatch = productsData.find(p => String(p.id) === pId);
-    return {
-      ...(baseMatch || {}),
-      ...editedMap[pId],
-      id: baseMatch ? baseMatch.id : editedMap[pId].id,
-      specs: {
-        ...(baseMatch?.specs || {}),
-        ...(editedMap[pId].specs || {})
-      }
-    } as Product;
+    return editedMap[pId];
   }
 
   try {
@@ -1227,10 +1208,6 @@ export const getProductById = async (productId: string | number): Promise<Produc
     // Fallback
   }
 
-  const foundFallback = productsData.find(p => String(p.id) === pId);
-  if (foundFallback && !getDeletedProductIds().has(String(foundFallback.id))) {
-    return foundFallback;
-  }
   return null;
 };
 
@@ -1277,12 +1254,6 @@ export const matchCatalogInverters = async (
 export const subscribeToProducts = (callback: (products: Product[]) => void): (() => void) => {
   let isSubscribed = true;
 
-  // Immediate synchronous invocation with filtered baseline + local edits so the UI never starts stale or with deleted items
-  const initial = getInitialLocalProducts();
-  if (initial && initial.length > 0) {
-    callback(initial);
-  }
-
   // Initial load from Cloudflare D1 / Backend API
   getProducts().then(products => {
     if (isSubscribed && products) {
@@ -1291,7 +1262,7 @@ export const subscribeToProducts = (callback: (products: Product[]) => void): ((
   }).catch(error => {
     console.warn('Cloudflare D1 Products Initial Load Notice:', error);
     if (isSubscribed) {
-      callback(getInitialLocalProducts());
+      callback([]);
     }
   });
 
