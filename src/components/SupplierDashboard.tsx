@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Package, Plus, Edit, Trash2, Search, Camera, Loader2, AlertTriangle, X } from 'lucide-react';
+import { Package, Plus, Edit, Trash2, Search, Camera, Loader2, AlertTriangle, X, Clock, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { translations } from '../translations';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,6 +42,32 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [approvalNotice, setApprovalNotice] = useState<string | null>(null);
+
+  const isSupplierRejected = user?.type === 'supplier' && Boolean(user?.rejected);
+  const isSupplierPendingApproval = user?.type === 'supplier' && !isSupplierRejected && user?.verified !== true;
+  const isSupplierApproved = user?.type === 'supplier' && user?.verified === true && !isSupplierRejected;
+
+  const handleAddNewProductClick = () => {
+    if (isSupplierRejected) {
+      setApprovalNotice(
+        isAr
+          ? 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
+          : 'Your supplier account has been rejected or suspended by Enerjoo administration. You cannot add or publish products.'
+      );
+      return;
+    }
+    if (isSupplierPendingApproval) {
+      setApprovalNotice(
+        isAr
+          ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+          : 'Your account is under review. You can add your products after your account is approved by Enerjoo administration.'
+      );
+      return;
+    }
+    setApprovalNotice(null);
+    setView('add');
+  };
 
   const handleConfirmDelete = async () => {
     if (!productToDelete) return;
@@ -92,23 +118,29 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
   };
 
   const myProducts = products.filter(p => {
-    if (adminFilterId) {
-      return (
-        p.supplierId === adminFilterId || 
-        p.supplierId?.toString() === adminFilterId.toString() ||
-        p.suppliers?.some(s => s.id === adminFilterId || s.id?.toString() === adminFilterId.toString())
-      );
-    }
-    
     if (user?.type === 'supplier') {
-      return p.supplierId === user?.uid;
+      const uid = String(user.uid || '').trim();
+      if (!uid) return false;
+      return (
+        String(p.supplierId || '').trim() === uid ||
+        String((p as any).supplier_id || '').trim() === uid ||
+        Boolean(p.suppliers?.some(s => String(s.id || '').trim() === uid))
+      );
     }
 
     if (user?.type === 'admin') {
+      if (adminFilterId) {
+        return (
+          p.supplierId === adminFilterId || 
+          p.supplierId?.toString() === adminFilterId.toString() ||
+          p.suppliers?.some(s => s.id === adminFilterId || s.id?.toString() === adminFilterId.toString())
+        );
+      }
+
       if (!adminSearch.trim()) return true;
       
       const search = adminSearch.toLowerCase();
-      const productName = (isAr ? p.nameAr || p.name : p.name).toLowerCase();
+      const productName = (isAr ? p.nameAr || p.name : p.name || '').toLowerCase();
       const productBrand = (p.brand || '').toLowerCase();
       const matchesSupplier = p.suppliers?.some(s => 
         (s.name || '').toLowerCase().includes(search) || 
@@ -164,7 +196,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
     >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 sm:mb-8 gap-4">
         <div className="flex items-center gap-3">
-          {adminFilterId ? (
+          {user?.type === 'admin' && adminFilterId ? (
             (() => {
               const currentSup = suppliers.find(s => s.id === adminFilterId || s.id?.toString() === adminFilterId?.toString());
               const supImg = currentSup?.profileImage || currentSup?.avatar;
@@ -220,7 +252,7 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
               {user?.type === 'supplier' ? (t.myProducts || (isAr ? 'منتجاتي' : 'My Products')) : (isAr ? 'إدارة منتجات الموردين' : 'Supplier Products Management')}
             </h1>
             <div className="text-solar-muted text-xs sm:text-sm">
-              {adminFilterId ? (
+              {user?.type === 'admin' && adminFilterId ? (
                 <span className="flex items-center gap-2">
                   <span className="text-solar-blue font-black underline">
                     {isAr ? suppliers.find(s => s.id === adminFilterId)?.nameAr || suppliers.find(s => s.id === adminFilterId)?.name : suppliers.find(s => s.id === adminFilterId)?.name}
@@ -285,17 +317,11 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
 
         {(user?.type === 'supplier' || user?.type === 'admin') && (
           <button 
-            onClick={() => {
-              if (user?.type === 'supplier' && !user?.verified) {
-                alert(isAr ? 'عذراً، حسابك بانتظار توثيق وموافقة الإدارة قبل التمكن من إضافة منتجات.' : 'Your account is pending admin verification and approval before you can add products.');
-                return;
-              }
-              setView('add');
-            }}
-            className={`w-full sm:w-auto px-6 py-3 rounded-xl sm:rounded-2xl font-black flex items-center justify-center gap-2 transition active:scale-95 text-sm ${
-              user?.type === 'supplier' && !user?.verified 
-                ? 'bg-solar-border text-solar-muted cursor-not-allowed opacity-70' 
-                : 'bg-solar-blue text-white shadow-md shadow-solar-blue/20 hover:opacity-90 cursor-pointer'
+            onClick={handleAddNewProductClick}
+            className={`w-full sm:w-auto px-6 py-3 rounded-xl sm:rounded-2xl font-black flex items-center justify-center gap-2 transition active:scale-95 text-sm cursor-pointer ${
+              isSupplierPendingApproval || isSupplierRejected
+                ? 'bg-amber-500/15 text-amber-800 border border-amber-400/50 hover:bg-amber-500/25'
+                : 'bg-solar-blue text-white shadow-md shadow-solar-blue/20 hover:opacity-90'
             }`}
           >
             <Plus size={18} />
@@ -303,6 +329,71 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
           </button>
         )}
       </div>
+
+      {/* Supplier Verification / Approval Status Banner */}
+      {isSupplierPendingApproval && (
+        <div className="mb-6 bg-amber-50 border border-amber-300 rounded-2xl sm:rounded-3xl p-4 sm:p-5 flex items-start gap-3.5 shadow-2xs">
+          <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0 mt-0.5">
+            <Clock size={22} />
+          </div>
+          <div className="flex-1 text-right">
+            <h3 className="text-sm sm:text-base font-black text-amber-900 mb-1">
+              {isAr ? 'حساب المورد قيد المراجعة' : 'Supplier Account Under Review'}
+            </h3>
+            <p className="text-xs sm:text-sm font-bold text-amber-800 leading-relaxed">
+              {isAr
+                ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+                : 'Your account is under review. You can add your products after your account is approved by Enerjoo administration.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {isSupplierRejected && (
+        <div className="mb-6 bg-red-50 border border-red-300 rounded-2xl sm:rounded-3xl p-4 sm:p-5 flex items-start gap-3.5 shadow-2xs">
+          <div className="w-10 h-10 rounded-2xl bg-red-500/15 text-red-600 flex items-center justify-center shrink-0 mt-0.5">
+            <ShieldAlert size={22} />
+          </div>
+          <div className="flex-1 text-right">
+            <h3 className="text-sm sm:text-base font-black text-red-900 mb-1">
+              {isAr ? 'تم رفض أو تعليق حساب المورد' : 'Supplier Account Rejected / Suspended'}
+            </h3>
+            <p className="text-xs sm:text-sm font-bold text-red-800 leading-relaxed">
+              {isAr
+                ? 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
+                : 'Your supplier account has been rejected or suspended by Enerjoo administration. You cannot add or publish products.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {isSupplierApproved && (
+        <div className="mb-6 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 flex items-center gap-2.5 text-emerald-800 text-xs sm:text-sm font-black">
+          <ShieldCheck size={18} className="text-emerald-600 shrink-0" />
+          <span>
+            {isAr
+              ? 'حسابك معتمد رسمياً لدى منصة Enerjoo — يمكنك إضافة ونشر وتحديث منتجاتك مباشرة.'
+              : 'Your supplier account is officially verified by Enerjoo — you can add, publish, and update your products.'}
+          </span>
+        </div>
+      )}
+
+      {approvalNotice && (
+        <div className="mb-6 bg-amber-100/90 border-2 border-amber-400 rounded-2xl p-4 flex items-center justify-between gap-3 text-amber-950 font-black text-xs sm:text-sm shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle size={18} className="text-amber-700 shrink-0" />
+            <span>{approvalNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setApprovalNotice(null)}
+            className="p-1.5 rounded-lg hover:bg-amber-200/70 text-amber-800 transition cursor-pointer"
+            aria-label="Close notice"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       <div className="space-y-6">
         {categoriesList.map(category => {
@@ -346,12 +437,18 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
                             })()
                           )}
                         </div>
-                        <div className="text-[10px] font-bold text-solar-muted mt-0.5">{product.price.toLocaleString()} {t.egp}</div>
+                        <div className="text-[10px] font-bold text-solar-muted mt-0.5">{(Number(product.price) || 0).toLocaleString()} {t.egp}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button 
-                        onClick={() => onEdit(product)}
+                        onClick={() => {
+                          if (isSupplierPendingApproval || isSupplierRejected) {
+                            handleAddNewProductClick();
+                            return;
+                          }
+                          onEdit(product);
+                        }}
                         className="w-10 h-10 flex items-center justify-center bg-white text-solar-muted hover:text-solar-blue hover:bg-solar-blue/5 rounded-xl border border-solar-border transition shadow-2xs active:scale-95"
                         title={isAr ? 'تعديل' : 'Edit'}
                         aria-label="Edit"
@@ -380,19 +477,19 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
               <Package size={40} className="text-solar-blue opacity-50" />
             </div>
             <h3 className="text-xl font-black text-solar-text mb-2">{isAr ? 'لا يوجد منتجات بعد' : 'No products yet'}</h3>
-            <p className="text-solar-muted font-bold mb-8">{isAr ? 'ابدأ بإضافة منتجاتك لتظهر لعملائك' : 'Start adding your products to show them to your customers'}</p>
+            <p className="text-solar-muted font-bold mb-8">
+              {isSupplierPendingApproval
+                ? (isAr ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.' : 'Your account is under review. You can add your products after your account is approved by Enerjoo administration.')
+                : isSupplierRejected
+                  ? (isAr ? 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo.' : 'Your supplier account has been rejected or suspended by Enerjoo administration.')
+                  : (isAr ? 'ابدأ بإضافة منتجاتك لتظهر لعملائك' : 'Start adding your products to show them to your customers')}
+            </p>
             {(user?.type === 'supplier' || user?.type === 'admin') && (
               <button 
-                onClick={() => {
-                  if (user?.type === 'supplier' && !user?.verified) {
-                    alert(isAr ? 'عذراً، حسابك بانتظار توثيق وموافقة الإدارة قبل التمكن من إضافة منتجات.' : 'Your account is pending admin verification and approval before you can add products.');
-                    return;
-                  }
-                  setView('add');
-                }}
+                onClick={handleAddNewProductClick}
                 className={`px-8 py-4 rounded-2xl font-black transition cursor-pointer ${
-                  user?.type === 'supplier' && !user?.verified 
-                    ? 'bg-solar-border text-solar-muted cursor-not-allowed opacity-70' 
+                  isSupplierPendingApproval || isSupplierRejected
+                    ? 'bg-amber-500/15 text-amber-800 border border-amber-400/50 hover:bg-amber-500/25'
                     : 'bg-solar-blue text-white shadow-xl shadow-solar-blue/20 hover:scale-105 active:scale-95'
                 }`}
               >

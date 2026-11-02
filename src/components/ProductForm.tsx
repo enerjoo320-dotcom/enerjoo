@@ -614,11 +614,20 @@ export const ProductForm: React.FC<{
       return;
     }
     
-    if (user?.type === 'supplier' && !user?.verified) {
+    if (user?.type === 'supplier' && user?.rejected) {
       setUploadError(
         lang === 'ar'
-          ? 'بصفتك مورداً، يجب التحقق من حسابك والموافقة عليه قبل التمكن من نشر المنتجات.'
-          : 'As a supplier, your account must be verified and approved by admin before you can publish products.'
+          ? 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
+          : 'This supplier account is rejected or suspended by Enerjoo administration.'
+      );
+      return;
+    }
+
+    if (user?.type === 'supplier' && user?.verified !== true) {
+      setUploadError(
+        lang === 'ar'
+          ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+          : 'Your account is under review. You can add your products after your account is approved by Enerjoo administration.'
       );
       return;
     }

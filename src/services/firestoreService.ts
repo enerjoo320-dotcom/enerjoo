@@ -1326,14 +1326,107 @@ export const subscribeToProducts = (callback: (products: Product[]) => void): ((
   };
 };
 
+const SERVICE_ADMIN_EMAILS = ['enerjoo365@gmail.com', 'enerjoo320@gmail.com'];
+const SERVICE_EXCLUDED_ADMIN_EMAILS = [
+  'eng.faressnasser@gmail.com',
+  'faressnasser12@gmail.com',
+  'siefsameh221@gmail.com'
+];
+
+/**
+ * Verifies from Firestore (`users/{uid}`) that the currently signed-in user is either:
+ * - An administrator (`admin`), OR
+ * - An approved supplier (`type === 'supplier' && verified === true && rejected !== true`).
+ * Throws an HTTP 403 error if the supplier account is pending review or rejected.
+ */
+export const verifyCurrentSupplierApprovalStatus = async (): Promise<{
+  uid: string;
+  role: 'admin' | 'supplier';
+}> => {
+  const currentUser = auth?.currentUser;
+  if (!currentUser?.uid) {
+    const unauthErr: any = new Error(
+      'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من إضافة أو تعديل المنتجات.'
+    );
+    unauthErr.status = 401;
+    unauthErr.code = 'UNAUTHORIZED';
+    throw unauthErr;
+  }
+
+  const uid = currentUser.uid;
+  const authEmail = String(currentUser.email || '').toLowerCase().trim();
+  const snap = await getDoc(doc(db, USERS_COLLECTION, uid));
+  const data = snap.exists() ? snap.data() : {};
+  const docEmail = String(data?.email || authEmail).toLowerCase().trim();
+  const isExcludedAdmin = SERVICE_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
+  const isAdmin =
+    !isExcludedAdmin &&
+    (SERVICE_ADMIN_EMAILS.includes(docEmail) || data?.type === 'admin');
+
+  if (isAdmin) {
+    return { uid, role: 'admin' };
+  }
+
+  if (data?.type === 'supplier') {
+    if (Boolean(data.rejected)) {
+      const rejErr: any = new Error(
+        'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
+      );
+      rejErr.status = 403;
+      rejErr.code = 'SUPPLIER_REJECTED';
+      throw rejErr;
+    }
+    if (data.verified !== true) {
+      const unvErr: any = new Error(
+        'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+      );
+      unvErr.status = 403;
+      unvErr.code = 'SUPPLIER_NOT_VERIFIED';
+      throw unvErr;
+    }
+    return { uid, role: 'supplier' };
+  }
+
+  const roleErr: any = new Error(
+    'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+  );
+  roleErr.status = 403;
+  roleErr.code = 'SUPPLIER_NOT_VERIFIED';
+  throw roleErr;
+};
+
+const verifyCurrentUserIsAdmin = async (): Promise<void> => {
+  const currentUser = auth?.currentUser;
+  if (!currentUser?.uid) {
+    throw new Error('صلاحية مسؤول مطلوبة لتنفيذ هذا الإجراء.');
+  }
+  const authEmail = String(currentUser.email || '').toLowerCase().trim();
+  const snap = await getDoc(doc(db, USERS_COLLECTION, currentUser.uid));
+  const data = snap.exists() ? snap.data() : {};
+  const docEmail = String(data?.email || authEmail).toLowerCase().trim();
+  const isExcludedAdmin = SERVICE_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
+  const isAdmin =
+    !isExcludedAdmin &&
+    (SERVICE_ADMIN_EMAILS.includes(docEmail) || data?.type === 'admin');
+  if (!isAdmin) {
+    throw new Error('صلاحية مسؤول مطلوبة لاعتماد أو تعديل حالة الموردين.');
+  }
+};
+
 /**
  * Add a new product to Cloudflare D1 via Worker API (POST /products).
+ * Strictly requires an approved supplier (`verified === true && !rejected`) or admin.
  * Uses product_id as the D1 identifier and returns product_id upon confirmed database save.
  */
 export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | number }): Promise<string> => {
+  const authInfo = await verifyCurrentSupplierApprovalStatus();
   const newProductId = (product.id ? String(product.id) : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`).toUpperCase();
+  const productWithSupplier =
+    authInfo.role === 'supplier'
+      ? { ...product, supplierId: authInfo.uid, verified: true }
+      : { ...product, verified: true };
   const payload = {
-    ...mapProductToD1Payload(product),
+    ...mapProductToD1Payload(productWithSupplier),
     product_id: newProductId
   };
 
@@ -1344,16 +1437,18 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
 
   const createdId = res.product_id || newProductId;
   unmarkProductAsDeleted(createdId);
-  saveEditedProduct(createdId, { ...product, id: createdId });
+  saveEditedProduct(createdId, { ...productWithSupplier, id: createdId });
   await notifyProductListeners();
   return createdId;
 };
 
 /**
  * Update an existing product in Cloudflare D1 via Worker API (PUT /products/:id).
+ * Strictly requires an approved supplier (`verified === true && !rejected`) or admin.
  * Strictly verifies that the API operation succeeded before persisting local state or reporting success.
  */
 export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
+  await verifyCurrentSupplierApprovalStatus();
   const pId = String(productId);
   const payload = mapProductToD1Payload(data);
   payload.product_id = pId;
@@ -1392,6 +1487,7 @@ export const updateProduct = async (productId: string | number, data: Partial<Pr
  * Strictly verifies that the API operation succeeded before removing the product or reporting success.
  */
 export const deleteProduct = async (productId: string | number): Promise<void> => {
+  await verifyCurrentSupplierApprovalStatus();
   const pId = String(productId);
 
   try {
@@ -1435,14 +1531,16 @@ export const subscribeToSuppliers = (callback: (suppliers: Supplier[]) => void) 
                             (!isRawUidOrId(data.nameAr) && data.nameAr) ||
                             (!isRawUidOrId(data.name) && data.name) ||
                             'مورد معتمد';
+        const isRejected = Boolean(data.rejected);
+        const isVerified = Boolean(data.verified) && !isRejected;
         const sup: Supplier = {
           id: doc.id,
           name: cleanName,
           nameAr: cleanNameAr,
           location: data.location || data.governorate || 'Cairo, Egypt',
           phone: data.phone || '',
-          verified: data.verified || false,
-          rejected: data.rejected || false,
+          verified: isVerified,
+          rejected: isRejected,
           email: data.email || '',
           avatar: imgUrl,
           profileImage: imgUrl,
@@ -1484,14 +1582,16 @@ export const getSupplierProfile = async (uid: string): Promise<Supplier | null> 
                           (!isRawUidOrId(data.nameAr) && data.nameAr) ||
                           (!isRawUidOrId(data.name) && data.name) ||
                           'مورد معتمد';
+      const isRejected = Boolean(data.rejected);
+      const isVerified = Boolean(data.verified) && !isRejected;
       const sup: Supplier = {
         id: snap.id,
         name: cleanName,
         nameAr: cleanNameAr,
         location: data.location || data.governorate || 'Cairo, Egypt',
         phone: data.phone || '',
-        verified: data.verified ?? true,
-        rejected: data.rejected || false,
+        verified: isVerified,
+        rejected: isRejected,
         email: data.email || '',
         avatar: imgUrl,
         profileImage: imgUrl,
@@ -1516,11 +1616,17 @@ export const seedInitialData = async () => {
 
 export const toggleSupplierVerification = async (uid: string, verified: boolean) => {
   try {
+    await verifyCurrentUserIsAdmin();
     const docRef = doc(db, USERS_COLLECTION, uid);
     await updateDoc(docRef, { 
-      verified,
-      rejected: false 
+      verified: Boolean(verified),
+      rejected: false,
+      updatedAt: new Date().toISOString()
     });
+    const cached = supplierProfileCache.get(uid);
+    if (cached) {
+      supplierProfileCache.set(uid, { ...cached, verified: Boolean(verified), rejected: false });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);
   }
@@ -1528,13 +1634,21 @@ export const toggleSupplierVerification = async (uid: string, verified: boolean)
 
 export const updateSupplierStatus = async (uid: string, status: 'approved' | 'pending' | 'rejected') => {
   try {
+    await verifyCurrentUserIsAdmin();
     const docRef = doc(db, USERS_COLLECTION, uid);
+    const nowIso = new Date().toISOString();
     if (status === 'approved') {
-      await updateDoc(docRef, { verified: true, rejected: false });
+      await updateDoc(docRef, { verified: true, rejected: false, updatedAt: nowIso });
+      const cached = supplierProfileCache.get(uid);
+      if (cached) supplierProfileCache.set(uid, { ...cached, verified: true, rejected: false });
     } else if (status === 'rejected') {
-      await updateDoc(docRef, { verified: false, rejected: true });
+      await updateDoc(docRef, { verified: false, rejected: true, updatedAt: nowIso });
+      const cached = supplierProfileCache.get(uid);
+      if (cached) supplierProfileCache.set(uid, { ...cached, verified: false, rejected: true });
     } else {
-      await updateDoc(docRef, { verified: false, rejected: false });
+      await updateDoc(docRef, { verified: false, rejected: false, updatedAt: nowIso });
+      const cached = supplierProfileCache.get(uid);
+      if (cached) supplierProfileCache.set(uid, { ...cached, verified: false, rejected: false });
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${USERS_COLLECTION}/${uid}`);

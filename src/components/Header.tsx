@@ -86,10 +86,10 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
           {user?.type === 'supplier' ? (
             <button 
               onClick={() => setView('supplier-dashboard')}
-              className="hidden md:flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold text-sm bg-solar-light px-3 py-1.5 rounded-full"
-              title={t.myProducts || (isAr ? 'منتجاتي' : 'My Products')}
+              className="flex items-center gap-1.5 text-solar-blue hover:bg-solar-blue/15 transition font-black text-xs sm:text-sm bg-solar-blue/10 border border-solar-blue/25 px-2.5 sm:px-3.5 py-1.5 rounded-full cursor-pointer active:scale-95"
+              title={t.myProducts || (isAr ? 'لوحة المورد - منتجاتي' : 'Supplier Dashboard - My Products')}
             >
-              <Package size={18} className="text-solar-blue" />
+              <Package size={16} className="text-solar-blue shrink-0" />
               <span>{t.myProducts || (isAr ? 'منتجاتي' : 'My Products')}</span>
             </button>
           ) : user?.type !== 'admin' && (
@@ -132,13 +132,27 @@ export const Header: React.FC<HeaderProps> = ({ lang, setLang, user, onLogout, s
           )}
 
           {user?.type === 'supplier' && (
-            <button 
-              onClick={() => setView('add')}
-              className="hidden md:flex items-center gap-2 text-solar-muted hover:text-solar-blue transition font-bold text-sm"
-            >
-              <PlusCircle size={18} />
-              <span>{t.addProduct}</span>
-            </button>
+            user.verified === true && !user.rejected ? (
+              <button 
+                onClick={() => setView('add')}
+                className="hidden sm:flex items-center gap-1.5 text-solar-muted hover:text-solar-blue transition font-bold text-xs sm:text-sm bg-solar-light px-2.5 sm:px-3 py-1.5 rounded-full cursor-pointer"
+              >
+                <PlusCircle size={16} />
+                <span>{t.addProduct}</span>
+              </button>
+            ) : (
+              <button 
+                onClick={() => setView('supplier-dashboard')}
+                title={
+                  user.rejected
+                    ? (isAr ? 'حساب المورد مرفوض أو معلق' : 'Supplier account rejected')
+                    : (isAr ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.' : 'Account under review')
+                }
+                className="hidden sm:flex items-center gap-1.5 text-amber-800 bg-amber-50 border border-amber-300/80 px-2.5 sm:px-3 py-1.5 rounded-full font-black text-xs cursor-pointer"
+              >
+                <span>⏳ {user.rejected ? (isAr ? 'حساب مرفوض' : 'Rejected') : (isAr ? 'قيد المراجعة' : 'Pending Review')}</span>
+              </button>
+            )
           )}
 
           {user ? (

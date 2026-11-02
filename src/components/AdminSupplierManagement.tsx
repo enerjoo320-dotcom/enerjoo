@@ -59,8 +59,12 @@ export const AdminSupplierManagement: React.FC<AdminSupplierManagementProps> = (
   const rejectedCount = suppliers.filter(s => s.rejected === true).length;
 
   const handleUpdateStatus = async (uid: string, status: 'approved' | 'pending' | 'rejected') => {
+    if (user?.type !== 'admin') {
+      console.error("Unauthorized attempt to update supplier status");
+      return;
+    }
     try {
-      await updateSupplierStatus(uid, status);
+      await updateSupplierStatus(String(uid), status);
     } catch (err) {
       console.error("Error updating supplier status:", err);
     }

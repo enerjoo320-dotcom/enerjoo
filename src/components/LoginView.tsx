@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, LogIn, ArrowLeft, ArrowRight, ShieldCheck, Check, User, MapPin, RefreshCw, Zap, Sparkles } from 'lucide-react';
+import { Mail, Lock, LogIn, ArrowLeft, ArrowRight, ShieldCheck, Check, User, MapPin, RefreshCw, Zap, Sparkles, Briefcase } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { translations } from '../translations';
 import { ViewType } from '../types';
@@ -10,15 +10,17 @@ import { auth } from '../lib/firebase';
 interface LoginViewProps {
   lang: 'ar' | 'en';
   setView: (view: ViewType) => void;
+  defaultTab?: 'customer_google' | 'email';
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
+export const LoginView: React.FC<LoginViewProps> = ({ lang, setView, defaultTab }) => {
   const { login, signInWithGoogle, resetPassword } = useAuth();
   const t = translations[lang];
   const isAr = lang === 'ar';
   
   const [activeTab, setActiveTab] = useState<'customer_google' | 'email'>(() => {
-    return localStorage.getItem('enerjoo_prefill_email') ? 'email' : 'customer_google';
+    if (localStorage.getItem('enerjoo_prefill_email')) return 'email';
+    return defaultTab || 'customer_google';
   });
 
   // Email / Supplier state
@@ -79,8 +81,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     setIsUnauthorizedDomainError(false);
     setIsNetworkError(false);
     try {
-      await login(email, password);
-      setView('home');
+      const loggedInUser = await login(email, password);
+      setView(
+        loggedInUser?.type === 'supplier' || loggedInUser?.type === 'admin'
+          ? 'supplier-dashboard'
+          : 'home'
+      );
     } catch (error: any) {
       const code = error?.code || '';
       if (code === 'auth/wrong-password' || code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/invalid-email') {
@@ -115,7 +121,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     }
   };
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (roleToUse: 'customer' | 'supplier' = 'customer') => {
     setLoading(true);
     setError('');
     setErrorCode(null);
@@ -124,9 +130,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
     setIsUnauthorizedDomainError(false);
     setIsNetworkError(false);
     try {
-      await signInWithGoogle('customer');
-      if (auth.currentUser) {
-        setView('home');
+      const normalizedRole = roleToUse === 'supplier' ? 'supplier' : 'customer';
+      const loggedInUser = await signInWithGoogle(normalizedRole);
+      if (loggedInUser) {
+        setView(
+          loggedInUser.type === 'supplier' || loggedInUser.type === 'admin'
+            ? 'supplier-dashboard'
+            : 'home'
+        );
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -249,8 +260,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
                 : 'text-solar-muted hover:text-solar-text'
             }`}
           >
-            <Mail size={14} />
-            <span>{isAr ? 'الموردين' : 'Suppliers'}</span>
+            <Briefcase size={14} />
+            <span>{isAr ? 'دخول الموردين والشركات' : 'Suppliers & Companies'}</span>
           </button>
         </div>
 
@@ -274,7 +285,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
             <button 
               type="button"
               disabled={loading}
-              onClick={handleGoogleSignIn}
+              onClick={() => handleGoogleSignIn('customer')}
               className="w-full bg-white text-solar-text border-2 border-slate-200 hover:border-solar-blue/60 rounded-2xl py-4.5 font-black hover:bg-slate-50 shadow-md shadow-slate-100 flex items-center justify-center gap-3 transition-all active:scale-98 text-sm cursor-pointer"
             >
               {loading ? (
@@ -308,8 +319,52 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
             )}
           </div>
         ) : (
-        /* Supplier/Admin Email Login Form */
-        <form onSubmit={handleSubmit} className="space-y-6">
+        /* Supplier/Admin Login Container */
+        <div className="space-y-6 pt-2">
+          {/* Quick Google Login for Suppliers */}
+          <div className="p-4 bg-solar-light rounded-2xl border border-solar-border text-center space-y-2">
+            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto shadow-sm">
+              <Briefcase size={18} className="text-solar-blue" />
+            </div>
+            <h3 className="font-black text-sm text-solar-text">
+              {isAr ? 'دخول الموردين السريع بحساب Google' : 'Supplier Fast Sign-In with Google'}
+            </h3>
+            <p className="text-xs text-solar-muted leading-relaxed">
+              {isAr 
+                ? 'سجّل دخولك بحساب Google للدخول فوراً إلى لوحة تحكم الموردين وإدارة منتجاتك بسهولة.' 
+                : 'Sign in with your Google account to access your supplier dashboard and manage products.'}
+            </p>
+          </div>
+
+          <button 
+            type="button"
+            disabled={loading}
+            onClick={() => handleGoogleSignIn('supplier')}
+            className="w-full bg-white text-solar-text border-2 border-slate-200 hover:border-solar-blue/60 rounded-2xl py-4 font-black hover:bg-slate-50 shadow-md shadow-slate-100 flex items-center justify-center gap-3 transition-all active:scale-98 text-sm cursor-pointer"
+          >
+            {loading ? (
+              <div className="w-5 h-5 border-2 border-solar-blue/30 border-t-solar-blue rounded-full animate-spin" />
+            ) : (
+              <>
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.48 14.98 1 12 1 7.35 1 3.37 3.65 1.41 7.54l3.88 3C6.22 7.74 8.88 5.04 12 5.04z" />
+                  <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.35H12v4.45h6.45c-.28 1.47-1.11 2.72-2.36 3.56l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z" />
+                  <path fill="#FBBC05" d="M5.29 14.3C5.03 13.52 4.88 12.69 4.88 11.83c0-.86.15-1.69.41-2.47L1.41 6.36C.51 8.16 0 10.15 0 12.27c0 2.12.51 4.11 1.41 5.91l3.88-3.88z" />
+                  <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.1.74-2.5 1.18-4.3 1.18-3.12 0-5.78-2.7-6.71-5.5l-3.88 3C3.37 20.35 7.35 23 12 23z" />
+                </svg>
+                <span>{isAr ? 'دخول الموردين بحساب Google' : 'Sign in as Supplier with Google'}</span>
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center my-4">
+            <div className="flex-1 border-t border-solar-border"></div>
+            <span className="px-3 text-xs text-solar-muted font-bold">{isAr ? 'أو بواسطة البريد وكلمة المرور' : 'Or with Email & Password'}</span>
+            <div className="flex-1 border-t border-solar-border"></div>
+          </div>
+
+          {/* Supplier/Admin Email Login Form */}
+          <form onSubmit={handleSubmit} className="space-y-6">
           
           {/* Email input field */}
           <div className="space-y-1.5 text-right">
@@ -459,6 +514,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ lang, setView }) => {
             )}
           </button>
         </form>
+        </div>
         )}
 
         {/* Footer info/redirection */}

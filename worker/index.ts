@@ -90,6 +90,206 @@ function generateId(prefix?: string): string {
   return prefix ? `${prefix}_${time}${rand}` : `${time}-${rand}`;
 }
 
+const WORKER_ADMIN_EMAILS = ['enerjoo365@gmail.com', 'enerjoo320@gmail.com'];
+const WORKER_EXCLUDED_ADMIN_EMAILS = [
+  'eng.faressnasser@gmail.com',
+  'faressnasser12@gmail.com',
+  'siefsameh221@gmail.com',
+];
+
+function decodeBase64UrlJson(segment: string): any {
+  const padded = segment.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((segment.length + 3) % 4);
+  const decoded = atob(padded);
+  return JSON.parse(decoded);
+}
+
+/**
+ * Verifies the Firebase ID Token and checks the authoritative user document in Firestore (`users/{uid}`)
+ * before allowing any product creation, modification, or deletion in Cloudflare D1.
+ */
+async function verifyWorkerProductPublisher(
+  request: Request,
+  requireAdminOnly = false
+): Promise<{
+  allowed: boolean;
+  status: number;
+  code: string;
+  message: string;
+  uid?: string;
+  role?: 'admin' | 'supplier';
+}> {
+  const authHeader =
+    request.headers.get('Authorization') || request.headers.get('X-Firebase-Auth') || '';
+  const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!rawToken) {
+    return {
+      allowed: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'سجّل الدخول إلى Enerjoo ثم أعد المحاولة.',
+    };
+  }
+
+  const parts = rawToken.split('.');
+  if (parts.length !== 3 || parts[2].length < 80) {
+    return {
+      allowed: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'رمز المصادقة غير صالح. سجّل الدخول إلى Enerjoo ثم أعد المحاولة.',
+    };
+  }
+
+  let header: any;
+  let payload: any;
+  try {
+    header = decodeBase64UrlJson(parts[0]);
+    payload = decodeBase64UrlJson(parts[1]);
+  } catch {
+    return {
+      allowed: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'رمز المصادقة تالف أو غير صالح.',
+    };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (
+    header?.alg !== 'RS256' ||
+    typeof header?.kid !== 'string' ||
+    typeof payload?.iss !== 'string' ||
+    !payload.iss.startsWith('https://securetoken.google.com/') ||
+    typeof payload?.sub !== 'string' ||
+    !payload.sub.trim() ||
+    typeof payload?.exp !== 'number' ||
+    payload.exp <= nowSec - 120
+  ) {
+    return {
+      allowed: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'انتهت صلاحية جلسة تسجيل الدخول أو أن الرمز غير صالح.',
+    };
+  }
+
+  const tokenProjectId = payload.iss.replace('https://securetoken.google.com/', '').trim();
+  if (!tokenProjectId || payload.aud !== tokenProjectId) {
+    return {
+      allowed: false,
+      status: 401,
+      code: 'UNAUTHORIZED',
+      message: 'رمز المصادقة لا يتطابق مع مشروع Firebase المعتمد.',
+    };
+  }
+
+  const uid = payload.sub.trim();
+  const tokenEmail = typeof payload.email === 'string' ? payload.email.toLowerCase().trim() : '';
+
+  const candidateTargets = [
+    {
+      projectId: 'gen-lang-client-0409057996',
+      databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
+      sendAuth: tokenProjectId === 'gen-lang-client-0409057996',
+    },
+  ];
+  if (tokenProjectId !== 'gen-lang-client-0409057996') {
+    candidateTargets.push({
+      projectId: tokenProjectId,
+      databaseId: '(default)',
+      sendAuth: true,
+    });
+  }
+
+  let userDocFields: Record<string, any> | null = null;
+  for (const target of candidateTargets) {
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+      target.projectId
+    )}/databases/${encodeURIComponent(target.databaseId)}/documents/users/${encodeURIComponent(uid)}`;
+    try {
+      const headers: Record<string, string> = {};
+      if (target.sendAuth) {
+        headers['Authorization'] = `Bearer ${rawToken}`;
+      }
+      const fsRes = await fetch(firestoreUrl, { method: 'GET', headers });
+      if (fsRes.ok) {
+        const docJson: any = await fsRes.json();
+        if (docJson && docJson.fields) {
+          userDocFields = docJson.fields;
+          break;
+        }
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  const docEmail = String(userDocFields?.email?.stringValue || tokenEmail || '')
+    .toLowerCase()
+    .trim();
+  const docType = String(userDocFields?.type?.stringValue || '').trim();
+  const docVerified = userDocFields?.verified?.booleanValue === true;
+  const docRejected = userDocFields?.rejected?.booleanValue === true;
+
+  const isExcludedAdmin = WORKER_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
+  const isAdmin =
+    !isExcludedAdmin && (WORKER_ADMIN_EMAILS.includes(docEmail) || docType === 'admin');
+
+  if (isAdmin) {
+    return {
+      allowed: true,
+      status: 200,
+      code: 'OK',
+      message: 'Authorized admin',
+      uid,
+      role: 'admin',
+    };
+  }
+
+  if (requireAdminOnly) {
+    return {
+      allowed: false,
+      status: 403,
+      code: 'ADMIN_REQUIRED',
+      message: 'هذه العملية مخصصة لمديري منصة Enerjoo فقط.',
+    };
+  }
+
+  if (docType === 'supplier') {
+    if (docRejected) {
+      return {
+        allowed: false,
+        status: 403,
+        code: 'SUPPLIER_REJECTED',
+        message: 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.',
+      };
+    }
+    if (!docVerified) {
+      return {
+        allowed: false,
+        status: 403,
+        code: 'SUPPLIER_NOT_VERIFIED',
+        message: 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.',
+      };
+    }
+    return {
+      allowed: true,
+      status: 200,
+      code: 'OK',
+      message: 'Authorized verified supplier',
+      uid,
+      role: 'supplier',
+    };
+  }
+
+  return {
+    allowed: false,
+    status: 403,
+    code: 'SUPPLIER_NOT_VERIFIED',
+    message: 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.',
+  };
+}
+
 // ============================================================================
 // Main Worker Fetch Handler
 // ============================================================================
@@ -385,6 +585,22 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'POST') {
+    const authCheck = await verifyWorkerProductPublisher(request, false);
+    if (!authCheck.allowed) {
+      return json(
+        {
+          ok: false,
+          success: false,
+          error: {
+            code: authCheck.code,
+            message: authCheck.message,
+          },
+        },
+        authCheck.status,
+        request
+      );
+    }
+
     let body: any;
     try {
       body = await request.json();
@@ -394,6 +610,10 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
 
     if (!body.product_id || !body.brand || !body.model) {
       return errorJson('Missing required fields: product_id, brand, model', 400, request);
+    }
+    if (authCheck.role === 'supplier' && authCheck.uid) {
+      body.supplier = authCheck.uid;
+      body.supplier_id = authCheck.uid;
     }
 
     // Check conflict
@@ -501,6 +721,22 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'PUT') {
+    const authCheck = await verifyWorkerProductPublisher(request, false);
+    if (!authCheck.allowed) {
+      return json(
+        {
+          ok: false,
+          success: false,
+          error: {
+            code: authCheck.code,
+            message: authCheck.message,
+          },
+        },
+        authCheck.status,
+        request
+      );
+    }
+
     if (!productId) return errorJson('Product ID required in path', 400, request);
 
     let body: any;
@@ -594,7 +830,24 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'DELETE') {
-    if (!productId || productId === 'all') {
+    const isBulkDelete = !productId || productId === 'all';
+    const authCheck = await verifyWorkerProductPublisher(request, isBulkDelete);
+    if (!authCheck.allowed) {
+      return json(
+        {
+          ok: false,
+          success: false,
+          error: {
+            code: authCheck.code,
+            message: authCheck.message,
+          },
+        },
+        authCheck.status,
+        request
+      );
+    }
+
+    if (isBulkDelete) {
       try {
         await env.DB.prepare('DELETE FROM products').run();
         return successJson({ message: 'All products deleted successfully', statement: 'DELETE FROM products;' }, 200, request);

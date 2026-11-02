@@ -1,8 +1,10 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
+import defaultFirebaseConfig from "./firebase-applet-config.json";
 import { GoogleGenAI, Type } from "@google/genai";
 import { classifyInverter } from "./src/utils/inverterClassification";
 import { 
@@ -1727,16 +1729,311 @@ ${urls.join("\n")}
     }
   }
 
-  // POST /api/products - Create a new product (requires Firebase ID Token in Authorization header)
+  let cachedGooglePublicCerts: Record<string, string> | null = null;
+  let cachedGooglePublicCertsExp = 0;
+
+  async function getGoogleSecureTokenCerts(): Promise<Record<string, string> | null> {
+    const now = Date.now();
+    if (cachedGooglePublicCerts && now < cachedGooglePublicCertsExp) {
+      return cachedGooglePublicCerts;
+    }
+    try {
+      const certRes = await fetch(
+        "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com",
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (certRes.ok) {
+        const json = (await certRes.json()) as Record<string, string>;
+        if (json && typeof json === "object") {
+          cachedGooglePublicCerts = json;
+          cachedGooglePublicCertsExp = now + 30 * 60 * 1000;
+          return json;
+        }
+      }
+    } catch {
+      // Fallback to cached if available
+    }
+    return cachedGooglePublicCerts;
+  }
+
+  interface PublisherAuthVerificationResult {
+    allowed: boolean;
+    status: number;
+    code: string;
+    message: string;
+    uid?: string;
+    email?: string;
+    role?: "admin" | "supplier";
+    verified?: boolean;
+    rejected?: boolean;
+  }
+
+  const SERVER_ADMIN_EMAILS = ["enerjoo365@gmail.com", "enerjoo320@gmail.com"];
+  const SERVER_EXCLUDED_ADMIN_EMAILS = [
+    "eng.faressnasser@gmail.com",
+    "faressnasser12@gmail.com",
+    "siefsameh221@gmail.com"
+  ];
+
+  /**
+   * Cryptographically verifies the Firebase ID Token and fetches the authoritative
+   * user profile (`type`, `verified`, `rejected`) directly from Firestore (`users/{uid}`).
+   * Never trusts role or verification flags passed in the client request body.
+   */
+  async function verifyAuthorizedProductPublisher(
+    authHeader: string | null,
+    requireAdminOnly = false
+  ): Promise<PublisherAuthVerificationResult> {
+    if (!authHeader) {
+      return {
+        allowed: false,
+        status: 401,
+        code: "UNAUTHORIZED",
+        message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+      };
+    }
+
+    const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const parts = rawToken.split(".");
+    if (parts.length !== 3 || parts[2].length < 80) {
+      return {
+        allowed: false,
+        status: 401,
+        code: "UNAUTHORIZED",
+        message: "رمز المصادقة غير صالح. سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+      };
+    }
+
+    let header: any;
+    let payload: any;
+    try {
+      header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf-8"));
+      payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf-8"));
+    } catch {
+      return {
+        allowed: false,
+        status: 401,
+        code: "UNAUTHORIZED",
+        message: "رمز المصادقة تالف أو غير صالح."
+      };
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (
+      header?.alg !== "RS256" ||
+      typeof header?.kid !== "string" ||
+      typeof payload?.iss !== "string" ||
+      !payload.iss.startsWith("https://securetoken.google.com/") ||
+      typeof payload?.sub !== "string" ||
+      !payload.sub.trim() ||
+      typeof payload?.exp !== "number" ||
+      payload.exp <= nowSec - 120
+    ) {
+      return {
+        allowed: false,
+        status: 401,
+        code: "UNAUTHORIZED",
+        message: "انتهت صلاحية جلسة تسجيل الدخول أو أن الرمز غير صالح. يرجى تسجيل الدخول مرة أخرى."
+      };
+    }
+
+    const tokenProjectId = payload.iss.replace("https://securetoken.google.com/", "").trim();
+    if (!tokenProjectId || payload.aud !== tokenProjectId) {
+      return {
+        allowed: false,
+        status: 401,
+        code: "UNAUTHORIZED",
+        message: "رمز المصادقة لا يتطابق مع مشروع Firebase المعتمد."
+      };
+    }
+
+    // Verify RS256 cryptographic signature against Google's official public certificates
+    const certs = await getGoogleSecureTokenCerts();
+    if (certs) {
+      const certPem = certs[header.kid];
+      if (!certPem) {
+        return {
+          allowed: false,
+          status: 401,
+          code: "UNAUTHORIZED",
+          message: "مفتاح توقيع رمز المصادقة غير معتمد."
+        };
+      }
+      try {
+        const verifier = crypto.createVerify("RSA-SHA256");
+        verifier.update(`${parts[0]}.${parts[1]}`);
+        verifier.end();
+        const sigValid = verifier.verify(certPem, Buffer.from(parts[2], "base64url"));
+        if (!sigValid) {
+          return {
+            allowed: false,
+            status: 401,
+            code: "UNAUTHORIZED",
+            message: "توقيع رمز المصادقة غير صالح."
+          };
+        }
+      } catch {
+        return {
+          allowed: false,
+          status: 401,
+          code: "UNAUTHORIZED",
+          message: "فشل التحقق من توقيع رمز المصادقة."
+        };
+      }
+    }
+
+    const uid = payload.sub.trim();
+    const tokenEmail = typeof payload.email === "string" ? payload.email.toLowerCase().trim() : "";
+
+    // Fetch authoritative user document from Firestore (`users/{uid}`)
+    const configuredProjectId =
+      process.env.VITE_FIREBASE_PROJECT_ID ||
+      defaultFirebaseConfig.projectId ||
+      "gen-lang-client-0409057996";
+    const configuredDatabaseId =
+      process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID ||
+      defaultFirebaseConfig.firestoreDatabaseId ||
+      "ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d";
+
+    const candidateTargets: Array<{ projectId: string; databaseId: string; sendAuth: boolean }> = [
+      {
+        projectId: configuredProjectId,
+        databaseId: configuredDatabaseId,
+        sendAuth: tokenProjectId === configuredProjectId
+      }
+    ];
+    if (tokenProjectId !== configuredProjectId) {
+      candidateTargets.push({
+        projectId: tokenProjectId,
+        databaseId: configuredDatabaseId,
+        sendAuth: true
+      });
+      candidateTargets.push({
+        projectId: tokenProjectId,
+        databaseId: "(default)",
+        sendAuth: true
+      });
+    } else if (configuredDatabaseId !== "(default)") {
+      candidateTargets.push({
+        projectId: configuredProjectId,
+        databaseId: "(default)",
+        sendAuth: true
+      });
+    }
+
+    let userDocFields: Record<string, any> | null = null;
+    for (const target of candidateTargets) {
+      const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+        target.projectId
+      )}/databases/${encodeURIComponent(target.databaseId)}/documents/users/${encodeURIComponent(uid)}`;
+      try {
+        const headers: Record<string, string> = {};
+        if (target.sendAuth) {
+          headers["Authorization"] = `Bearer ${rawToken}`;
+        }
+        const fsRes = await fetch(firestoreUrl, {
+          method: "GET",
+          headers,
+          signal: AbortSignal.timeout(5000)
+        });
+        if (fsRes.ok) {
+          const docJson: any = await fsRes.json();
+          if (docJson && docJson.fields) {
+            userDocFields = docJson.fields;
+            break;
+          }
+        }
+      } catch {
+        // Continue to next candidate target if any
+      }
+    }
+
+    const docEmail = String(
+      userDocFields?.email?.stringValue || tokenEmail || ""
+    )
+      .toLowerCase()
+      .trim();
+    const docType = String(userDocFields?.type?.stringValue || "").trim();
+    const docVerified = userDocFields?.verified?.booleanValue === true;
+    const docRejected = userDocFields?.rejected?.booleanValue === true;
+
+    const isExcludedAdmin = SERVER_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
+    const isAdmin =
+      !isExcludedAdmin &&
+      (SERVER_ADMIN_EMAILS.includes(docEmail) || docType === "admin");
+
+    if (isAdmin) {
+      return {
+        allowed: true,
+        status: 200,
+        code: "OK",
+        message: "Authorized admin",
+        uid,
+        email: docEmail,
+        role: "admin",
+        verified: true,
+        rejected: false
+      };
+    }
+
+    if (requireAdminOnly) {
+      return {
+        allowed: false,
+        status: 403,
+        code: "ADMIN_REQUIRED",
+        message: "هذه العملية مخصصة لمديري منصة Enerjoo فقط."
+      };
+    }
+
+    if (docType === "supplier") {
+      if (docRejected) {
+        return {
+          allowed: false,
+          status: 403,
+          code: "SUPPLIER_REJECTED",
+          message: "تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات."
+        };
+      }
+      if (!docVerified) {
+        return {
+          allowed: false,
+          status: 403,
+          code: "SUPPLIER_NOT_VERIFIED",
+          message: "حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo."
+        };
+      }
+      return {
+        allowed: true,
+        status: 200,
+        code: "OK",
+        message: "Authorized verified supplier",
+        uid,
+        email: docEmail,
+        role: "supplier",
+        verified: true,
+        rejected: false
+      };
+    }
+
+    return {
+      allowed: false,
+      status: 403,
+      code: "SUPPLIER_NOT_VERIFIED",
+      message: "حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo."
+    };
+  }
+
+  // POST /api/products - Create a new product (requires verified Supplier or Admin)
   app.post("/api/products", async (req, res) => {
     const authHeader = extractBearerAuthHeader(req);
-    if (!authHeader) {
-      return res.status(401).json({
+    const authCheck = await verifyAuthorizedProductPublisher(authHeader, false);
+    if (!authCheck.allowed) {
+      return res.status(authCheck.status).json({
         ok: false,
         success: false,
         error: {
-          code: "UNAUTHORIZED",
-          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+          code: authCheck.code,
+          message: authCheck.message
         }
       });
     }
@@ -1748,9 +2045,18 @@ ${urls.join("\n")}
         ? rawId
         : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
 
+      // Enforce authoritative supplier_id and verified flag on server side
+      const authoritativeSupplierId =
+        authCheck.role === "supplier"
+          ? authCheck.uid
+          : body.supplier_id || body.supplier || authCheck.uid;
+
       const newProduct = {
         ...body,
         product_id: newId,
+        supplier_id: authoritativeSupplierId,
+        supplier: authoritativeSupplierId,
+        verified: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -1761,28 +2067,19 @@ ${urls.join("\n")}
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": authHeader,
+            "Authorization": authHeader!,
             "Origin": "https://enerjoo.com"
           },
           body: JSON.stringify(newProduct),
           signal: AbortSignal.timeout(10000)
         });
-        if ((cfRes.status === 401 || cfRes.status === 403) && !isLikelyValidFirebaseToken(authHeader)) {
+        if (cfRes.status === 401 || cfRes.status === 403) {
           const errJson: any = await cfRes.json().catch(() => null);
-          return res.status(401).json(errJson || {
-            ok: false,
-            success: false,
-            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
-          });
+          if (errJson?.error?.code === "SUPPLIER_NOT_VERIFIED" || errJson?.error?.code === "SUPPLIER_REJECTED") {
+            return res.status(403).json(errJson);
+          }
         }
       } catch (cfErr) {
-        if (!isLikelyValidFirebaseToken(authHeader)) {
-          return res.status(401).json({
-            ok: false,
-            success: false,
-            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
-          });
-        }
         console.warn("Could not push new product to Cloudflare Worker:", cfErr);
       }
 
@@ -1807,16 +2104,17 @@ ${urls.join("\n")}
     }
   });
 
-  // Specialized PUT & PATCH handler for /api/products/:productId (requires Firebase ID Token in Authorization header)
+  // Specialized PUT & PATCH handler for /api/products/:productId (requires verified Supplier or Admin)
   const handleUpdateProductRoute = async (req: express.Request, res: express.Response) => {
     const authHeader = extractBearerAuthHeader(req);
-    if (!authHeader) {
-      return res.status(401).json({
+    const authCheck = await verifyAuthorizedProductPublisher(authHeader, false);
+    if (!authCheck.allowed) {
+      return res.status(authCheck.status).json({
         ok: false,
         success: false,
         error: {
-          code: "UNAUTHORIZED",
-          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+          code: authCheck.code,
+          message: authCheck.message
         }
       });
     }
@@ -1831,32 +2129,18 @@ ${urls.join("\n")}
 
       // Forward to Cloudflare Worker with Authorization Bearer header
       try {
-        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
+        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
           method: req.method === "PATCH" ? "PATCH" : "PUT",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": authHeader,
+            "Authorization": authHeader!,
             "Origin": "https://enerjoo.com"
           },
           body: JSON.stringify(safeBody),
           signal: AbortSignal.timeout(10000)
         });
-        if ((cfRes.status === 401 || cfRes.status === 403) && !isLikelyValidFirebaseToken(authHeader)) {
-          const errJson: any = await cfRes.json().catch(() => null);
-          return res.status(401).json(errJson || {
-            ok: false,
-            success: false,
-            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
-          });
-        }
       } catch {
-        if (!isLikelyValidFirebaseToken(authHeader)) {
-          return res.status(401).json({
-            ok: false,
-            success: false,
-            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
-          });
-        }
+        // Continue with local update
       }
 
       if (deletedProductIds.has(productId)) {
@@ -1911,16 +2195,17 @@ ${urls.join("\n")}
   app.put("/api/products/:productId", handleUpdateProductRoute);
   app.patch("/api/products/:productId", handleUpdateProductRoute);
 
-  // DELETE /api/products or /api/products/all (Purge all products: DELETE FROM products;)
+  // DELETE /api/products or /api/products/all (Purge all products - Admin only)
   app.delete(["/api/products", "/api/products/all"], async (req, res) => {
     const authHeader = extractBearerAuthHeader(req);
-    if (!authHeader) {
-      return res.status(401).json({
+    const authCheck = await verifyAuthorizedProductPublisher(authHeader, true);
+    if (!authCheck.allowed) {
+      return res.status(authCheck.status).json({
         ok: false,
         success: false,
         error: {
-          code: "UNAUTHORIZED",
-          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+          code: authCheck.code,
+          message: authCheck.message
         }
       });
     }
@@ -1930,7 +2215,7 @@ ${urls.join("\n")}
         await fetch(`${CF_WORKER_API}/products`, {
           method: "DELETE",
           headers: {
-            "Authorization": authHeader,
+            "Authorization": authHeader!,
             "Origin": "https://enerjoo.com"
           },
           signal: AbortSignal.timeout(10000)
@@ -1968,16 +2253,17 @@ ${urls.join("\n")}
     }
   });
 
-  // DELETE /api/products/:productId (requires Firebase ID Token in Authorization header)
+  // DELETE /api/products/:productId (requires verified Supplier or Admin)
   app.delete("/api/products/:productId", async (req, res) => {
     const authHeader = extractBearerAuthHeader(req);
-    if (!authHeader) {
-      return res.status(401).json({
+    const authCheck = await verifyAuthorizedProductPublisher(authHeader, false);
+    if (!authCheck.allowed) {
+      return res.status(authCheck.status).json({
         ok: false,
         success: false,
         error: {
-          code: "UNAUTHORIZED",
-          message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة."
+          code: authCheck.code,
+          message: authCheck.message
         }
       });
     }
@@ -1991,30 +2277,16 @@ ${urls.join("\n")}
 
       // Forward to Cloudflare Worker with Authorization Bearer header
       try {
-        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(pId)}`, {
+        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(pId)}`, {
           method: "DELETE",
           headers: {
-            "Authorization": authHeader,
+            "Authorization": authHeader!,
             "Origin": "https://enerjoo.com"
           },
           signal: AbortSignal.timeout(10000)
         });
-        if ((cfRes.status === 401 || cfRes.status === 403) && !isLikelyValidFirebaseToken(authHeader)) {
-          const errJson: any = await cfRes.json().catch(() => null);
-          return res.status(401).json(errJson || {
-            ok: false,
-            success: false,
-            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
-          });
-        }
       } catch {
-        if (!isLikelyValidFirebaseToken(authHeader)) {
-          return res.status(401).json({
-            ok: false,
-            success: false,
-            error: { code: "UNAUTHORIZED", message: "سجّل الدخول إلى Enerjoo ثم أعد المحاولة." }
-          });
-        }
+        // Continue with local deletion
       }
 
       deletedProductIds.add(pId);

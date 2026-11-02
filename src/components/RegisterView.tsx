@@ -70,7 +70,7 @@ export const RegisterView: React.FC<{
     setIsNetworkError(false);
 
     try {
-      await register(formData.email, formData.password, {
+      const createdUser = await register(formData.email, formData.password, {
         name: formData.name,
         type: role,
         company: formData.company,
@@ -78,10 +78,13 @@ export const RegisterView: React.FC<{
         phone: formData.phone
       });
       setIsSuccess(true);
-      
+      const targetView: ViewType =
+        createdUser?.type === 'supplier' || createdUser?.type === 'admin'
+          ? 'supplier-dashboard'
+          : 'home';
       setTimeout(() => {
-        setView('home');
-      }, 5000);
+        setView(targetView);
+      }, 1000);
     } catch (err: any) {
       const code = err.code || (err.message && err.message.includes('auth/email-already-in-use') ? 'auth/email-already-in-use' : '');
       const isEmailAlreadyInUse = code === 'auth/email-already-in-use' || err.message?.includes('auth/email-already-in-use');
@@ -139,8 +142,12 @@ export const RegisterView: React.FC<{
       setDirectLoginLoading(true);
       setError('');
       try {
-        await login(formData.email, formData.password);
-        setView('home');
+        const loggedInUser = await login(formData.email, formData.password);
+        const targetView: ViewType =
+          loggedInUser?.type === 'supplier' || loggedInUser?.type === 'admin'
+            ? 'supplier-dashboard'
+            : 'home';
+        setView(targetView);
         return;
       } catch (loginErr: any) {
         console.warn("Direct login notice:", loginErr?.message || loginErr);
@@ -175,12 +182,16 @@ export const RegisterView: React.FC<{
     setIsUnauthorizedDomainError(false);
     setIsNetworkError(false);
     try {
-      await signInWithGoogle(role);
-      if (auth.currentUser) {
+      const signedUpUser = await signInWithGoogle(role);
+      if (signedUpUser) {
         setIsSuccess(true);
+        const targetView: ViewType =
+          signedUpUser.type === 'supplier' || signedUpUser.type === 'admin'
+            ? 'supplier-dashboard'
+            : 'home';
         setTimeout(() => {
-          setView('home');
-        }, 1500);
+          setView(targetView);
+        }, 900);
       }
     } catch (err: any) {
       const code = err?.code || '';
@@ -266,10 +277,10 @@ export const RegisterView: React.FC<{
               : 'Welcome to enerjoo. We have sent a verification link to your email.'}
           </p>
           {role === 'supplier' && (
-            <div className="p-4 bg-solar-blue/5 text-solar-blue rounded-2xl border border-solar-blue/10 text-xs font-bold mb-4 leading-relaxed">
+            <div className="p-4 bg-emerald-50 text-emerald-800 rounded-2xl border border-emerald-200 text-xs font-bold mb-4 leading-relaxed">
               {isAr
-                ? 'ملاحظة للموردين: حسابك الآن حالته "بانتظار موافقة الإدارة" (Pending Approval). لن تتمكن من إضافة منتجاتك حتى يقوم المشرف بتفعيل حسابك.'
-                : 'Notice for Suppliers: Your account is set to "Pending Approval". You cannot publish products until an administrator approves your status.'}
+                ? 'مرحباً بك كمورد في Enerjoo! تم تفعيل حسابك بنجاح، وجارِ نقلك إلى لوحة تحكم الموردين لإضافة منتجاتك فوراً.'
+                : 'Welcome as an Enerjoo supplier! Your account is active, redirecting to your dashboard to add products.'}
             </div>
           )}
           <p className="text-solar-muted text-xs font-bold">

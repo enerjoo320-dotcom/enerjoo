@@ -125,6 +125,7 @@ export interface User {
   avatar: string;
   profileImage?: string;
   verified: boolean;
+  rejected?: boolean;
   createdAt: string;
 }
 

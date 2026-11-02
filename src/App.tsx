@@ -136,6 +136,18 @@ export default function App() {
     }
   }, []);
 
+  // Ensure authenticated users on the login view are routed according to their resolved role,
+  // and clear any admin-only filter when a supplier logs in.
+  useEffect(() => {
+    if (authLoading || !user) return;
+    if (user.type === 'supplier' && adminFilterId !== null) {
+      setAdminFilterId(null);
+    }
+    if (view === 'login') {
+      navigateToView(user.type === 'supplier' ? 'supplier-dashboard' : 'home');
+    }
+  }, [authLoading, user, view, adminFilterId]);
+
   // Initialize initial browser history state if not present (step: 0)
   useEffect(() => {
     if (!window.history.state || typeof window.history.state.step !== 'number') {
@@ -638,6 +650,22 @@ export default function App() {
       );
     }
 
+    if (user.type === 'supplier' && Boolean(user.rejected)) {
+      throw new Error(
+        isAr
+          ? 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
+          : 'Your supplier account has been rejected or suspended by Enerjoo administration.'
+      );
+    }
+
+    if (user.type === 'supplier' && user.verified !== true) {
+      throw new Error(
+        isAr
+          ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+          : 'Your account is under review. You can add your products after your account is approved by Enerjoo administration.'
+      );
+    }
+
     try {
       if (editingProduct) {
         const prodId = editingProduct.id.toString();
@@ -1099,7 +1127,7 @@ export default function App() {
       case 'compare':
         return <CompareView products={compareList} lang={lang} onBack={() => navigateBack('home')} onRemove={(id) => setCompareList(l => l.filter(p => p.id !== id))} />;
       case 'add':
-        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
+        if (!user) return <LoginView lang={lang} setView={navigateToView} defaultTab="email" />;
         if (user.type !== 'supplier' && user.type !== 'admin') {
           return (
             <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm max-w-xl mx-auto">
@@ -1109,13 +1137,42 @@ export default function App() {
             </div>
           );
         }
+        if (user.type === 'supplier' && (user.verified !== true || Boolean(user.rejected))) {
+          return (
+            <div className="py-16 text-center bg-white rounded-[40px] p-8 border border-amber-300 shadow-sm max-w-xl mx-auto">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/15 text-amber-600 flex items-center justify-center mx-auto mb-5 text-3xl">
+                ⏳
+              </div>
+              <h3 className="text-2xl font-black text-solar-text mb-3">
+                {user.rejected
+                  ? (isAr ? 'حساب المورد مرفوض أو معلق' : 'Supplier Account Rejected')
+                  : (isAr ? 'حساب المورد قيد المراجعة' : 'Supplier Account Under Review')}
+              </h3>
+              <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded-2xl p-4 font-black text-sm sm:text-base leading-relaxed mb-6">
+                {user.rejected
+                  ? (isAr
+                      ? 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
+                      : 'Your supplier account has been rejected or suspended by Enerjoo administration.')
+                  : (isAr
+                      ? 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+                      : 'Your account is under review. You can add your products after your account is approved by Enerjoo administration.')}
+              </p>
+              <button
+                onClick={() => navigateToView('supplier-dashboard')}
+                className="bg-solar-blue text-white px-8 py-3.5 rounded-2xl font-black cursor-pointer hover:opacity-90 transition"
+              >
+                {isAr ? 'العودة إلى لوحة تحكم المورد' : 'Back to Supplier Dashboard'}
+              </button>
+            </div>
+          );
+        }
         return <AddProductView lang={lang} onBack={() => { navigateBack(user?.type === 'supplier' || user?.type === 'admin' ? 'supplier-dashboard' : 'home'); setEditingProduct(null); }} onAdd={handleProductAction} editingProduct={editingProduct} />;
       case 'login':
         return <LoginView lang={lang} setView={navigateToView} />;
       case 'register':
         return <RegisterView lang={lang} setView={navigateToView} />;
       case 'supplier-dashboard':
-        if (!user) return <LoginView lang={lang} setView={navigateToView} />;
+        if (!user) return <LoginView lang={lang} setView={navigateToView} defaultTab="email" />;
         if (user.type !== 'supplier' && user.type !== 'admin') {
           return (
             <div className="py-20 text-center bg-white rounded-[40px] p-8 border border-solar-border shadow-sm max-w-xl mx-auto">
@@ -1245,14 +1302,14 @@ export default function App() {
       
       {user && (
         <div className="max-w-7xl mx-auto px-3 sm:px-4 mt-2 w-full max-w-full box-border">
-          {/* Case 2: Supplier, but admin has not approved them yet */}
-          {user.type === 'supplier' && !user.verified && (
-            <div className="bg-blue-600 text-white text-xs py-3.5 px-4 font-bold flex items-center justify-center gap-2 rounded-2xl border border-blue-700/30 shadow-md">
-              <span className="text-sm">🕒</span>
+          {/* Case 2: Supplier explicitly suspended/rejected */}
+          {user.type === 'supplier' && user.rejected && (
+            <div className="bg-amber-600 text-white text-xs py-3.5 px-4 font-bold flex items-center justify-center gap-2 rounded-2xl border border-amber-700/30 shadow-md">
+              <span className="text-sm">⚠️</span>
               <span>
                 {isAr
-                  ? 'حساب المورد الخاص بك قيد الانتظار لمراجعة الإدارة والموافقة (Pending Approval). لن تتمكن من إضافة ونشر منتجاتك حتى يتم التوثيق.'
-                  : 'Your supplier account is pending admin approval. You will be able to add and publish products once your profile is verified.'}
+                  ? 'تم تعليق حساب المورد هذا من قبل الإدارة. يرجى التواصل مع إدارة المنصة للمراجعة.'
+                  : 'Your supplier account has been suspended by administration. Please contact support.'}
               </span>
             </div>
           )}
