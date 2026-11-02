@@ -144,8 +144,12 @@ export const SupplierDashboard: React.FC<SupplierDashboardProps> = ({
 
   const groupedProducts = React.useMemo(() => {
     const groups: Record<string, Product[]> = {};
+    const seenIds = new Set<string>();
     myProducts.forEach(p => {
-      const cat = p.category.toLowerCase();
+      const pId = String((p as any).product_id ?? p.id ?? '').trim();
+      if (!pId || seenIds.has(pId)) return;
+      seenIds.add(pId);
+      const cat = (p.category || 'panels').toLowerCase();
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(p);
     });

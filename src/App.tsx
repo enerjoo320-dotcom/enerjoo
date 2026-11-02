@@ -32,7 +32,9 @@ import {
   updateProduct,
   deleteProduct,
   toggleSupplierVerification,
-  getInitialLocalProducts
+  getInitialLocalProducts,
+  deduplicateProducts,
+  getCanonicalProductId
 } from './services/firestoreService';
 import { 
   getInitialExchangePrices, 
@@ -72,7 +74,8 @@ export default function App() {
   const [rawProducts, setRawProducts] = useState<Product[]>([]);
   const setProducts = setRawProducts;
   const products = useMemo(() => {
-    return applySolarPanelPricingToProducts(rawProducts, exchangePrices);
+    const uniqueRaw = deduplicateProducts(rawProducts);
+    return applySolarPanelPricingToProducts(uniqueRaw, exchangePrices);
   }, [rawProducts, exchangePrices]);
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -455,7 +458,7 @@ export default function App() {
     // Setup real-time listeners for products, suppliers and energy exchange
     const unsubProducts = subscribeToProducts((loadedProducts) => {
       if (Array.isArray(loadedProducts)) {
-        setProducts(loadedProducts);
+        setProducts(deduplicateProducts(loadedProducts));
       }
     });
     const unsubSuppliers = subscribeToSuppliers(setSuppliers);
@@ -519,7 +522,7 @@ export default function App() {
 
   // Consolidated Filtering and Sorting Logic
   const filteredProducts = useMemo(() => {
-    let items = [...products];
+    let items = deduplicateProducts(products);
 
     // Filter by supplier if requested
     if (supplierFilterId) {
@@ -599,13 +602,16 @@ export default function App() {
   }, [products, searchTerm, activeFilters, advancedFilters, inverterFilters, isAr, useAiSearch, semanticResults, supplierFilterId]);
 
   const toggleCompare = (product: Product) => {
+    const targetId = getCanonicalProductId(product);
     setCompareList(prev => {
-      if (prev.find(p => p.id === product.id)) return prev.filter(p => p.id !== product.id);
+      if (prev.find(p => getCanonicalProductId(p) === targetId)) {
+        return prev.filter(p => getCanonicalProductId(p) !== targetId);
+      }
       if (prev.length >= 4) {
         alert(isAr ? 'يمكنك مقارنة 4 منتجات فقط' : 'You can compare up to 4 products');
         return prev;
       }
-      return [...prev, product];
+      return deduplicateProducts([...prev, product]);
     });
   };
 
@@ -614,9 +620,12 @@ export default function App() {
       navigateToView('login');
       return;
     }
+    const targetId = getCanonicalProductId(product);
     setWishlist(prev => {
-      if (prev.find(p => p.id === product.id)) return prev.filter(p => p.id !== product.id);
-      return [...prev, product];
+      if (prev.find(p => getCanonicalProductId(p) === targetId)) {
+        return prev.filter(p => getCanonicalProductId(p) !== targetId);
+      }
+      return deduplicateProducts([...prev, product]);
     });
   };
 
@@ -643,9 +652,9 @@ export default function App() {
         };
         // Wait for confirmed database update before updating UI state or navigating away
         await updateProduct(prodId, mergedProduct);
-        setProducts(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
-        setCompareList(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
-        setWishlist(prev => prev.map(p => p.id.toString() === prodId ? mergedProduct : p));
+        setProducts(prev => deduplicateProducts(prev.map(p => p.id.toString() === prodId ? mergedProduct : p)));
+        setCompareList(prev => deduplicateProducts(prev.map(p => p.id.toString() === prodId ? mergedProduct : p)));
+        setWishlist(prev => deduplicateProducts(prev.map(p => p.id.toString() === prodId ? mergedProduct : p)));
         if (selectedProduct && selectedProduct.id.toString() === prodId) {
           setSelectedProduct(mergedProduct);
         }
@@ -656,7 +665,14 @@ export default function App() {
           ...productData,
           id: newId
         } as Product;
-        setProducts(prev => [createdProduct, ...prev]);
+        setProducts(prev => {
+          const targetId = String(newId).trim();
+          const exists = prev.some(p => getCanonicalProductId(p) === targetId);
+          const next = exists
+            ? prev.map(p => getCanonicalProductId(p) === targetId ? { ...p, ...createdProduct, id: p.id || newId } : p)
+            : [createdProduct, ...prev];
+          return deduplicateProducts(next);
+        });
       }
       navigateToView(user?.type === 'supplier' || user?.type === 'admin' ? 'supplier-dashboard' : 'home');
     } catch (err: any) {
@@ -910,7 +926,7 @@ export default function App() {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                               {group.items.map(p => (
                                 <ProductCard 
-                                  key={p.id}
+                                  key={getCanonicalProductId(p)}
                                   product={p} 
                                   lang={lang} 
                                   onClick={() => navigateToProduct(p)} 
@@ -925,8 +941,8 @@ export default function App() {
                                     e.stopPropagation();
                                     setProductToDelete(product);
                                   }}
-                                  isCompared={!!compareList.find(cp => cp.id === p.id)}
-                                  isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
+                                  isCompared={!!compareList.find(cp => getCanonicalProductId(cp) === getCanonicalProductId(p))}
+                                  isWishlisted={!!wishlist.find(wp => getCanonicalProductId(wp) === getCanonicalProductId(p))}
                                 />
                               ))}
                             </div>
@@ -941,7 +957,7 @@ export default function App() {
                   {filteredProducts.map(p => {
                     const aiResult = semanticResults.find(r => r.productId === p.id?.toString());
                     return (
-                      <div key={p.id} className="relative group">
+                      <div key={getCanonicalProductId(p)} className="relative group">
                         <ProductCard 
                           product={p} 
                           lang={lang} 
@@ -957,8 +973,8 @@ export default function App() {
                             e.stopPropagation();
                             setProductToDelete(product);
                           }}
-                          isCompared={!!compareList.find(cp => cp.id === p.id)}
-                          isWishlisted={!!wishlist.find(wp => wp.id === p.id)}
+                          isCompared={!!compareList.find(cp => getCanonicalProductId(cp) === getCanonicalProductId(p))}
+                          isWishlisted={!!wishlist.find(wp => getCanonicalProductId(wp) === getCanonicalProductId(p))}
                         />
                         {useAiSearch && aiResult && (
                           <div className="absolute top-2 right-2 bg-solar-blue text-white p-2 rounded-xl shadow-xl z-20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none max-w-[200px]">

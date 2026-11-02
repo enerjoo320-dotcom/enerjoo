@@ -717,10 +717,22 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const effectivePrimarySupplier = resolvedPrimarySupplier ? { ...primarySupplierObj, ...resolvedPrimarySupplier } : primarySupplierObj;
   const primarySupplierDisplayName = getSupplierDisplayName(effectivePrimarySupplier, isAr);
 
-  const otherProducts = allProducts.filter(p => 
-    p.id !== product.id && 
-    p.supplierId === supplierId
-  ).slice(0, 4);
+  const otherProducts = useMemo(() => {
+    if (!supplierId) return [];
+    const seen = new Set<string>();
+    const currentId = String((product as any).product_id ?? product.id);
+    const result: Product[] = [];
+    for (const p of allProducts) {
+      const pId = String((p as any).product_id ?? p.id);
+      if (!pId || pId === currentId || seen.has(pId)) continue;
+      if (String(p.supplierId) === String(supplierId)) {
+        seen.add(pId);
+        result.push(p);
+        if (result.length >= 4) break;
+      }
+    }
+    return result;
+  }, [allProducts, product, supplierId]);
 
   const handleDownloadDatasheet = () => {
     if (!product.datasheetUrl) return;

@@ -73,10 +73,40 @@ export const unmarkProductAsDeleted = (productId: string | number): void => {
   }
 };
 
+export const getCanonicalProductId = (item: any): string => {
+  if (!item || typeof item !== 'object') return '';
+  const rawId = item.product_id ?? item.id ?? '';
+  return String(rawId).trim();
+};
+
 export const filterDeletedProducts = (products: Product[]): Product[] => {
   const deletedSet = getDeletedProductIds();
   if (deletedSet.size === 0) return products;
-  return products.filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
+  return products.filter(p => {
+    const cId = getCanonicalProductId(p);
+    return !deletedSet.has(cId) && !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id));
+  });
+};
+
+export const deduplicateProducts = (products: Product[]): Product[] => {
+  if (!Array.isArray(products) || products.length === 0) return [];
+  const deletedSet = getDeletedProductIds();
+  const uniqueMap = new Map<string, Product>();
+
+  for (const item of products) {
+    if (!item) continue;
+    const canonicalId = getCanonicalProductId(item);
+    if (!canonicalId || deletedSet.has(canonicalId) || deletedSet.has(String(item.id))) {
+      continue;
+    }
+    const normalizedItem: Product = {
+      ...item,
+      id: item.id ?? canonicalId,
+    };
+    uniqueMap.set(canonicalId, normalizedItem);
+  }
+
+  return Array.from(uniqueMap.values());
 };
 
 const EDITED_PRODUCTS_STORAGE_KEY = 'enerjoo_edited_products_v1';
@@ -225,14 +255,18 @@ const getProductsApiBaseUrl = () => {
 // In-memory product listeners to notify active components immediately upon product mutations
 type ProductsListener = (products: Product[]) => void;
 const activeProductListeners: Set<ProductsListener> = new Set();
+let latestProductsFetchSeq = 0;
 
 const notifyProductListeners = async () => {
   if (activeProductListeners.size === 0) return;
+  const currentSeq = ++latestProductsFetchSeq;
   try {
     const products = await getProducts();
+    if (currentSeq !== latestProductsFetchSeq) return;
+    const uniqueProducts = deduplicateProducts(products);
     for (const listener of activeProductListeners) {
       try {
-        listener(products);
+        listener(uniqueProducts);
       } catch (err) {
         console.error('Error in product listener callback:', err);
       }
@@ -639,7 +673,7 @@ function normalizeD1Brand(rawBrand?: string | null, model?: string | null): stri
 }
 
 function mapD1ProductToProduct(d1Item: any): Product {
-  const id = d1Item.product_id || d1Item.id || '';
+  const id = getCanonicalProductId(d1Item);
   const baseMatch = productsData.find(b => String(b.id) === String(id));
   const localEdited = getEditedProducts()[String(id)];
   const isEdited = Boolean(
@@ -1089,10 +1123,10 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
 export const getProducts = async (): Promise<Product[]> => {
   const deletedSet = getDeletedProductIds();
   try {
-    const data = await requestProductsApi<{ success?: boolean; ok?: boolean; d1_count?: number; deleted_ids?: string[]; products: any[] }>('/products');
+    const data = await requestProductsApi<{ success?: boolean; ok?: boolean; count?: number; d1_count?: number; deleted_ids?: string[]; products: any[] }>('/products');
     if (data && Array.isArray(data.deleted_ids)) {
       for (const delId of data.deleted_ids) {
-        const dStr = String(delId);
+        const dStr = String(delId).trim();
         deletedSet.add(dStr);
         markProductAsDeleted(dStr);
       }
@@ -1101,8 +1135,8 @@ export const getProducts = async (): Promise<Product[]> => {
     if (data && Array.isArray(data.products)) {
       let rawD1List = [...data.products];
 
-      // If response comes directly from the deployed Cloudflare Worker (which caps each response at 10 items), harvest all partitions
-      if (rawD1List.length > 0 && rawD1List.length <= 10 && !data.d1_count) {
+      // Only harvest partitions if the response came from a legacy 10-item-capped Worker response without count/d1_count
+      if (rawD1List.length === 10 && !data.d1_count && data.count === undefined) {
         const partitions = [
           'PROD-1789',
           'PROD-1790081', 'PROD-1790082', 'PROD-1790083', 'PROD-1790085', 'PROD-1790086', 'PROD-1790087',
@@ -1110,12 +1144,16 @@ export const getProducts = async (): Promise<Product[]> => {
           'PROD-179028', 'PROD-179052', 'PROD-179092', 'PROD-17910', 'PROD-17913', 'PROD-17914', 'PROD-17917', 'PROD-1792', 'PROD-1793'
         ];
         const partMap = new Map<string, any>();
-        for (const p of rawD1List) partMap.set(String(p.product_id || p.id), p);
+        for (const p of rawD1List) {
+          const cId = getCanonicalProductId(p);
+          if (cId) partMap.set(cId, p);
+        }
         await Promise.all(partitions.map(async (q) => {
           try {
             const pData = await requestProductsApi<{ products?: any[] }>(`/products?q=${encodeURIComponent(q)}`);
             for (const item of (pData.products || [])) {
-              partMap.set(String(item.product_id || item.id), item);
+              const cId = getCanonicalProductId(item);
+              if (cId) partMap.set(cId, item);
             }
           } catch {
             // Ignore partition failure
@@ -1126,23 +1164,29 @@ export const getProducts = async (): Promise<Product[]> => {
 
       const mappedD1 = rawD1List
         .filter(p => {
-          const pId = String(p.product_id || p.id);
-          return !deletedSet.has(pId);
+          const pId = getCanonicalProductId(p);
+          return Boolean(pId) && !deletedSet.has(pId);
         })
         .map(mapD1ProductToProduct)
-        .filter(p => !deletedSet.has(String(p.id)) && !deletedSet.has(String((p as any).product_id)));
+        .filter(p => {
+          const cId = getCanonicalProductId(p);
+          return Boolean(cId) && !deletedSet.has(cId) && !deletedSet.has(String(p.id));
+        });
 
-      // D1 is the sole Single Source of Truth - only live database records are kept
+      // D1 is the sole Single Source of Truth - deduplicate strictly by canonical product ID
       const productsMap = new Map<string, Product>();
       for (const d1Prod of mappedD1) {
-        const id = String(d1Prod.id);
-        productsMap.set(id, d1Prod);
+        const id = getCanonicalProductId(d1Prod);
+        if (id) {
+          productsMap.set(id, d1Prod);
+        }
       }
 
       // Overlay locally edited products for records existing in D1
       const editedMap = getEditedProducts();
-      for (const [id, editedProd] of Object.entries(editedMap)) {
-        if (!deletedSet.has(id) && productsMap.has(id)) {
+      for (const [rawId, editedProd] of Object.entries(editedMap)) {
+        const id = String(rawId).trim();
+        if (id && !deletedSet.has(id) && productsMap.has(id)) {
           const existing = productsMap.get(id)!;
           productsMap.set(id, {
             ...existing,
@@ -1156,7 +1200,7 @@ export const getProducts = async (): Promise<Product[]> => {
         }
       }
 
-      return Array.from(productsMap.values());
+      return deduplicateProducts(Array.from(productsMap.values()));
     }
 
     return [];
@@ -1253,15 +1297,16 @@ export const matchCatalogInverters = async (
  */
 export const subscribeToProducts = (callback: (products: Product[]) => void): (() => void) => {
   let isSubscribed = true;
+  const initialSeq = ++latestProductsFetchSeq;
 
   // Initial load from Cloudflare D1 / Backend API
   getProducts().then(products => {
-    if (isSubscribed && products) {
-      callback(products);
+    if (isSubscribed && products && initialSeq === latestProductsFetchSeq) {
+      callback(deduplicateProducts(products));
     }
   }).catch(error => {
     console.warn('Cloudflare D1 Products Initial Load Notice:', error);
-    if (isSubscribed) {
+    if (isSubscribed && initialSeq === latestProductsFetchSeq) {
       callback([]);
     }
   });
@@ -1269,7 +1314,7 @@ export const subscribeToProducts = (callback: (products: Product[]) => void): ((
   // Track active listener to push updates whenever addProduct, updateProduct or deleteProduct is called
   const listener: ProductsListener = (updatedProducts) => {
     if (isSubscribed && updatedProducts) {
-      callback(filterDeletedProducts(updatedProducts));
+      callback(deduplicateProducts(filterDeletedProducts(updatedProducts)));
     }
   };
   activeProductListeners.add(listener);
