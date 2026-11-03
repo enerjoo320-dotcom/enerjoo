@@ -245,6 +245,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 // Cloudflare D1 Products API
 const CF_DIRECT_BASE_URL = 'https://enerjoo-api.enerjoo320.workers.dev';
 const getProductsApiBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host.endsWith('.run.app')) {
+      return '/api';
+    }
+  }
   const envUrl = (import.meta as any).env?.VITE_PRODUCTS_API_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
     return envUrl.trim().replace(/\/+$/, '');
@@ -353,16 +359,17 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     typeof window !== 'undefined' &&
     (window.location.hostname.endsWith('.run.app') || window.location.hostname === 'localhost');
   const canFallbackToDirectWorker =
-    typeof window === 'undefined' ||
-    window.location.hostname === 'enerjoo.com' ||
-    window.location.hostname.endsWith('.enerjoo.com');
+    !isWriteMethod &&
+    (typeof window === 'undefined' ||
+      window.location.hostname === 'enerjoo.com' ||
+      window.location.hostname.endsWith('.enerjoo.com'));
 
   let idToken = '';
   if (isWriteMethod) {
     idToken = await getFirebaseIdTokenForWrite(false);
+    // In preview container (.run.app / localhost), send X-Firebase-Auth on same-origin /api requests
+    // and also send Authorization: Bearer <idToken>. If Cloud Run GFE intercepts Authorization, retry with X-Firebase-Auth only.
     requestHeaders['Authorization'] = `Bearer ${idToken}`;
-    // Only send X-Firebase-Auth on same-origin proxy in preview container to prevent Cloud Run GFE interception
-    // NEVER send it to Cloudflare Worker directly because its CORS policy strictly permits 'Content-Type, Authorization'
     if (isPreviewContainer && baseUrl === '/api') {
       requestHeaders['X-Firebase-Auth'] = idToken;
     }
@@ -384,8 +391,7 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const currentHeaders = { ...headersToUse };
-        // On retry in preview container after a redirect/network error, keep X-Firebase-Auth and omit Authorization
-        // in case the upstream container proxy intercepted the Authorization header
+        // On retry in preview container after a redirect/network error or gateway interception, keep X-Firebase-Auth and omit Authorization
         if (attempt > 1 && isPreviewContainer && isWriteMethod && idToken) {
           await fetch('/api/health', { method: 'GET', cache: 'no-store', credentials: 'same-origin' }).catch(() => {});
           delete currentHeaders['Authorization'];
@@ -400,11 +406,16 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
         });
 
         const contentType = response.headers.get('content-type') || '';
+        const isNonJsonAuthInterception =
+          targetUrl.startsWith('/api') &&
+          (response.status === 401 || response.status === 403) &&
+          !contentType.includes('application/json');
         const isTransientHtmlOrGateway =
           response.redirected ||
           response.status === 502 ||
           response.status === 503 ||
           response.status === 504 ||
+          isNonJsonAuthInterception ||
           (targetUrl.startsWith('/api') && contentType.includes('text/html'));
 
         if (isTransientHtmlOrGateway && attempt < maxAttempts) {
@@ -469,10 +480,11 @@ async function requestProductsApi<T>(path: string, options?: RequestInit): Promi
       const refreshedToken = await getFirebaseIdTokenForWrite(true);
       if (refreshedToken) {
         idToken = refreshedToken;
-        requestHeaders['Authorization'] = `Bearer ${idToken}`;
         if (isPreviewContainer && baseUrl === '/api') {
+          delete requestHeaders['Authorization'];
           requestHeaders['X-Firebase-Auth'] = idToken;
         } else {
+          requestHeaders['Authorization'] = `Bearer ${idToken}`;
           delete requestHeaders['X-Firebase-Auth'];
         }
         res = await fetch(url, {
@@ -1513,7 +1525,7 @@ export const verifyCurrentSupplierApprovalStatus = async (): Promise<{
     return { uid, role: 'admin' };
   }
 
-  if (data?.type === 'supplier') {
+  if (data?.type === 'supplier' || data?.role === 'supplier') {
     if (Boolean(data.rejected)) {
       const rejErr: any = new Error(
         'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.'
@@ -1522,7 +1534,7 @@ export const verifyCurrentSupplierApprovalStatus = async (): Promise<{
       rejErr.code = 'SUPPLIER_REJECTED';
       throw rejErr;
     }
-    if (data.verified !== true) {
+    if (data.verified !== true && data.verified !== 'true' && data.verified !== 1) {
       const unvErr: any = new Error(
         'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
       );
@@ -1534,10 +1546,10 @@ export const verifyCurrentSupplierApprovalStatus = async (): Promise<{
   }
 
   const roleErr: any = new Error(
-    'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.'
+    'هذا الحساب مسجل كعميل وليس كمورد. إضافة المنتجات وتعديلها وحذفها متاحة للموردين المعتمدين وإدارة المنصة فقط.'
   );
   roleErr.status = 403;
-  roleErr.code = 'SUPPLIER_NOT_VERIFIED';
+  roleErr.code = 'CUSTOMER_FORBIDDEN';
   throw roleErr;
 };
 
@@ -1569,11 +1581,21 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
   const newProductId = (product.id ? String(product.id) : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`).toUpperCase();
   const productWithSupplier =
     authInfo.role === 'supplier'
-      ? { ...product, supplierId: authInfo.uid, verified: true }
+      ? {
+          ...product,
+          supplierId: authInfo.uid,
+          suppliers: Array.isArray(product.suppliers) && product.suppliers.length > 0
+            ? product.suppliers.map(s => ({ ...s, id: authInfo.uid, verified: true }))
+            : undefined,
+          verified: true
+        }
       : { ...product, verified: true };
   const payload = {
     ...mapProductToD1Payload(productWithSupplier),
-    product_id: newProductId
+    product_id: newProductId,
+    ...(authInfo.role === 'supplier'
+      ? { supplier_id: authInfo.uid, supplier: authInfo.uid, supplierId: authInfo.uid }
+      : {})
   };
 
   let createdId = newProductId;
@@ -1613,14 +1635,29 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
 
 /**
  * Update an existing product in Cloudflare D1 via Worker API (PUT /products/:id).
- * Strictly requires an approved supplier (`verified === true && !rejected`) or admin.
+ * Strictly requires an approved supplier (`verified === true && !rejected`) owning the product, or admin.
  * Strictly verifies that the API operation succeeded before persisting local state or reporting success.
  */
 export const updateProduct = async (productId: string | number, data: Partial<Product>): Promise<void> => {
-  await verifyCurrentSupplierApprovalStatus();
+  const authInfo = await verifyCurrentSupplierApprovalStatus();
   const pId = String(productId);
-  const payload = mapProductToD1Payload(data);
+  const sanitizedData: Partial<Product> =
+    authInfo.role === 'supplier'
+      ? {
+          ...data,
+          supplierId: authInfo.uid,
+          suppliers: Array.isArray(data.suppliers) && data.suppliers.length > 0
+            ? data.suppliers.map(s => ({ ...s, id: authInfo.uid }))
+            : data.suppliers
+        }
+      : data;
+
+  const payload = mapProductToD1Payload(sanitizedData);
   payload.product_id = pId;
+  if (authInfo.role === 'supplier') {
+    payload.supplier_id = authInfo.uid;
+    payload.supplier = authInfo.uid;
+  }
   payload.updated_at = new Date().toISOString();
 
   try {
@@ -1633,9 +1670,11 @@ export const updateProduct = async (productId: string | number, data: Partial<Pr
     );
   } catch (putErr: any) {
     // Only fallback to POST /products if PUT returned 404 specifically because a baseline product row is not yet in D1
-    // (NOT when the PUT endpoint route itself is missing on the Worker, which returns code === 'NOT_FOUND' / 'المسار غير موجود.')
-    const isRouteMissing = putErr?.code === 'NOT_FOUND' || String(putErr?.detail || '').includes('المسار غير موجود');
-    if (putErr?.status === 404 && !isRouteMissing) {
+    const isRouteMissing =
+      putErr?.code === 'NOT_FOUND' ||
+      putErr?.code === 'PRODUCT_NOT_FOUND' ||
+      String(putErr?.detail || '').includes('المسار غير موجود');
+    if (putErr?.status === 404 && !isRouteMissing && authInfo.role === 'admin') {
       await requestProductsApi<{ success?: boolean; ok?: boolean }>(`/products`, {
         method: 'POST',
         body: JSON.stringify(payload)
@@ -1647,7 +1686,7 @@ export const updateProduct = async (productId: string | number, data: Partial<Pr
 
   // Persist locally and notify listeners ONLY after backend API confirms success
   unmarkProductAsDeleted(pId);
-  saveEditedProduct(pId, data);
+  saveEditedProduct(pId, sanitizedData);
   await notifyProductListeners();
 };
 
@@ -1667,7 +1706,10 @@ export const deleteProduct = async (productId: string | number): Promise<void> =
       }
     );
   } catch (delErr: any) {
-    const isRouteMissing = delErr?.code === 'NOT_FOUND' || String(delErr?.detail || '').includes('المسار غير موجود');
+    const isRouteMissing =
+      delErr?.code === 'NOT_FOUND' ||
+      delErr?.code === 'PRODUCT_NOT_FOUND' ||
+      String(delErr?.detail || '').includes('المسار غير موجود');
     const isBaselineCatalogItem = productsData.some(p => String(p.id) === pId);
     if (delErr?.status === 404 && !isRouteMissing && isBaselineCatalogItem) {
       // Product only existed in baseline catalog and is already absent from remote D1

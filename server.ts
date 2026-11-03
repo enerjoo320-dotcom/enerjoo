@@ -1192,6 +1192,14 @@ async function startServer() {
       ? parsedSuppliers
       : (baseMatch?.suppliers || []);
 
+    const resolvedSupplierId = String(
+      p.supplier_id ||
+      p.supplierId ||
+      p.supplier ||
+      (Array.isArray(suppliers) && suppliers[0]?.id ? suppliers[0].id : '') ||
+      ''
+    ).trim();
+
     return {
       ...p,
       id,
@@ -1220,6 +1228,9 @@ async function startServer() {
       description: notes,
       specs,
       suppliers,
+      supplierId: resolvedSupplierId,
+      supplier_id: resolvedSupplierId,
+      supplier: resolvedSupplierId,
       _isEdited: isEdited,
       source: p._fromD1 ? 'd1' : (baseMatch ? 'catalog' : 'd1')
     };
@@ -1289,6 +1300,14 @@ async function startServer() {
 
       await Promise.all(D1_PARTITIONS.map(q => fetchPartition(q)));
 
+      // Preserve locally created/edited non-deleted products so D1 cache refresh never wipes supplier additions
+      for (const [id, editedProd] of editedProductsMap.entries()) {
+        if (id && !deletedProductIds.has(id)) {
+          const current = discovered.get(id) || {};
+          discovered.set(id, { ...current, ...editedProd, _fromD1: true });
+        }
+      }
+
       liveD1ProductsCache = discovered;
       lastD1CacheTime = Date.now();
       d1FetchInFlight = null;
@@ -1336,9 +1355,9 @@ async function startServer() {
       console.warn("Notice: could not reach remote Cloudflare Worker for authoritative products:", cfErr);
     }
 
-    // 2. Overlay locally edited products only if they exist in live D1
+    // 2. Overlay locally created/edited products that are not deleted
     for (const [id, editedProd] of editedProductsMap.entries()) {
-      if (!deletedProductIds.has(id) && productsMap.has(id)) {
+      if (!deletedProductIds.has(id)) {
         const current = productsMap.get(id) || {};
         productsMap.set(id, normalizeProductRecord({ ...current, ...editedProd }));
       }
@@ -1509,9 +1528,9 @@ ${urls.join("\n")}
         console.warn("Notice: could not reach remote Cloudflare Worker:", cfErr);
       }
 
-      // 2. Only overlay locally edited products that exist in live D1
+      // 2. Overlay locally created/edited products that are not deleted
       for (const [id, editedProd] of editedProductsMap.entries()) {
-        if (!deletedProductIds.has(id) && productsMap.has(id)) {
+        if (!deletedProductIds.has(id)) {
           const current = productsMap.get(id) || {};
           productsMap.set(id, normalizeProductRecord({ ...current, ...editedProd }));
         }
@@ -1920,6 +1939,13 @@ ${urls.join("\n")}
         sendAuth: tokenProjectId === configuredProjectId
       }
     ];
+    if (tokenProjectId === configuredProjectId) {
+      candidateTargets.push({
+        projectId: configuredProjectId,
+        databaseId: configuredDatabaseId,
+        sendAuth: false
+      });
+    }
     if (tokenProjectId !== configuredProjectId) {
       candidateTargets.push({
         projectId: tokenProjectId,
@@ -1940,29 +1966,32 @@ ${urls.join("\n")}
     }
 
     let userDocFields: Record<string, any> | null = null;
-    for (const target of candidateTargets) {
-      const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-        target.projectId
-      )}/databases/${encodeURIComponent(target.databaseId)}/documents/users/${encodeURIComponent(uid)}`;
-      try {
-        const headers: Record<string, string> = {};
-        if (target.sendAuth) {
-          headers["Authorization"] = `Bearer ${rawToken}`;
-        }
-        const fsRes = await fetch(firestoreUrl, {
-          method: "GET",
-          headers,
-          signal: AbortSignal.timeout(5000)
-        });
-        if (fsRes.ok) {
-          const docJson: any = await fsRes.json();
-          if (docJson && docJson.fields) {
-            userDocFields = docJson.fields;
-            break;
+    for (const collectionName of ["users", "suppliers"]) {
+      if (userDocFields) break;
+      for (const target of candidateTargets) {
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+          target.projectId
+        )}/databases/${encodeURIComponent(target.databaseId)}/documents/${collectionName}/${encodeURIComponent(uid)}`;
+        try {
+          const headers: Record<string, string> = {};
+          if (target.sendAuth) {
+            headers["Authorization"] = `Bearer ${rawToken}`;
           }
+          const fsRes = await fetch(firestoreUrl, {
+            method: "GET",
+            headers,
+            signal: AbortSignal.timeout(5000)
+          });
+          if (fsRes.ok) {
+            const docJson: any = await fsRes.json();
+            if (docJson && docJson.fields) {
+              userDocFields = docJson.fields;
+              break;
+            }
+          }
+        } catch {
+          // Continue to next candidate target if any
         }
-      } catch {
-        // Continue to next candidate target if any
       }
     }
 
@@ -1971,9 +2000,21 @@ ${urls.join("\n")}
     )
       .toLowerCase()
       .trim();
-    const docType = String(userDocFields?.type?.stringValue || "").trim();
-    const docVerified = userDocFields?.verified?.booleanValue === true;
-    const docRejected = userDocFields?.rejected?.booleanValue === true;
+    const docType = String(
+      userDocFields?.type?.stringValue ||
+      userDocFields?.role?.stringValue ||
+      ""
+    )
+      .toLowerCase()
+      .trim();
+    const docVerified =
+      userDocFields?.verified?.booleanValue === true ||
+      userDocFields?.verified?.stringValue === "true" ||
+      userDocFields?.verified?.integerValue === "1";
+    const docRejected =
+      userDocFields?.rejected?.booleanValue === true ||
+      userDocFields?.rejected?.stringValue === "true" ||
+      userDocFields?.rejected?.integerValue === "1";
 
     const isExcludedAdmin = SERVER_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
     const isAdmin =
@@ -2036,9 +2077,79 @@ ${urls.join("\n")}
     return {
       allowed: false,
       status: 403,
-      code: "SUPPLIER_NOT_VERIFIED",
-      message: "حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo."
+      code: "CUSTOMER_FORBIDDEN",
+      message: "هذا الحساب مسجل كعميل وليس كمورد. إضافة المنتجات وتعديلها وحذفها متاحة للموردين المعتمدين وإدارة المنصة فقط."
     };
+  }
+
+  /**
+   * Resolves the authoritative owner (`supplier_id` / `supplierId` / `supplier`) of an existing product.
+   */
+  function extractProductSupplierOwnerId(product: any): string {
+    if (!product || typeof product !== "object") return "";
+    const directOwner =
+      product.supplier_id ||
+      product.supplierId ||
+      product.supplier ||
+      (Array.isArray(product.suppliers) && product.suppliers[0]?.id ? product.suppliers[0].id : "");
+    if (directOwner && typeof directOwner === "string") {
+      return directOwner.trim();
+    }
+    if (typeof product.suppliers === "string" && product.suppliers.trim().startsWith("[")) {
+      try {
+        const parsed = JSON.parse(product.suppliers);
+        if (Array.isArray(parsed) && parsed[0]?.id) {
+          return String(parsed[0].id).trim();
+        }
+      } catch {
+        // Ignore parse error
+      }
+    }
+    return "";
+  }
+
+  function isProductOwnedBySupplier(product: any, supplierUid: string): boolean {
+    const cleanUid = String(supplierUid || "").trim();
+    if (!cleanUid || !product) return false;
+    const ownerId = extractProductSupplierOwnerId(product);
+    if (ownerId && ownerId === cleanUid) return true;
+    if (Array.isArray(product.suppliers)) {
+      return product.suppliers.some((s: any) => String(s?.id || "").trim() === cleanUid);
+    }
+    return false;
+  }
+
+  async function findExistingProductForOwnershipCheck(productId: string): Promise<any | null> {
+    const pId = String(productId || "").trim();
+    if (!pId || deletedProductIds.has(pId)) return null;
+
+    if (editedProductsMap.has(pId)) {
+      return editedProductsMap.get(pId);
+    }
+    const foundActive = activeCatalogProducts.find(
+      p => String(p.product_id) === pId || String(p.id) === pId
+    );
+    if (foundActive) return foundActive;
+
+    if (liveD1ProductsCache.has(pId)) {
+      return liveD1ProductsCache.get(pId);
+    }
+
+    try {
+      const d1Map = await fetchAllLiveD1Products();
+      if (d1Map.has(pId)) {
+        return d1Map.get(pId);
+      }
+    } catch {
+      // Ignore network error
+    }
+
+    const foundBaseline = productsData.find(p => String(p.id) === pId);
+    if (foundBaseline && !deletedProductIds.has(pId)) {
+      return foundBaseline;
+    }
+
+    return null;
   }
 
   // POST /api/products - Create a new product (requires verified Supplier or Admin)
@@ -2079,11 +2190,43 @@ ${urls.join("\n")}
         ? rawId
         : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
 
-      // Enforce authoritative supplier_id and verified flag on server side
+      // Prevent a Supplier from overwriting an existing product belonging to another supplier via POST
+      const existingProduct = await findExistingProductForOwnershipCheck(newId);
+      if (existingProduct && authCheck.role === "supplier") {
+        if (!isProductOwnedBySupplier(existingProduct, authCheck.uid!)) {
+          return res.status(403).json({
+            ok: false,
+            success: false,
+            error: {
+              code: "PRODUCT_OWNERSHIP_FORBIDDEN",
+              message: "غير مصرح لك بتعديل أو استبدال منتج تابع لمورد آخر."
+            }
+          });
+        }
+      }
+
+      // Enforce authoritative supplier_id and verified flag on server side (never trust client-supplied supplier_id for suppliers)
       const authoritativeSupplierId =
         authCheck.role === "supplier"
-          ? authCheck.uid
-          : body.supplier_id || body.supplier || authCheck.uid;
+          ? authCheck.uid!
+          : String(body.supplier_id || body.supplierId || body.supplier || authCheck.uid || "").trim();
+
+      const resolvedSuppliersArray = Array.isArray(body.suppliers) && body.suppliers.length > 0
+        ? body.suppliers.map((s: any) => ({
+            ...s,
+            id: authCheck.role === "supplier" ? authoritativeSupplierId : (s?.id || authoritativeSupplierId),
+            verified: true
+          }))
+        : [
+            {
+              id: authoritativeSupplierId,
+              name: body.supplier_name || "Enerjoo Certified Supplier",
+              nameAr: body.supplier_name_ar || "مورد معتمد",
+              price: body.price_egp ?? body.price ?? 0,
+              verified: true,
+              lastUpdate: new Date().toISOString().split("T")[0]
+            }
+          ];
 
       const newProduct: Record<string, any> = {
         ...body,
@@ -2091,7 +2234,9 @@ ${urls.join("\n")}
         model: body.model || body.name || newId,
         name: body.name || body.model || newId,
         supplier_id: authoritativeSupplierId,
+        supplierId: authoritativeSupplierId,
         supplier: authoritativeSupplierId,
+        suppliers: resolvedSuppliersArray,
         verified: true,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -2137,7 +2282,12 @@ ${urls.join("\n")}
 
         if (cfRes.status === 401 || cfRes.status === 403) {
           const errJson: any = await cfRes.json().catch(() => null);
-          if (errJson?.error?.code === "SUPPLIER_NOT_VERIFIED" || errJson?.error?.code === "SUPPLIER_REJECTED") {
+          if (
+            errJson?.error?.code === "SUPPLIER_NOT_VERIFIED" ||
+            errJson?.error?.code === "SUPPLIER_REJECTED" ||
+            errJson?.error?.code === "PRODUCT_OWNERSHIP_FORBIDDEN" ||
+            errJson?.error?.code === "CUSTOMER_FORBIDDEN"
+          ) {
             return res.status(403).json(errJson);
           }
         } else if (cfRes.status === 400) {
@@ -2180,7 +2330,7 @@ ${urls.join("\n")}
     }
   });
 
-  // Specialized PUT & PATCH handler for /api/products/:productId (requires verified Supplier or Admin)
+  // Specialized PUT & PATCH handler for /api/products/:productId (requires verified Supplier owning the product, or Admin)
   const handleUpdateProductRoute = async (req: express.Request, res: express.Response) => {
     const authHeader = extractBearerAuthHeader(req);
     const authCheck = await verifyAuthorizedProductPublisher(authHeader, false);
@@ -2201,6 +2351,32 @@ ${urls.join("\n")}
     }
 
     try {
+      const existing = await findExistingProductForOwnershipCheck(productId);
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          success: false,
+          error: {
+            code: "PRODUCT_NOT_FOUND",
+            message: `المنتج غير موجود: ${productId}`
+          }
+        });
+      }
+
+      // Strict Supplier Ownership Enforcement: Suppliers can ONLY edit products belonging to their own UID
+      if (authCheck.role === "supplier") {
+        if (!isProductOwnedBySupplier(existing, authCheck.uid!)) {
+          return res.status(403).json({
+            ok: false,
+            success: false,
+            error: {
+              code: "PRODUCT_OWNERSHIP_FORBIDDEN",
+              message: "غير مصرح لك بتعديل هذا المنتج لأنه تابع لمورد آخر."
+            }
+          });
+        }
+      }
+
       const sanitizedBody = sanitizeProductPayload(req.body || {});
       const numericValidation = validateAndNormalizeD1ProductNumericFields(sanitizedBody, { isUpdate: true });
       if (!numericValidation.valid) {
@@ -2218,6 +2394,30 @@ ${urls.join("\n")}
       }
 
       const safeBody = numericValidation.normalizedPayload;
+
+      // Never allow a supplier to alter product ownership (supplier_id / supplierId / supplier) during update
+      const authoritativeSupplierId =
+        authCheck.role === "supplier"
+          ? authCheck.uid!
+          : String(
+              safeBody.supplier_id ||
+              safeBody.supplierId ||
+              safeBody.supplier ||
+              extractProductSupplierOwnerId(existing) ||
+              authCheck.uid ||
+              ""
+            ).trim();
+
+      safeBody.supplier_id = authoritativeSupplierId;
+      safeBody.supplierId = authoritativeSupplierId;
+      safeBody.supplier = authoritativeSupplierId;
+      if (Array.isArray(safeBody.suppliers) && authCheck.role === "supplier") {
+        safeBody.suppliers = safeBody.suppliers.map((s: any) => ({
+          ...s,
+          id: authoritativeSupplierId
+        }));
+      }
+
       const workerUpdatePayload = {
         ...safeBody,
         specs: typeof safeBody.specs === "object" && safeBody.specs !== null
@@ -2255,19 +2455,14 @@ ${urls.join("\n")}
         await saveDeletedProducts();
       }
 
-      // Find existing product across all sources: edited, active, live D1 cache, baseline catalog
-      const existing: any = 
-        editedProductsMap.get(productId) ||
-        activeCatalogProducts.find(p => String(p.product_id) === productId || String(p.id) === productId) ||
-        liveD1ProductsCache.get(productId) ||
-        productsData.find(p => String(p.id) === productId) ||
-        {};
-      
       const mergedPayload = {
         ...existing,
         ...safeBody,
         product_id: productId,
         id: existing.id || productId,
+        supplier_id: authoritativeSupplierId,
+        supplierId: authoritativeSupplierId,
+        supplier: authoritativeSupplierId,
         specs: {
           ...(existing.specs || {}),
           ...(safeBody.specs || {})
@@ -2360,7 +2555,7 @@ ${urls.join("\n")}
     }
   });
 
-  // DELETE /api/products/:productId (requires verified Supplier or Admin)
+  // DELETE /api/products/:productId (requires verified Supplier owning the product, or Admin)
   app.delete("/api/products/:productId", async (req, res) => {
     const authHeader = extractBearerAuthHeader(req);
     const authCheck = await verifyAuthorizedProductPublisher(authHeader, false);
@@ -2381,6 +2576,31 @@ ${urls.join("\n")}
     }
     try {
       const pId = String(productId);
+      const existing = await findExistingProductForOwnershipCheck(pId);
+      if (!existing) {
+        return res.status(404).json({
+          ok: false,
+          success: false,
+          error: {
+            code: "PRODUCT_NOT_FOUND",
+            message: `المنتج غير موجود: ${pId}`
+          }
+        });
+      }
+
+      // Strict Supplier Ownership Enforcement: Suppliers can ONLY delete products belonging to their own UID
+      if (authCheck.role === "supplier") {
+        if (!isProductOwnedBySupplier(existing, authCheck.uid!)) {
+          return res.status(403).json({
+            ok: false,
+            success: false,
+            error: {
+              code: "PRODUCT_OWNERSHIP_FORBIDDEN",
+              message: "غير مصرح لك بحذف هذا المنتج لأنه تابع لمورد آخر."
+            }
+          });
+        }
+      }
 
       // Forward to Cloudflare Worker with Authorization Bearer header
       try {

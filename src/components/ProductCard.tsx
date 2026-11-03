@@ -38,7 +38,15 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const primarySupplier = product.suppliers?.[0];
   const isVerified = primarySupplier?.verified;
   const supplierName = getSupplierDisplayName(primarySupplier, isAr);
-  const isOwner = user?.uid === product.supplierId || user?.type === 'admin';
+  const userUid = String(user?.uid || '').trim();
+  const isOwner =
+    user?.type === 'admin' ||
+    (user?.type === 'supplier' &&
+      Boolean(userUid) &&
+      (String(product.supplierId || '').trim() === userUid ||
+        String((product as any).supplier_id || '').trim() === userUid ||
+        String((product as any).supplier || '').trim() === userUid ||
+        Boolean(product.suppliers?.some(s => String(s?.id || '').trim() === userUid))));
 
   // Swipe gesture state & motion values
   const x = useMotionValue(0);

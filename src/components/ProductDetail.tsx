@@ -58,7 +58,15 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({
   const t = translations[lang];
   const isAr = lang === 'ar';
   const isWishlisted = isInWishlist(product.id);
-  const isOwner = user?.uid === product.supplierId || user?.type === 'admin';
+  const userUid = String(user?.uid || '').trim();
+  const isOwner =
+    user?.type === 'admin' ||
+    (user?.type === 'supplier' &&
+      Boolean(userUid) &&
+      (String(product.supplierId || '').trim() === userUid ||
+        String((product as any).supplier_id || '').trim() === userUid ||
+        String((product as any).supplier || '').trim() === userUid ||
+        Boolean(product.suppliers?.some(s => String(s?.id || '').trim() === userUid))));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);

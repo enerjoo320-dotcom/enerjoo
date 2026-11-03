@@ -641,12 +641,34 @@ export default function App() {
     });
   };
 
+  const isProductOwnedByCurrentUser = (product?: Product | null): boolean => {
+    if (!user || !product) return false;
+    if (user.type === 'admin') return true;
+    if (user.type !== 'supplier') return false;
+    const uid = String(user.uid || '').trim();
+    if (!uid) return false;
+    return (
+      String(product.supplierId || '').trim() === uid ||
+      String((product as any).supplier_id || '').trim() === uid ||
+      String((product as any).supplier || '').trim() === uid ||
+      Boolean(product.suppliers?.some(s => String(s?.id || '').trim() === uid))
+    );
+  };
+
   const handleProductAction = async (productData: Omit<Product, 'id'>) => {
     if (!user || !auth.currentUser) {
       throw new Error(
         isAr
           ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من إضافة أو تعديل المنتجات.'
           : 'Please sign in to your Enerjoo account first to add or edit products.'
+      );
+    }
+
+    if (user.type !== 'admin' && user.type !== 'supplier') {
+      throw new Error(
+        isAr
+          ? 'هذا الحساب مسجل كعميل وليس كمورد. إضافة المنتجات وتعديلها وحذفها متاحة للموردين المعتمدين وإدارة المنصة فقط.'
+          : 'This account is registered as a customer. Only verified suppliers and administrators can manage products.'
       );
     }
 
@@ -668,11 +690,19 @@ export default function App() {
 
     try {
       if (editingProduct) {
+        if (user.type === 'supplier' && !isProductOwnedByCurrentUser(editingProduct)) {
+          throw new Error(
+            isAr
+              ? 'غير مصرح لك بتعديل هذا المنتج لأنه تابع لمورد آخر.'
+              : 'You are not authorized to edit this product because it belongs to another supplier.'
+          );
+        }
         const prodId = editingProduct.id.toString();
         const mergedProduct: Product = {
           ...editingProduct,
           ...productData,
           id: editingProduct.id,
+          supplierId: user.type === 'supplier' ? user.uid : (productData.supplierId || editingProduct.supplierId),
           specs: {
             ...(editingProduct.specs || {}),
             ...(productData.specs || {})
@@ -691,7 +721,8 @@ export default function App() {
         const newId = await addProduct(productData);
         const createdProduct: Product = {
           ...productData,
-          id: newId
+          id: newId,
+          supplierId: user.type === 'supplier' ? user.uid : productData.supplierId
         } as Product;
         setProducts(prev => {
           const targetId = String(newId).trim();
@@ -731,6 +762,15 @@ export default function App() {
         isAr
           ? 'يرجى تسجيل الدخول إلى حسابك في Enerjoo أولاً لتتمكن من حذف المنتج.'
           : 'Please sign in to your Enerjoo account first to delete this product.'
+      );
+      return;
+    }
+
+    if (user.type === 'supplier' && !isProductOwnedByCurrentUser(productToDelete)) {
+      setDeleteError(
+        isAr
+          ? 'غير مصرح لك بحذف هذا المنتج لأنه تابع لمورد آخر.'
+          : 'You are not authorized to delete this product because it belongs to another supplier.'
       );
       return;
     }

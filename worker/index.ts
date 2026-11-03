@@ -49,8 +49,8 @@ const getCorsHeaders = (request: Request): HeadersInit => {
 
   return {
     'Access-Control-Allow-Origin': isAllowed ? (origin || '*') : '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Firebase-Auth, X-Requested-With',
     'Access-Control-Max-Age': '86400',
   };
 };
@@ -66,8 +66,8 @@ function json(data: unknown, status = 200, request?: Request): Response {
     Object.assign(headers, getCorsHeaders(request));
   } else {
     headers['Access-Control-Allow-Origin'] = 'https://enerjoo.com';
-    headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-    headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With';
+    headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+    headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Firebase-Auth, X-Requested-With';
   }
 
   return new Response(JSON.stringify(data), {
@@ -110,6 +110,7 @@ function decodeBase64UrlJson(segment: string): any {
  */
 async function verifyWorkerProductPublisher(
   request: Request,
+  env: Env,
   requireAdminOnly = false
 ): Promise<{
   allowed: boolean;
@@ -187,14 +188,30 @@ async function verifyWorkerProductPublisher(
   const uid = payload.sub.trim();
   const tokenEmail = typeof payload.email === 'string' ? payload.email.toLowerCase().trim() : '';
 
-  const candidateTargets = [
+  const candidateTargets: Array<{ projectId: string; databaseId: string; sendAuth: boolean }> = [
     {
       projectId: 'gen-lang-client-0409057996',
       databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
       sendAuth: tokenProjectId === 'gen-lang-client-0409057996',
     },
   ];
-  if (tokenProjectId !== 'gen-lang-client-0409057996') {
+  if (tokenProjectId === 'gen-lang-client-0409057996') {
+    candidateTargets.push({
+      projectId: 'gen-lang-client-0409057996',
+      databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
+      sendAuth: false,
+    });
+    candidateTargets.push({
+      projectId: 'gen-lang-client-0409057996',
+      databaseId: '(default)',
+      sendAuth: true,
+    });
+  } else {
+    candidateTargets.push({
+      projectId: tokenProjectId,
+      databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
+      sendAuth: true,
+    });
     candidateTargets.push({
       projectId: tokenProjectId,
       databaseId: '(default)',
@@ -203,34 +220,78 @@ async function verifyWorkerProductPublisher(
   }
 
   let userDocFields: Record<string, any> | null = null;
-  for (const target of candidateTargets) {
-    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-      target.projectId
-    )}/databases/${encodeURIComponent(target.databaseId)}/documents/users/${encodeURIComponent(uid)}`;
-    try {
-      const headers: Record<string, string> = {};
-      if (target.sendAuth) {
-        headers['Authorization'] = `Bearer ${rawToken}`;
-      }
-      const fsRes = await fetch(firestoreUrl, { method: 'GET', headers });
-      if (fsRes.ok) {
-        const docJson: any = await fsRes.json();
-        if (docJson && docJson.fields) {
-          userDocFields = docJson.fields;
-          break;
+  for (const collectionName of ['users', 'suppliers']) {
+    if (userDocFields) break;
+    for (const target of candidateTargets) {
+      const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+        target.projectId
+      )}/databases/${encodeURIComponent(target.databaseId)}/documents/${collectionName}/${encodeURIComponent(uid)}`;
+      try {
+        const headers: Record<string, string> = {};
+        if (target.sendAuth) {
+          headers['Authorization'] = `Bearer ${rawToken}`;
         }
+        const fsRes = await fetch(firestoreUrl, { method: 'GET', headers });
+        if (fsRes.ok) {
+          const docJson: any = await fsRes.json();
+          if (docJson && docJson.fields) {
+            userDocFields = docJson.fields;
+            break;
+          }
+        }
+      } catch {
+        // Continue
       }
-    } catch {
-      // Continue
     }
   }
 
-  const docEmail = String(userDocFields?.email?.stringValue || tokenEmail || '')
+  let docEmail = String(userDocFields?.email?.stringValue || tokenEmail || '')
     .toLowerCase()
     .trim();
-  const docType = String(userDocFields?.type?.stringValue || '').trim();
-  const docVerified = userDocFields?.verified?.booleanValue === true;
-  const docRejected = userDocFields?.rejected?.booleanValue === true;
+  let docType = String(
+    userDocFields?.type?.stringValue || userDocFields?.role?.stringValue || ''
+  )
+    .toLowerCase()
+    .trim();
+  let docVerified =
+    userDocFields?.verified?.booleanValue === true ||
+    userDocFields?.verified?.stringValue === 'true' ||
+    userDocFields?.verified?.integerValue === '1';
+  let docRejected =
+    userDocFields?.rejected?.booleanValue === true ||
+    userDocFields?.rejected?.stringValue === 'true' ||
+    userDocFields?.rejected?.integerValue === '1';
+
+  // Fallback to D1 users / suppliers table if Firestore REST lookup did not return fields
+  if (!userDocFields && env?.DB) {
+    try {
+      const d1User: any = await env.DB.prepare(
+        'SELECT email, type, verified, rejected FROM users WHERE id = ?'
+      )
+        .bind(uid)
+        .first();
+      if (d1User) {
+        if (!docEmail && d1User.email) {
+          docEmail = String(d1User.email).toLowerCase().trim();
+        }
+        if (!docType && d1User.type) {
+          docType = String(d1User.type).toLowerCase().trim();
+        }
+        docVerified =
+          d1User.verified === 1 ||
+          d1User.verified === true ||
+          d1User.verified === '1' ||
+          d1User.verified === 'true';
+        docRejected =
+          d1User.rejected === 1 ||
+          d1User.rejected === true ||
+          d1User.rejected === '1' ||
+          d1User.rejected === 'true';
+      }
+    } catch {
+      // Ignore if D1 users table query fails
+    }
+  }
 
   const isExcludedAdmin = WORKER_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
   const isAdmin =
@@ -286,8 +347,8 @@ async function verifyWorkerProductPublisher(
   return {
     allowed: false,
     status: 403,
-    code: 'SUPPLIER_NOT_VERIFIED',
-    message: 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.',
+    code: 'CUSTOMER_FORBIDDEN',
+    message: 'هذا الحساب مسجل كعميل وليس كمورد. إضافة المنتجات وتعديلها وحذفها متاحة للموردين المعتمدين وإدارة المنصة فقط.',
   };
 }
 
@@ -586,7 +647,7 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'POST') {
-    const authCheck = await verifyWorkerProductPublisher(request, false);
+    const authCheck = await verifyWorkerProductPublisher(request, env, false);
     if (!authCheck.allowed) {
       return json(
         {
@@ -634,9 +695,38 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     if (!body.product_id || !body.brand || !body.model) {
       return errorJson('Missing required fields: product_id, brand, model', 400, request);
     }
+
+    // Check if a product with this product_id already exists and belongs to another supplier
+    const existingRow: any = await env.DB.prepare(
+      'SELECT product_id, supplier FROM products WHERE product_id = ?'
+    )
+      .bind(body.product_id)
+      .first();
+
+    if (existingRow && authCheck.role === 'supplier') {
+      const existingOwner = String(existingRow.supplier || '').trim();
+      if (existingOwner !== authCheck.uid) {
+        return json(
+          {
+            ok: false,
+            success: false,
+            error: {
+              code: 'PRODUCT_OWNERSHIP_FORBIDDEN',
+              message: 'غير مصرح لك بتعديل أو استبدال منتج تابع لمورد آخر.',
+            },
+          },
+          403,
+          request
+        );
+      }
+    }
+
     if (authCheck.role === 'supplier' && authCheck.uid) {
       body.supplier = authCheck.uid;
       body.supplier_id = authCheck.uid;
+    } else {
+      body.supplier = body.supplier || body.supplier_id || authCheck.uid || null;
+      body.supplier_id = body.supplier;
     }
 
     const query = `
@@ -762,11 +852,19 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       )
       .run();
 
-    return successJson({ message: 'Product created successfully', product_id: body.product_id }, 201, request);
+    return successJson(
+      {
+        message: 'Product created successfully',
+        product_id: body.product_id,
+        supplier_id: body.supplier,
+      },
+      201,
+      request
+    );
   }
 
-  if (method === 'PUT') {
-    const authCheck = await verifyWorkerProductPublisher(request, false);
+  if (method === 'PUT' || method === 'PATCH') {
+    const authCheck = await verifyWorkerProductPublisher(request, env, false);
     if (!authCheck.allowed) {
       return json(
         {
@@ -783,6 +881,32 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     }
 
     if (!productId) return errorJson('Product ID required in path', 400, request);
+
+    const existing: any = await env.DB.prepare(
+      'SELECT product_id, supplier FROM products WHERE product_id = ? OR id = ?'
+    )
+      .bind(productId, productId)
+      .first();
+    if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
+
+    // Strict Supplier Ownership Enforcement: Suppliers can ONLY edit products belonging to their own UID
+    if (authCheck.role === 'supplier') {
+      const existingOwner = String(existing.supplier || '').trim();
+      if (!existingOwner || existingOwner !== authCheck.uid) {
+        return json(
+          {
+            ok: false,
+            success: false,
+            error: {
+              code: 'PRODUCT_OWNERSHIP_FORBIDDEN',
+              message: 'غير مصرح لك بتعديل هذا المنتج لأنه تابع لمورد آخر.',
+            },
+          },
+          403,
+          request
+        );
+      }
+    }
 
     let rawBody: any;
     try {
@@ -812,11 +936,6 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
 
     const body = numericValidation.normalizedPayload;
 
-    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ? OR id = ?')
-      .bind(productId, productId)
-      .first();
-    if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
-
     const brand = body.brand || null;
     const model = body.model || body.name || null;
     const productCategory = body.product_category || body.category || null;
@@ -841,7 +960,10 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     const batteryVoltageV = body.battery_voltage_v !== undefined ? body.battery_voltage_v : null;
     const capacityAh = body.capacity_ah !== undefined ? body.capacity_ah : null;
     const maxPvVoc = body.max_pv_open_circuit_voltage_v !== undefined ? body.max_pv_open_circuit_voltage_v : null;
-    const supplier = body.supplier || body.supplier_id || null;
+    const supplier =
+      authCheck.role === 'supplier'
+        ? authCheck.uid
+        : body.supplier || body.supplier_id || existing.supplier || null;
 
     await env.DB.prepare(
       `UPDATE products SET 
@@ -909,7 +1031,7 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
 
   if (method === 'DELETE') {
     const isBulkDelete = !productId || productId === 'all';
-    const authCheck = await verifyWorkerProductPublisher(request, isBulkDelete);
+    const authCheck = await verifyWorkerProductPublisher(request, env, isBulkDelete);
     if (!authCheck.allowed) {
       return json(
         {
@@ -934,10 +1056,31 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       }
     }
 
-    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ? OR id = ?')
+    const existing: any = await env.DB.prepare(
+      'SELECT product_id, supplier FROM products WHERE product_id = ? OR id = ?'
+    )
       .bind(productId, productId)
       .first();
     if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
+
+    // Strict Supplier Ownership Enforcement: Suppliers can ONLY delete products belonging to their own UID
+    if (authCheck.role === 'supplier') {
+      const existingOwner = String(existing.supplier || '').trim();
+      if (!existingOwner || existingOwner !== authCheck.uid) {
+        return json(
+          {
+            ok: false,
+            success: false,
+            error: {
+              code: 'PRODUCT_OWNERSHIP_FORBIDDEN',
+              message: 'غير مصرح لك بحذف هذا المنتج لأنه تابع لمورد آخر.',
+            },
+          },
+          403,
+          request
+        );
+      }
+    }
 
     await env.DB.prepare('DELETE FROM products WHERE product_id = ? OR id = ?').bind(productId, productId).run();
     return successJson({ message: 'Product deleted successfully', product_id: productId }, 200, request);

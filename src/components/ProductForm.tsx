@@ -1008,7 +1008,7 @@ export const ProductForm: React.FC<{
         area: finalArea,
         status: formData.status as any,
         updatedAt: new Date().toISOString().split('T')[0],
-        supplierId: initialData?.supplierId || user?.uid || '',
+        supplierId: user?.type === 'supplier' ? (user.uid || '') : (initialData?.supplierId || user?.uid || ''),
         max_pv_open_circuit_voltage_v: maxPvVoltageNum ?? undefined,
         mppt_count: mpptCountNum ?? undefined,
         vmp_v: vmpNum ?? undefined,
@@ -1090,12 +1090,13 @@ export const ProductForm: React.FC<{
         suppliers: (initialData?.suppliers && initialData.suppliers.length > 0)
           ? initialData.suppliers.map(s => ({
               ...s,
+              id: user?.type === 'supplier' ? (user.uid || s.id) : s.id,
               price: parsedPrice || s.price || 0,
               lastUpdate: new Date().toISOString().split('T')[0]
             }))
           : [
               {
-                id: initialData?.supplierId || user?.uid || '',
+                id: user?.type === 'supplier' ? (user.uid || '') : (initialData?.supplierId || user?.uid || ''),
                 name: (!isRawUidOrId(user?.company) && user?.company) ||
                       (!isRawUidOrId(user?.name) && user?.name) ||
                       'Enerjoo Certified Supplier',
