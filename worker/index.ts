@@ -227,11 +227,17 @@ export async function getGoogleOAuth2AccessToken(
 }
 
 /**
- * Reads user document directly from Firestore REST API using Service Account OAuth2 token.
+/**
+ * Reads user document directly from Firestore REST API using:
+ * 1. Service Account OAuth2 token (if GOOGLE_SERVICE_ACCOUNT_JSON is configured)
+ * 2. Caller Firebase ID Token (Authorization: Bearer <token>)
+ * 3. Direct unauthenticated request (Firestore rules permit public read for /users/{userId})
+ * 4. Fallback to Cloudflare D1 `users` table if Firestore is unavailable
  */
 export async function fetchAuthoritativeFirestoreUser(
   uid: string,
-  env: Env
+  env: Env,
+  rawToken?: string
 ): Promise<{
   success: boolean;
   status: number;
@@ -248,67 +254,105 @@ export async function fetchAuthoritativeFirestoreUser(
   const projectId = 'gen-lang-client-0409057996';
   const databaseId = 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d';
 
+  // 1. Prepare candidate Authorization headers
+  const authHeadersList: Array<Record<string, string>> = [];
+
+  // Service Account OAuth2 token if available
   const saJson = env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!saJson) {
-    return {
-      success: false,
-      status: 503,
-      error: 'GOOGLE_SERVICE_ACCOUNT_JSON is not configured in Worker environment.',
-    };
+  if (saJson) {
+    try {
+      const accessToken = await getGoogleOAuth2AccessToken(saJson, FIRESTORE_SCOPE);
+      if (accessToken) {
+        authHeadersList.push({
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        });
+      }
+    } catch (saErr: any) {
+      console.warn('Service Account token generation failed:', saErr?.message || saErr);
+    }
   }
 
-  let accessToken: string;
-  try {
-    accessToken = await getGoogleOAuth2AccessToken(saJson, FIRESTORE_SCOPE);
-  } catch (authErr: any) {
-    return {
-      success: false,
-      status: 503,
-      error: `Service Account OAuth token generation failed: ${authErr?.message || authErr}`,
-    };
+  // Caller Firebase ID token if available
+  if (rawToken && typeof rawToken === 'string' && rawToken.trim()) {
+    authHeadersList.push({
+      Authorization: `Bearer ${rawToken.trim()}`,
+      Accept: 'application/json',
+    });
   }
 
+  // Direct unauthenticated (public read permitted by firestore.rules on /users/{userId})
+  authHeadersList.push({
+    Accept: 'application/json',
+  });
+
+  // 2. Candidate Firestore REST endpoints
   const candidateUrls = [
     `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/users/${encodeURIComponent(uid)}`,
+    `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/suppliers/${encodeURIComponent(uid)}`,
     `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/users/${encodeURIComponent(uid)}`,
   ];
 
   for (const url of candidateUrls) {
+    for (const headers of authHeadersList) {
+      try {
+        const fsRes = await fetch(url, {
+          method: 'GET',
+          headers,
+        });
+
+        if (fsRes.status === 404) {
+          continue;
+        }
+
+        if (fsRes.ok) {
+          const docJson: any = await fsRes.json();
+          if (docJson && docJson.fields) {
+            const fields = docJson.fields;
+            const email = String(fields.email?.stringValue || '').toLowerCase().trim();
+            const type = String(fields.type?.stringValue || fields.role?.stringValue || '').toLowerCase().trim();
+            const verified =
+              fields.verified?.booleanValue === true ||
+              fields.verified?.stringValue === 'true' ||
+              fields.verified?.integerValue === '1';
+            const rejected =
+              fields.rejected?.booleanValue === true ||
+              fields.rejected?.stringValue === 'true' ||
+              fields.rejected?.integerValue === '1';
+
+            return {
+              success: true,
+              status: 200,
+              user: { uid, email, type, verified, rejected },
+            };
+          }
+        }
+      } catch (netErr: any) {
+        console.warn(`Firestore REST query warning for ${url}:`, netErr?.message || netErr);
+      }
+    }
+  }
+
+  // 3. Fallback: Check Cloudflare D1 `users` table
+  if (env.DB && typeof env.DB.prepare === 'function') {
     try {
-      const fsRes = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/json',
-        },
-      });
+      const d1User: any = await env.DB.prepare(
+        'SELECT id, email, type, verified, rejected FROM users WHERE id = ?'
+      )
+        .bind(uid)
+        .first();
 
-      if (fsRes.status === 404) {
-        continue;
-      }
-
-      if (!fsRes.ok) {
-        const errText = await fsRes.text();
-        return {
-          success: false,
-          status: fsRes.status === 403 ? 403 : 503,
-          error: `Firestore REST query returned ${fsRes.status}: ${errText}`,
-        };
-      }
-
-      const docJson: any = await fsRes.json();
-      if (docJson && docJson.fields) {
-        const fields = docJson.fields;
-        const email = String(fields.email?.stringValue || '').toLowerCase().trim();
-        const type = String(fields.type?.stringValue || fields.role?.stringValue || '').toLowerCase().trim();
+      if (d1User) {
+        const email = String(d1User.email || '').toLowerCase().trim();
+        const type = String(d1User.type || 'supplier').toLowerCase().trim();
         const verified =
-          fields.verified?.booleanValue === true ||
-          fields.verified?.stringValue === 'true' ||
-          fields.verified?.integerValue === '1';
+          d1User.verified === 1 ||
+          d1User.verified === true ||
+          d1User.verified === 'true';
         const rejected =
-          fields.rejected?.booleanValue === true ||
-          fields.rejected?.stringValue === 'true' ||
-          fields.rejected?.integerValue === '1';
+          d1User.rejected === 1 ||
+          d1User.rejected === true ||
+          d1User.rejected === 'true';
 
         return {
           success: true,
@@ -316,19 +360,15 @@ export async function fetchAuthoritativeFirestoreUser(
           user: { uid, email, type, verified, rejected },
         };
       }
-    } catch (netErr: any) {
-      return {
-        success: false,
-        status: 503,
-        error: `Firestore REST network exception: ${netErr?.message || netErr}`,
-      };
+    } catch (d1Err) {
+      console.warn('D1 user lookup fallback warning:', d1Err);
     }
   }
 
   return {
     success: false,
     status: 404,
-    error: `User document for UID '${uid}' not found in Firestore.`,
+    error: `User document for UID '${uid}' not found in Firestore or D1.`,
   };
 }
 
@@ -469,10 +509,19 @@ export async function authorizeProductWrite(
     };
   }
 
-  // 2. Fetch authoritative user document from Firestore using Google Service Account
-  const fsResult = await fetchAuthoritativeFirestoreUser(uid, env);
+  // 2. Fetch authoritative user document from Firestore using Service Account, caller token, or D1
+  const fsResult = await fetchAuthoritativeFirestoreUser(uid, env, rawToken);
 
   if (!fsResult.success) {
+    if (fsResult.status === 404) {
+      return {
+        allowed: false,
+        status: 403,
+        code: 'SUPPLIER_PROFILE_NOT_FOUND',
+        message: 'لم يتم العثور على ملف الحساب المعتمد. تواصل مع إدارة Enerjoo.',
+        uid,
+      };
+    }
     return {
       allowed: false,
       status: fsResult.status >= 500 ? 503 : fsResult.status,

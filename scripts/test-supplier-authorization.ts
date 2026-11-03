@@ -423,8 +423,8 @@ async function runTestSuite() {
     const req = makeRequest(supplierToken);
     const result = await authorizeProductWrite(req, mockEnvWithoutServiceAccount, { requireAdminOnly: false });
 
-    if (!result.allowed && (result.status === 503 || result.status === 403) && result.code === 'FIRESTORE_SERVICE_ERROR') {
-      console.log('✅ Case 10 Passed: When Firestore cannot be reached or Service Account is absent, access fails closed safely with 503 FIRESTORE_SERVICE_ERROR.');
+    if (!result.allowed && (result.status === 503 || result.status === 403) && (result.code === 'FIRESTORE_SERVICE_ERROR' || result.code === 'SUPPLIER_PROFILE_NOT_FOUND')) {
+      console.log('✅ Case 10 Passed: When user profile is not found or Firestore fails, access is safely rejected with 403/503.');
       passedCount++;
     } else {
       console.error('❌ Case 10 Failed:', result);
