@@ -26,6 +26,10 @@ export interface D1Database {
 export interface Env {
   DB: D1Database;
   AI?: any;
+  R2?: any;
+  GOOGLE_SERVICE_ACCOUNT_JSON?: string;
+  PRODUCT_ADMIN_EMAILS?: string;
+  PRODUCT_ADMIN_UIDS?: string;
 }
 
 // ============================================================================
@@ -91,12 +95,242 @@ function generateId(prefix?: string): string {
   return prefix ? `${prefix}_${time}${rand}` : `${time}-${rand}`;
 }
 
-const WORKER_ADMIN_EMAILS = ['enerjoo365@gmail.com', 'enerjoo320@gmail.com'];
-const WORKER_EXCLUDED_ADMIN_EMAILS = [
+export const PRODUCT_ADMIN_EMAILS: string[] = ['enerjoo365@gmail.com', 'enerjoo320@gmail.com'];
+export const PRODUCT_ADMIN_UIDS: string[] = ['enerjoo-admin-root'];
+export const EXCLUDED_ADMIN_EMAILS: string[] = [
   'eng.faressnasser@gmail.com',
   'faressnasser12@gmail.com',
   'siefsameh221@gmail.com',
 ];
+
+interface GoogleServiceAccount {
+  client_email: string;
+  private_key: string;
+  project_id?: string;
+  [key: string]: any;
+}
+
+interface CachedOAuthToken {
+  accessToken: string;
+  expiresAt: number;
+}
+
+// Token cache strictly segregated by OAuth2 scope (prevents using Sheets token for Firestore)
+const serviceAccountTokenCache = new Map<string, CachedOAuthToken>();
+
+/**
+ * Imports a PEM-encoded PKCS#8 private key using Web Crypto (SubtleCrypto)
+ */
+async function importPkcs8PrivateKey(pemKey: string): Promise<CryptoKey> {
+  const cleanPem = pemKey
+    .replace(/-----BEGIN [A-Z ]+-----/g, '')
+    .replace(/-----END [A-Z ]+-----/g, '')
+    .replace(/\\n/g, '')
+    .replace(/\s+/g, '');
+
+  const binaryDer = Uint8Array.from(atob(cleanPem), c => c.charCodeAt(0));
+
+  return crypto.subtle.importKey(
+    'pkcs8',
+    binaryDer.buffer,
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      hash: 'SHA-256',
+    },
+    false,
+    ['sign']
+  );
+}
+
+/**
+ * Mints or retrieves a cached OAuth2 access token for Google Service Account.
+ * Scopes are segregated in the cache to avoid scope collision.
+ */
+export async function getGoogleOAuth2AccessToken(
+  serviceAccountJsonStr: string,
+  scope: string
+): Promise<string> {
+  const nowMs = Date.now();
+  const cached = serviceAccountTokenCache.get(scope);
+  if (cached && cached.expiresAt > nowMs + 60000) {
+    return cached.accessToken;
+  }
+
+  let sa: GoogleServiceAccount;
+  try {
+    sa = typeof serviceAccountJsonStr === 'string'
+      ? JSON.parse(serviceAccountJsonStr)
+      : (serviceAccountJsonStr as any);
+  } catch {
+    throw new Error('INVALID_SERVICE_ACCOUNT_JSON');
+  }
+
+  if (!sa.client_email || !sa.private_key) {
+    throw new Error('MISSING_SERVICE_ACCOUNT_CREDENTIALS');
+  }
+
+  const nowSec = Math.floor(nowMs / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: sa.client_email,
+    scope,
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: nowSec + 3600,
+    iat: nowSec,
+  };
+
+  const encodeBase64Url = (obj: any) => {
+    const jsonStr = JSON.stringify(obj);
+    const base64 = btoa(jsonStr);
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+
+  const unsignedToken = `${encodeBase64Url(header)}.${encodeBase64Url(payload)}`;
+  const privateKey = await importPkcs8PrivateKey(sa.private_key);
+  const signatureBuffer = await crypto.subtle.sign(
+    { name: 'RSASSA-PKCS1-v1_5' },
+    privateKey,
+    new TextEncoder().encode(unsignedToken)
+  );
+
+  const signatureBase64Url = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  const assertion = `${unsignedToken}.${signatureBase64Url}`;
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    const errText = await tokenRes.text();
+    throw new Error(`OAUTH_TOKEN_EXCHANGE_FAILED: ${tokenRes.status} ${errText}`);
+  }
+
+  const tokenData: any = await tokenRes.json();
+  const accessToken = tokenData.access_token;
+  const expiresIn = tokenData.expires_in || 3600;
+
+  serviceAccountTokenCache.set(scope, {
+    accessToken,
+    expiresAt: nowMs + expiresIn * 1000,
+  });
+
+  return accessToken;
+}
+
+/**
+ * Reads user document directly from Firestore REST API using Service Account OAuth2 token.
+ */
+export async function fetchAuthoritativeFirestoreUser(
+  uid: string,
+  env: Env
+): Promise<{
+  success: boolean;
+  status: number;
+  user?: {
+    uid: string;
+    email: string;
+    type: string;
+    verified: boolean;
+    rejected: boolean;
+  };
+  error?: string;
+}> {
+  const FIRESTORE_SCOPE = 'https://www.googleapis.com/auth/datastore';
+  const projectId = 'gen-lang-client-0409057996';
+  const databaseId = 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d';
+
+  const saJson = env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!saJson) {
+    return {
+      success: false,
+      status: 503,
+      error: 'GOOGLE_SERVICE_ACCOUNT_JSON is not configured in Worker environment.',
+    };
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await getGoogleOAuth2AccessToken(saJson, FIRESTORE_SCOPE);
+  } catch (authErr: any) {
+    return {
+      success: false,
+      status: 503,
+      error: `Service Account OAuth token generation failed: ${authErr?.message || authErr}`,
+    };
+  }
+
+  const candidateUrls = [
+    `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/users/${encodeURIComponent(uid)}`,
+    `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/users/${encodeURIComponent(uid)}`,
+  ];
+
+  for (const url of candidateUrls) {
+    try {
+      const fsRes = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (fsRes.status === 404) {
+        continue;
+      }
+
+      if (!fsRes.ok) {
+        const errText = await fsRes.text();
+        return {
+          success: false,
+          status: fsRes.status === 403 ? 403 : 503,
+          error: `Firestore REST query returned ${fsRes.status}: ${errText}`,
+        };
+      }
+
+      const docJson: any = await fsRes.json();
+      if (docJson && docJson.fields) {
+        const fields = docJson.fields;
+        const email = String(fields.email?.stringValue || '').toLowerCase().trim();
+        const type = String(fields.type?.stringValue || fields.role?.stringValue || '').toLowerCase().trim();
+        const verified =
+          fields.verified?.booleanValue === true ||
+          fields.verified?.stringValue === 'true' ||
+          fields.verified?.integerValue === '1';
+        const rejected =
+          fields.rejected?.booleanValue === true ||
+          fields.rejected?.stringValue === 'true' ||
+          fields.rejected?.integerValue === '1';
+
+        return {
+          success: true,
+          status: 200,
+          user: { uid, email, type, verified, rejected },
+        };
+      }
+    } catch (netErr: any) {
+      return {
+        success: false,
+        status: 503,
+        error: `Firestore REST network exception: ${netErr?.message || netErr}`,
+      };
+    }
+  }
+
+  return {
+    success: false,
+    status: 404,
+    error: `User document for UID '${uid}' not found in Firestore.`,
+  };
+}
 
 function decodeBase64UrlJson(segment: string): any {
   const padded = segment.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((segment.length + 3) % 4);
@@ -104,25 +338,36 @@ function decodeBase64UrlJson(segment: string): any {
   return JSON.parse(decoded);
 }
 
-/**
- * Verifies the Firebase ID Token and checks the authoritative user document in Firestore (`users/{uid}`)
- * before allowing any product creation, modification, or deletion in Cloudflare D1.
- */
-async function verifyWorkerProductPublisher(
-  request: Request,
-  env: Env,
-  requireAdminOnly = false
-): Promise<{
+export interface ProductAuthorizationResult {
   allowed: boolean;
   status: number;
   code: string;
   message: string;
   uid?: string;
-  role?: 'admin' | 'supplier';
-}> {
+  email?: string;
+  role?: 'admin' | 'supplier' | 'customer';
+  user?: any;
+}
+
+/**
+ * Authorizes product creation, modification, and deletion in Cloudflare D1:
+ * - Admin: Full access based on PRODUCT_ADMIN_EMAILS / PRODUCT_ADMIN_UIDS
+ * - Supplier: Verified through Firebase ID Token + Authoritative Firestore User Doc (verified === true, rejected !== true)
+ * - Customer: Strictly forbidden (403)
+ * - Untrusted Frontend: No client-side roles or flags are accepted
+ * - Firestore service failure: Fails closed safely with clear configuration error
+ */
+export async function authorizeProductWrite(
+  request: Request,
+  env: Env,
+  options?: { requireAdminOnly?: boolean }
+): Promise<ProductAuthorizationResult> {
+  const requireAdminOnly = Boolean(options?.requireAdminOnly);
+
   const authHeader =
     request.headers.get('Authorization') || request.headers.get('X-Firebase-Auth') || '';
   const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+
   if (!rawToken) {
     return {
       allowed: false,
@@ -188,114 +433,20 @@ async function verifyWorkerProductPublisher(
   const uid = payload.sub.trim();
   const tokenEmail = typeof payload.email === 'string' ? payload.email.toLowerCase().trim() : '';
 
-  const candidateTargets: Array<{ projectId: string; databaseId: string; sendAuth: boolean }> = [
-    {
-      projectId: 'gen-lang-client-0409057996',
-      databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
-      sendAuth: tokenProjectId === 'gen-lang-client-0409057996',
-    },
-  ];
-  if (tokenProjectId === 'gen-lang-client-0409057996') {
-    candidateTargets.push({
-      projectId: 'gen-lang-client-0409057996',
-      databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
-      sendAuth: false,
-    });
-    candidateTargets.push({
-      projectId: 'gen-lang-client-0409057996',
-      databaseId: '(default)',
-      sendAuth: true,
-    });
-  } else {
-    candidateTargets.push({
-      projectId: tokenProjectId,
-      databaseId: 'ai-studio-2546f389-38ec-4b43-b0f4-5eede498569d',
-      sendAuth: true,
-    });
-    candidateTargets.push({
-      projectId: tokenProjectId,
-      databaseId: '(default)',
-      sendAuth: true,
-    });
-  }
+  // 1. Check Admin status
+  const dynamicAdminEmails = env.PRODUCT_ADMIN_EMAILS
+    ? env.PRODUCT_ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase())
+    : [];
+  const dynamicAdminUids = env.PRODUCT_ADMIN_UIDS
+    ? env.PRODUCT_ADMIN_UIDS.split(',').map(u => u.trim())
+    : [];
 
-  let userDocFields: Record<string, any> | null = null;
-  for (const collectionName of ['users', 'suppliers']) {
-    if (userDocFields) break;
-    for (const target of candidateTargets) {
-      const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-        target.projectId
-      )}/databases/${encodeURIComponent(target.databaseId)}/documents/${collectionName}/${encodeURIComponent(uid)}`;
-      try {
-        const headers: Record<string, string> = {};
-        if (target.sendAuth) {
-          headers['Authorization'] = `Bearer ${rawToken}`;
-        }
-        const fsRes = await fetch(firestoreUrl, { method: 'GET', headers });
-        if (fsRes.ok) {
-          const docJson: any = await fsRes.json();
-          if (docJson && docJson.fields) {
-            userDocFields = docJson.fields;
-            break;
-          }
-        }
-      } catch {
-        // Continue
-      }
-    }
-  }
+  const allAdminEmails = [...PRODUCT_ADMIN_EMAILS, ...dynamicAdminEmails];
+  const allAdminUids = [...PRODUCT_ADMIN_UIDS, ...dynamicAdminUids];
 
-  let docEmail = String(userDocFields?.email?.stringValue || tokenEmail || '')
-    .toLowerCase()
-    .trim();
-  let docType = String(
-    userDocFields?.type?.stringValue || userDocFields?.role?.stringValue || ''
-  )
-    .toLowerCase()
-    .trim();
-  let docVerified =
-    userDocFields?.verified?.booleanValue === true ||
-    userDocFields?.verified?.stringValue === 'true' ||
-    userDocFields?.verified?.integerValue === '1';
-  let docRejected =
-    userDocFields?.rejected?.booleanValue === true ||
-    userDocFields?.rejected?.stringValue === 'true' ||
-    userDocFields?.rejected?.integerValue === '1';
-
-  // Fallback to D1 users / suppliers table if Firestore REST lookup did not return fields
-  if (!userDocFields && env?.DB) {
-    try {
-      const d1User: any = await env.DB.prepare(
-        'SELECT email, type, verified, rejected FROM users WHERE id = ?'
-      )
-        .bind(uid)
-        .first();
-      if (d1User) {
-        if (!docEmail && d1User.email) {
-          docEmail = String(d1User.email).toLowerCase().trim();
-        }
-        if (!docType && d1User.type) {
-          docType = String(d1User.type).toLowerCase().trim();
-        }
-        docVerified =
-          d1User.verified === 1 ||
-          d1User.verified === true ||
-          d1User.verified === '1' ||
-          d1User.verified === 'true';
-        docRejected =
-          d1User.rejected === 1 ||
-          d1User.rejected === true ||
-          d1User.rejected === '1' ||
-          d1User.rejected === 'true';
-      }
-    } catch {
-      // Ignore if D1 users table query fails
-    }
-  }
-
-  const isExcludedAdmin = WORKER_EXCLUDED_ADMIN_EMAILS.includes(docEmail);
+  const isExcluded = EXCLUDED_ADMIN_EMAILS.includes(tokenEmail);
   const isAdmin =
-    !isExcludedAdmin && (WORKER_ADMIN_EMAILS.includes(docEmail) || docType === 'admin');
+    !isExcluded && (allAdminEmails.includes(tokenEmail) || allAdminUids.includes(uid));
 
   if (isAdmin) {
     return {
@@ -304,6 +455,7 @@ async function verifyWorkerProductPublisher(
       code: 'OK',
       message: 'Authorized admin',
       uid,
+      email: tokenEmail,
       role: 'admin',
     };
   }
@@ -317,40 +469,80 @@ async function verifyWorkerProductPublisher(
     };
   }
 
-  if (docType === 'supplier') {
-    if (docRejected) {
+  // 2. Fetch authoritative user document from Firestore using Google Service Account
+  const fsResult = await fetchAuthoritativeFirestoreUser(uid, env);
+
+  if (!fsResult.success) {
+    return {
+      allowed: false,
+      status: fsResult.status >= 500 ? 503 : fsResult.status,
+      code: 'FIRESTORE_SERVICE_ERROR',
+      message: `تعذر التحقق من حالة المورد عبر خدمة Firestore السحابية: ${fsResult.error}`,
+    };
+  }
+
+  const authoritativeUser = fsResult.user!;
+  const userType = authoritativeUser.type || 'customer';
+
+  // 3. Customer Role: Strictly forbidden
+  if (userType === 'customer') {
+    return {
+      allowed: false,
+      status: 403,
+      code: 'CUSTOMER_FORBIDDEN',
+      message: 'هذا الحساب مسجل كعميل وليس كمورد. إضافة المنتجات وتعديلها وحذفها متاحة للموردين المعتمدين وإدارة المنصة فقط.',
+      role: 'customer',
+      uid,
+    };
+  }
+
+  // 4. Supplier Role: Check verification and rejection flags
+  if (userType === 'supplier') {
+    if (authoritativeUser.rejected) {
       return {
         allowed: false,
         status: 403,
         code: 'SUPPLIER_REJECTED',
         message: 'تم رفض أو تعليق حساب المورد من قبل إدارة Enerjoo. لا يمكنك إضافة أو نشر منتجات.',
+        role: 'supplier',
+        uid,
       };
     }
-    if (!docVerified) {
+
+    if (!authoritativeUser.verified) {
       return {
         allowed: false,
         status: 403,
         code: 'SUPPLIER_NOT_VERIFIED',
         message: 'حسابك قيد المراجعة. يمكنك إضافة منتجاتك بعد اعتماد حسابك من إدارة Enerjoo.',
+        role: 'supplier',
+        uid,
       };
     }
+
+    // Approved & verified supplier
     return {
       allowed: true,
       status: 200,
       code: 'OK',
       message: 'Authorized verified supplier',
       uid,
+      email: authoritativeUser.email || tokenEmail,
       role: 'supplier',
+      user: authoritativeUser,
     };
   }
 
   return {
     allowed: false,
     status: 403,
-    code: 'CUSTOMER_FORBIDDEN',
-    message: 'هذا الحساب مسجل كعميل وليس كمورد. إضافة المنتجات وتعديلها وحذفها متاحة للموردين المعتمدين وإدارة المنصة فقط.',
+    code: 'ROLE_FORBIDDEN',
+    message: 'نوع الحساب غير مصرح له بإدارة المنتجات.',
   };
 }
+
+export const verifyWorkerProductPublisher = authorizeProductWrite;
+
 
 // ============================================================================
 // Main Worker Fetch Handler
@@ -597,6 +789,19 @@ ${consultantResult.reply}
   }, 200, request);
 }
 
+let _hasOwnerUidColumnCache: boolean | null = null;
+export async function hasOwnerUidColumn(db: D1Database): Promise<boolean> {
+  if (_hasOwnerUidColumnCache !== null) return _hasOwnerUidColumnCache;
+  try {
+    const tableInfo = await db.prepare("PRAGMA table_info(products)").all();
+    const cols = (tableInfo?.results || []).map((c: any) => String(c.name).toLowerCase());
+    _hasOwnerUidColumnCache = cols.includes('owner_uid');
+    return _hasOwnerUidColumnCache;
+  } catch {
+    return false;
+  }
+}
+
 // ============================================================================
 // 1. /products Handler (Preserved Existing Implementation)
 // ============================================================================
@@ -647,7 +852,7 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'POST') {
-    const authCheck = await verifyWorkerProductPublisher(request, env, false);
+    const authCheck = await authorizeProductWrite(request, env, { requireAdminOnly: false });
     if (!authCheck.allowed) {
       return json(
         {
@@ -696,23 +901,24 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       return errorJson('Missing required fields: product_id, brand, model', 400, request);
     }
 
-    // Check if a product with this product_id already exists and belongs to another supplier
+    // Check if a product with this product_id already exists in D1
     const existingRow: any = await env.DB.prepare(
-      'SELECT product_id, supplier FROM products WHERE product_id = ?'
+      'SELECT * FROM products WHERE product_id = ? OR id = ?'
     )
-      .bind(body.product_id)
+      .bind(body.product_id, body.product_id)
       .first();
 
     if (existingRow && authCheck.role === 'supplier') {
-      const existingOwner = String(existingRow.supplier || '').trim();
-      if (existingOwner !== authCheck.uid) {
+      const existingOwnerUid = existingRow.owner_uid ? String(existingRow.owner_uid).trim() : null;
+      // Legacy products with no owner_uid are strictly manageable by Admin only
+      if (!existingOwnerUid || existingOwnerUid !== authCheck.uid) {
         return json(
           {
             ok: false,
             success: false,
             error: {
               code: 'PRODUCT_OWNERSHIP_FORBIDDEN',
-              message: 'غير مصرح لك بتعديل أو استبدال منتج تابع لمورد آخر.',
+              message: 'غير مصرح لك بتعديل أو استبدال منتج تابع لمورد آخر أو غير مرتبط بملكيتك.',
             },
           },
           403,
@@ -721,70 +927,198 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       }
     }
 
-    if (authCheck.role === 'supplier' && authCheck.uid) {
+    // Server strictly dictates owner_uid from authenticated UID; never accept from frontend
+    if (authCheck.role === 'supplier') {
+      body.owner_uid = authCheck.uid;
       body.supplier = authCheck.uid;
       body.supplier_id = authCheck.uid;
     } else {
+      body.owner_uid = body.owner_uid || authCheck.uid || null;
       body.supplier = body.supplier || body.supplier_id || authCheck.uid || null;
       body.supplier_id = body.supplier;
     }
 
-    const query = `
-      INSERT INTO products (
-        product_id, product_category, brand, model, product_type, technology,
-        cell_type, number_of_cells, power_w, rated_power_kw, surge_power_w,
-        waveform, ac_voltage_v, ac_voltage_regulation, frequency_hz, peak_efficiency_percent,
-        transfer_time_ms, battery_voltage_v, nominal_voltage_v, capacity_ah, nominal_energy_wh,
-        max_output_power_kw, recommended_charge_voltage_v, recommended_charge_current_a,
-        end_of_discharge_voltage_v, max_continuous_charge_current_a, max_continuous_discharge_current_a,
-        cycle_life, communication, max_pv_open_circuit_voltage_v, max_pv_array_power_w,
-        max_pv_input_current_a, pv_mppt_voltage_range_v, max_solar_charger_current_a,
-        max_ac_charger_current_a, max_charge_current_a, vmp_v, voc_v, imp_a, isc_a,
-        efficiency_percent, temperature_coefficient_pmax, temperature_coefficient_voc,
-        temperature_coefficient_isc, max_system_voltage_v, maximum_series_fuse_a,
-        dimensions_mm, machine_dimensions_w_h_d_mm, weight_kg, nw_kg, gw_kg,
-        front_glass, back_glass, frame, connector_type, junction_box,
-        operating_temperature, storage_temperature, warranty_years, price_egp,
-        supplier, availability, image_url, notes, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, datetime('now'), datetime('now')
-      )
-      ON CONFLICT(product_id) DO UPDATE SET
-        product_category = excluded.product_category,
-        brand = excluded.brand,
-        model = excluded.model,
-        product_type = excluded.product_type,
-        technology = excluded.technology,
-        cell_type = excluded.cell_type,
-        number_of_cells = excluded.number_of_cells,
-        power_w = excluded.power_w,
-        rated_power_kw = excluded.rated_power_kw,
-        ac_voltage_v = excluded.ac_voltage_v,
-        battery_voltage_v = excluded.battery_voltage_v,
-        nominal_voltage_v = excluded.nominal_voltage_v,
-        capacity_ah = excluded.capacity_ah,
-        max_pv_open_circuit_voltage_v = excluded.max_pv_open_circuit_voltage_v,
-        pv_mppt_voltage_range_v = excluded.pv_mppt_voltage_range_v,
-        vmp_v = excluded.vmp_v,
-        voc_v = excluded.voc_v,
-        imp_a = excluded.imp_a,
-        isc_a = excluded.isc_a,
-        efficiency_percent = excluded.efficiency_percent,
-        dimensions_mm = excluded.dimensions_mm,
-        weight_kg = excluded.weight_kg,
-        warranty_years = excluded.warranty_years,
-        price_egp = excluded.price_egp,
-        supplier = COALESCE(excluded.supplier, products.supplier),
-        availability = excluded.availability,
-        image_url = COALESCE(excluded.image_url, products.image_url),
-        notes = excluded.notes,
-        updated_at = datetime('now')
-    `;
+    const hasOwnerCol = await hasOwnerUidColumn(env.DB);
+    let query: string;
+    let bindParams: any[];
 
-    await env.DB.prepare(query)
-      .bind(
+    if (hasOwnerCol) {
+      query = `
+        INSERT INTO products (
+          product_id, product_category, brand, model, product_type, technology,
+          cell_type, number_of_cells, power_w, rated_power_kw, surge_power_w,
+          waveform, ac_voltage_v, ac_voltage_regulation, frequency_hz, peak_efficiency_percent,
+          transfer_time_ms, battery_voltage_v, nominal_voltage_v, capacity_ah, nominal_energy_wh,
+          max_output_power_kw, recommended_charge_voltage_v, recommended_charge_current_a,
+          end_of_discharge_voltage_v, max_continuous_charge_current_a, max_continuous_discharge_current_a,
+          cycle_life, communication, max_pv_open_circuit_voltage_v, max_pv_array_power_w,
+          max_pv_input_current_a, pv_mppt_voltage_range_v, max_solar_charger_current_a,
+          max_ac_charger_current_a, max_charge_current_a, vmp_v, voc_v, imp_a, isc_a,
+          efficiency_percent, temperature_coefficient_pmax, temperature_coefficient_voc,
+          temperature_coefficient_isc, max_system_voltage_v, maximum_series_fuse_a,
+          dimensions_mm, machine_dimensions_w_h_d_mm, weight_kg, nw_kg, gw_kg,
+          front_glass, back_glass, frame, connector_type, junction_box,
+          operating_temperature, storage_temperature, warranty_years, price_egp,
+          supplier, availability, image_url, notes, owner_uid, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, datetime('now'), datetime('now')
+        )
+        ON CONFLICT(product_id) DO UPDATE SET
+          product_category = excluded.product_category,
+          brand = excluded.brand,
+          model = excluded.model,
+          product_type = excluded.product_type,
+          technology = excluded.technology,
+          cell_type = excluded.cell_type,
+          number_of_cells = excluded.number_of_cells,
+          power_w = excluded.power_w,
+          rated_power_kw = excluded.rated_power_kw,
+          ac_voltage_v = excluded.ac_voltage_v,
+          battery_voltage_v = excluded.battery_voltage_v,
+          nominal_voltage_v = excluded.nominal_voltage_v,
+          capacity_ah = excluded.capacity_ah,
+          max_pv_open_circuit_voltage_v = excluded.max_pv_open_circuit_voltage_v,
+          pv_mppt_voltage_range_v = excluded.pv_mppt_voltage_range_v,
+          vmp_v = excluded.vmp_v,
+          voc_v = excluded.voc_v,
+          imp_a = excluded.imp_a,
+          isc_a = excluded.isc_a,
+          efficiency_percent = excluded.efficiency_percent,
+          dimensions_mm = excluded.dimensions_mm,
+          weight_kg = excluded.weight_kg,
+          warranty_years = excluded.warranty_years,
+          price_egp = excluded.price_egp,
+          supplier = COALESCE(excluded.supplier, products.supplier),
+          availability = excluded.availability,
+          image_url = COALESCE(excluded.image_url, products.image_url),
+          notes = excluded.notes,
+          owner_uid = COALESCE(products.owner_uid, excluded.owner_uid),
+          updated_at = datetime('now')
+      `;
+      bindParams = [
+        body.product_id,
+        body.product_category || 'Solar Panels',
+        body.brand,
+        body.model,
+        body.product_type || null,
+        body.technology || null,
+        body.cell_type || null,
+        body.number_of_cells ?? null,
+        body.power_w ?? null,
+        body.rated_power_kw ?? null,
+        body.surge_power_w ?? null,
+        body.waveform || null,
+        body.ac_voltage_v || null,
+        body.ac_voltage_regulation || null,
+        body.frequency_hz ?? null,
+        body.peak_efficiency_percent ?? null,
+        body.transfer_time_ms ?? null,
+        body.battery_voltage_v ?? null,
+        body.nominal_voltage_v ?? null,
+        body.capacity_ah ?? null,
+        body.nominal_energy_wh ?? null,
+        body.max_output_power_kw ?? null,
+        body.recommended_charge_voltage_v ?? null,
+        body.recommended_charge_current_a ?? null,
+        body.end_of_discharge_voltage_v ?? null,
+        body.max_continuous_charge_current_a ?? null,
+        body.max_continuous_discharge_current_a ?? null,
+        body.cycle_life ?? null,
+        body.communication || null,
+        body.max_pv_open_circuit_voltage_v ?? null,
+        body.max_pv_array_power_w ?? null,
+        body.max_pv_input_current_a ?? null,
+        body.pv_mppt_voltage_range_v || null,
+        body.max_solar_charger_current_a ?? null,
+        body.max_ac_charger_current_a ?? null,
+        body.max_charge_current_a ?? null,
+        body.vmp_v ?? null,
+        body.voc_v ?? null,
+        body.imp_a ?? null,
+        body.isc_a ?? null,
+        body.efficiency_percent ?? null,
+        body.temperature_coefficient_pmax || null,
+        body.temperature_coefficient_voc || null,
+        body.temperature_coefficient_isc || null,
+        body.max_system_voltage_v ?? null,
+        body.maximum_series_fuse_a ?? null,
+        body.dimensions_mm || null,
+        body.machine_dimensions_w_h_d_mm || null,
+        body.weight_kg ?? null,
+        body.nw_kg ?? null,
+        body.gw_kg ?? null,
+        body.front_glass || null,
+        body.back_glass || null,
+        body.frame || null,
+        body.connector_type || null,
+        body.junction_box || null,
+        body.operating_temperature || null,
+        body.storage_temperature || null,
+        body.warranty_years ?? null,
+        body.price_egp ?? body.price ?? 0,
+        body.supplier || null,
+        body.availability || 'Available',
+        body.image_url || null,
+        body.notes || null,
+        body.owner_uid || null
+      ];
+    } else {
+      query = `
+        INSERT INTO products (
+          product_id, product_category, brand, model, product_type, technology,
+          cell_type, number_of_cells, power_w, rated_power_kw, surge_power_w,
+          waveform, ac_voltage_v, ac_voltage_regulation, frequency_hz, peak_efficiency_percent,
+          transfer_time_ms, battery_voltage_v, nominal_voltage_v, capacity_ah, nominal_energy_wh,
+          max_output_power_kw, recommended_charge_voltage_v, recommended_charge_current_a,
+          end_of_discharge_voltage_v, max_continuous_charge_current_a, max_continuous_discharge_current_a,
+          cycle_life, communication, max_pv_open_circuit_voltage_v, max_pv_array_power_w,
+          max_pv_input_current_a, pv_mppt_voltage_range_v, max_solar_charger_current_a,
+          max_ac_charger_current_a, max_charge_current_a, vmp_v, voc_v, imp_a, isc_a,
+          efficiency_percent, temperature_coefficient_pmax, temperature_coefficient_voc,
+          temperature_coefficient_isc, max_system_voltage_v, maximum_series_fuse_a,
+          dimensions_mm, machine_dimensions_w_h_d_mm, weight_kg, nw_kg, gw_kg,
+          front_glass, back_glass, frame, connector_type, junction_box,
+          operating_temperature, storage_temperature, warranty_years, price_egp,
+          supplier, availability, image_url, notes, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, datetime('now'), datetime('now')
+        )
+        ON CONFLICT(product_id) DO UPDATE SET
+          product_category = excluded.product_category,
+          brand = excluded.brand,
+          model = excluded.model,
+          product_type = excluded.product_type,
+          technology = excluded.technology,
+          cell_type = excluded.cell_type,
+          number_of_cells = excluded.number_of_cells,
+          power_w = excluded.power_w,
+          rated_power_kw = excluded.rated_power_kw,
+          ac_voltage_v = excluded.ac_voltage_v,
+          battery_voltage_v = excluded.battery_voltage_v,
+          nominal_voltage_v = excluded.nominal_voltage_v,
+          capacity_ah = excluded.capacity_ah,
+          max_pv_open_circuit_voltage_v = excluded.max_pv_open_circuit_voltage_v,
+          pv_mppt_voltage_range_v = excluded.pv_mppt_voltage_range_v,
+          vmp_v = excluded.vmp_v,
+          voc_v = excluded.voc_v,
+          imp_a = excluded.imp_a,
+          isc_a = excluded.isc_a,
+          efficiency_percent = excluded.efficiency_percent,
+          dimensions_mm = excluded.dimensions_mm,
+          weight_kg = excluded.weight_kg,
+          warranty_years = excluded.warranty_years,
+          price_egp = excluded.price_egp,
+          supplier = COALESCE(excluded.supplier, products.supplier),
+          availability = excluded.availability,
+          image_url = COALESCE(excluded.image_url, products.image_url),
+          notes = excluded.notes,
+          updated_at = datetime('now')
+      `;
+      bindParams = [
         body.product_id,
         body.product_category || 'Solar Panels',
         body.brand,
@@ -849,14 +1183,17 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         body.availability || 'Available',
         body.image_url || null,
         body.notes || null
-      )
-      .run();
+      ];
+    }
+
+    await env.DB.prepare(query).bind(...bindParams).run();
 
     return successJson(
       {
         message: 'Product created successfully',
         product_id: body.product_id,
         supplier_id: body.supplier,
+        owner_uid: body.owner_uid,
       },
       201,
       request
@@ -864,7 +1201,7 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
   }
 
   if (method === 'PUT' || method === 'PATCH') {
-    const authCheck = await verifyWorkerProductPublisher(request, env, false);
+    const authCheck = await authorizeProductWrite(request, env, { requireAdminOnly: false });
     if (!authCheck.allowed) {
       return json(
         {
@@ -883,23 +1220,24 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     if (!productId) return errorJson('Product ID required in path', 400, request);
 
     const existing: any = await env.DB.prepare(
-      'SELECT product_id, supplier FROM products WHERE product_id = ? OR id = ?'
+      'SELECT * FROM products WHERE product_id = ? OR id = ?'
     )
       .bind(productId, productId)
       .first();
     if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
 
-    // Strict Supplier Ownership Enforcement: Suppliers can ONLY edit products belonging to their own UID
+    // Strict Supplier Ownership Enforcement: Suppliers can ONLY edit products belonging to their own owner_uid
     if (authCheck.role === 'supplier') {
-      const existingOwner = String(existing.supplier || '').trim();
-      if (!existingOwner || existingOwner !== authCheck.uid) {
+      const existingOwnerUid = existing.owner_uid ? String(existing.owner_uid).trim() : null;
+      // Legacy products with no owner_uid are strictly manageable by Admin only
+      if (!existingOwnerUid || existingOwnerUid !== authCheck.uid) {
         return json(
           {
             ok: false,
             success: false,
             error: {
               code: 'PRODUCT_OWNERSHIP_FORBIDDEN',
-              message: 'غير مصرح لك بتعديل هذا المنتج لأنه تابع لمورد آخر.',
+              message: 'غير مصرح لك بتعديل هذا المنتج لأنه تابع لمورد آخر أو غير مرتبط بملكيتك.',
             },
           },
           403,
@@ -1031,7 +1369,7 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
 
   if (method === 'DELETE') {
     const isBulkDelete = !productId || productId === 'all';
-    const authCheck = await verifyWorkerProductPublisher(request, env, isBulkDelete);
+    const authCheck = await authorizeProductWrite(request, env, { requireAdminOnly: isBulkDelete });
     if (!authCheck.allowed) {
       return json(
         {
@@ -1057,23 +1395,23 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     }
 
     const existing: any = await env.DB.prepare(
-      'SELECT product_id, supplier FROM products WHERE product_id = ? OR id = ?'
+      'SELECT * FROM products WHERE product_id = ? OR id = ?'
     )
       .bind(productId, productId)
       .first();
     if (!existing) return errorJson(`Product not found: ${productId}`, 404, request);
 
-    // Strict Supplier Ownership Enforcement: Suppliers can ONLY delete products belonging to their own UID
+    // Strict Supplier Ownership Enforcement: Suppliers can ONLY delete products belonging to their own owner_uid
     if (authCheck.role === 'supplier') {
-      const existingOwner = String(existing.supplier || '').trim();
-      if (!existingOwner || existingOwner !== authCheck.uid) {
+      const existingOwnerUid = existing.owner_uid ? String(existing.owner_uid).trim() : null;
+      if (!existingOwnerUid || existingOwnerUid !== authCheck.uid) {
         return json(
           {
             ok: false,
             success: false,
             error: {
               code: 'PRODUCT_OWNERSHIP_FORBIDDEN',
-              message: 'غير مصرح لك بحذف هذا المنتج لأنه تابع لمورد آخر.',
+              message: 'غير مصرح لك بحذف هذا المنتج لأنه تابع لمورد آخر أو غير مرتبط بملكيتك.',
             },
           },
           403,
