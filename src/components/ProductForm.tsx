@@ -11,6 +11,10 @@ import { auth } from '../lib/firebase';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
 import { isRawUidOrId } from '../utils/supplierUtils';
 import { formatCleanNumber, cleanDecimal, calculateMetricArea } from '../utils/dimensionUtils';
+import {
+  parseAndValidateNumericField,
+  stripLegacyUnitFromNumericInput,
+} from '../utils/productNumericValidation';
 
 export const STANDARD_PUMP_HP_OPTIONS = [1, 2, 3, 5.5, 7.5, 10, 15, 20, 25, 30, 40, 50, 75, 100];
 
@@ -89,8 +93,15 @@ const extractInitialFormData = (data?: Product | null) => {
       warranty: '',
       type: '',
       voltage: '',
+      voc: '',
       current: '',
+      isc: '',
       weight: '',
+      mppt: '',
+      mpptCount: '',
+      maxPvVoltage: '',
+      phase: 'Three Phase',
+      batterySupport: false,
       capacity: '',
       crossSection: '',
       length: '',
@@ -100,7 +111,7 @@ const extractInitialFormData = (data?: Product | null) => {
       poles: '',
       quantity: '',
       color: '',
-      status: 'available' as const,
+      status: 'available' as 'available' | 'limited' | 'out_of_stock',
       dimLength: '',
       dimWidth: '',
       dimThickness: '',
@@ -116,35 +127,35 @@ const extractInitialFormData = (data?: Product | null) => {
   let power = '';
   let powerKw = '';
   if (data.power !== undefined && data.power !== null && data.power > 0) {
-    power = data.power.toString();
-    powerKw = (data.power / 1000).toString();
+    power = stripLegacyUnitFromNumericInput(data.power);
+    powerKw = stripLegacyUnitFromNumericInput(data.power / 1000);
   }
-  if (specs.power !== undefined && specs.power !== null && specs.power !== '') {
-    power = specs.power.toString();
+  if (specs.power !== undefined && specs.power !== null && specs.power !== '' && Number(specs.power) > 0) {
+    power = stripLegacyUnitFromNumericInput(specs.power);
   }
   if (specs.powerKw !== undefined && specs.powerKw !== null && specs.powerKw !== '') {
-    powerKw = specs.powerKw.toString();
-    if (!power) power = (parseFloat(specs.powerKw) * 1000).toString();
+    powerKw = stripLegacyUnitFromNumericInput(specs.powerKw);
+    if (!power && !isNaN(parseFloat(powerKw))) power = (parseFloat(powerKw) * 1000).toString();
   }
   if (specs.ratedPowerKw !== undefined && specs.ratedPowerKw !== null && specs.ratedPowerKw !== '') {
-    powerKw = specs.ratedPowerKw.toString();
-    if (!power) power = (parseFloat(specs.ratedPowerKw) * 1000).toString();
+    powerKw = stripLegacyUnitFromNumericInput(specs.ratedPowerKw);
+    if (!power && !isNaN(parseFloat(powerKw))) power = (parseFloat(powerKw) * 1000).toString();
   }
 
   // Extract horsepower for pump inverters and motors
   let hp = '';
   if ((data as any).hp !== undefined && (data as any).hp !== null && (data as any).hp !== '') {
-    hp = (data as any).hp.toString();
+    hp = stripLegacyUnitFromNumericInput((data as any).hp);
   } else if (specs.hp !== undefined && specs.hp !== null && specs.hp !== '') {
-    hp = specs.hp.toString();
+    hp = stripLegacyUnitFromNumericInput(specs.hp);
   } else if (specs.horsepower !== undefined && specs.horsepower !== null && specs.horsepower !== '') {
-    hp = specs.horsepower.toString();
+    hp = stripLegacyUnitFromNumericInput(specs.horsepower);
   } else if (specs.horsePower !== undefined && specs.horsePower !== null && specs.horsePower !== '') {
-    hp = specs.horsePower.toString();
+    hp = stripLegacyUnitFromNumericInput(specs.horsePower);
   } else if (specs.pumpHorsepower !== undefined && specs.pumpHorsepower !== null && specs.pumpHorsepower !== '') {
-    hp = specs.pumpHorsepower.toString();
+    hp = stripLegacyUnitFromNumericInput(specs.pumpHorsepower);
   } else if (specs.motorHp !== undefined && specs.motorHp !== null && specs.motorHp !== '') {
-    hp = specs.motorHp.toString();
+    hp = stripLegacyUnitFromNumericInput(specs.motorHp);
   } else if (specs.motorPowerRange && typeof specs.motorPowerRange === 'string') {
     const m = specs.motorPowerRange.match(/(\d+(?:\.\d+)?)\s*(?:hp|حصان)/i);
     if (m) hp = m[1];
@@ -159,43 +170,49 @@ const extractInitialFormData = (data?: Product | null) => {
     }
   }
 
-  // Extract voltage
-  const voltage = (
-    specs.voltage ||
-    specs.vmpV ||
-    specs.nominalVoltage ||
-    specs.acVoltageV ||
-    (data as any).vmp_v ||
-    (data as any).nominal_voltage_v ||
-    (data as any).ac_voltage_v ||
+  // Extract voltage (for inverters keep AC voltage string like "380/400", for panels/batteries strip legacy unit suffix)
+  const rawVoltage = (
+    (category === 'inverters'
+      ? (specs.acVoltageV || (data as any).ac_voltage_v || specs.voltage)
+      : (specs.vmpV || (data as any).vmp_v || specs.nominalVoltage || (data as any).nominal_voltage_v || (data as any).battery_voltage_v || specs.voltage)) ||
     ''
   ).toString();
+  const voltage = category === 'inverters' || category === 'cables' || category === 'protection' || category === 'combiner'
+    ? rawVoltage
+    : stripLegacyUnitFromNumericInput(rawVoltage);
+
+  // Extract Voc
+  const voc = stripLegacyUnitFromNumericInput(
+    specs.vocV ?? (data as any).voc_v ?? specs.Voc ?? (data as any).Voc ?? ''
+  );
 
   // Extract current
-  const current = (
-    specs.current ||
+  const rawCurrent = (
     specs.impA ||
-    specs.maxContinuousDischargeCurrentA ||
     (data as any).imp_a ||
-    (data as any).isc_a ||
+    specs.current ||
+    specs.maxContinuousDischargeCurrentA ||
+    (data as any).max_continuous_discharge_current_a ||
     ''
   ).toString();
+  const current = category === 'panels' || category === 'batteries' || category === 'pumps'
+    ? stripLegacyUnitFromNumericInput(rawCurrent)
+    : rawCurrent;
+
+  // Extract Isc
+  const isc = stripLegacyUnitFromNumericInput(
+    specs.iscA ?? (data as any).isc_a ?? specs.Isc ?? (data as any).Isc ?? ''
+  );
 
   // Extract weight
-  const weight = (
-    specs.weight ||
-    specs.weightKg ||
-    (data as any).weight_kg ||
-    ''
-  ).toString();
+  const weight = stripLegacyUnitFromNumericInput(
+    specs.weightKg ?? (data as any).weight_kg ?? specs.weight ?? ''
+  );
 
   // Extract capacity
-  const capacity = (
-    specs.capacity ||
-    specs.capacityAh ||
-    (data as any).capacity_ah ||
-    ''
-  ).toString();
+  const capacity = stripLegacyUnitFromNumericInput(
+    specs.capacityAh ?? (data as any).capacity_ah ?? specs.capacity ?? ''
+  );
 
   // Extract type
   const type = (
@@ -232,23 +249,23 @@ const extractInitialFormData = (data?: Product | null) => {
   // Extract efficiency
   let efficiency = '';
   if (data.efficiency !== undefined && data.efficiency !== null && data.efficiency > 0) {
-    efficiency = data.efficiency.toString();
+    efficiency = stripLegacyUnitFromNumericInput(data.efficiency);
   } else if (specs.efficiency !== undefined && specs.efficiency !== null && specs.efficiency !== '') {
-    efficiency = specs.efficiency.toString();
+    efficiency = stripLegacyUnitFromNumericInput(specs.efficiency);
   } else if (specs.peakEfficiency !== undefined && specs.peakEfficiency !== null && specs.peakEfficiency !== '') {
-    efficiency = specs.peakEfficiency.toString();
+    efficiency = stripLegacyUnitFromNumericInput(specs.peakEfficiency);
   } else if ((data as any).efficiency_percent !== undefined && (data as any).efficiency_percent !== null) {
-    efficiency = (data as any).efficiency_percent.toString();
+    efficiency = stripLegacyUnitFromNumericInput((data as any).efficiency_percent);
   }
 
   // Extract warranty
   let warranty = '';
   if (data.warranty !== undefined && data.warranty !== null && data.warranty > 0) {
-    warranty = data.warranty.toString();
+    warranty = stripLegacyUnitFromNumericInput(data.warranty);
   } else if (specs.warranty !== undefined && specs.warranty !== null && specs.warranty !== '') {
-    warranty = specs.warranty.toString();
+    warranty = stripLegacyUnitFromNumericInput(specs.warranty);
   } else if ((data as any).warranty_years !== undefined && (data as any).warranty_years !== null) {
-    warranty = (data as any).warranty_years.toString();
+    warranty = stripLegacyUnitFromNumericInput((data as any).warranty_years);
   }
 
   // Dimensions
@@ -262,9 +279,9 @@ const extractInitialFormData = (data?: Product | null) => {
     ? formatCleanNumber(data.thickness)
     : (specs.thickness ? formatCleanNumber(specs.thickness) : '');
   let dimensionUnit = ((data.dimensionUnit || specs.dimensionUnit || 'mm') as 'mm' | 'cm' | 'm');
-  let area = data.area !== undefined && data.area !== null
+  let area = data.area !== undefined && data.area !== null && data.area > 0
     ? formatCleanNumber(data.area, 3)
-    : (specs.area ? formatCleanNumber(specs.area, 3) : '');
+    : (specs.area && Number(specs.area) > 0 ? formatCleanNumber(specs.area, 3) : '');
 
   // Fallback parsing for dimensions string if length/width are missing
   if (!dimLength || !dimWidth) {
@@ -310,11 +327,26 @@ const extractInitialFormData = (data?: Product | null) => {
     if (!finalDescription) finalDescription = 'محول طاقة شمسية ذكي ثلاثي الأوجه بقدرة 5 كيلوواط من هواوي بكفاءة عالية وحماية مدمجة مع 2 متتبع MPPT.';
   }
 
+  const rawMpptCount =
+    specs.mpptCount ??
+    specs.numberOfMppt ??
+    (data as any)?.mppt_count ??
+    (data && category === 'inverters' && classifyInverter(data).mppt_count !== 'Unknown'
+      ? classifyInverter(data).mppt_count
+      : '');
+  const rawMaxPvVoltage =
+    specs.maxPvVoltage ??
+    specs.maxPvOpenCircuitVoltageV ??
+    (data as any)?.max_pv_open_circuit_voltage_v ??
+    (data && category === 'inverters' && classifyInverter(data).max_pv_voltage_v !== 'Unknown'
+      ? classifyInverter(data).max_pv_voltage_v
+      : '');
+
   return {
     name: data.nameAr || data.name || (data as any).model || '',
     brand: data.brand || '',
     category,
-    price: data.price !== undefined && data.price !== null ? data.price.toString() : '',
+    price: data.price !== undefined && data.price !== null ? stripLegacyUnitFromNumericInput(data.price) : '',
     phone: data.suppliers?.[0]?.phone || SUPPLIER_CONTACT_PHONE_DISPLAY,
     description: finalDescription,
     power,
@@ -324,7 +356,9 @@ const extractInitialFormData = (data?: Product | null) => {
     warranty,
     type: finalType,
     voltage: finalVoltage,
+    voc,
     current: finalCurrent,
+    isc,
     weight: finalWeight,
     mppt: finalMppt,
     capacity,
@@ -339,8 +373,8 @@ const extractInitialFormData = (data?: Product | null) => {
     status: (data.status || 'available') as 'available' | 'limited' | 'out_of_stock',
     phase: (specs.phase || (data as any).phase || (category === 'inverters' ? classifyInverterPhase(data) : 'Three Phase')).toString(),
     batterySupport: specs.batterySupport !== undefined ? Boolean(specs.batterySupport) : (category === 'inverters' ? (finalType === 'Hybrid' || finalType === 'Off-Grid') : false),
-    mpptCount: (specs.mpptCount || specs.numberOfMppt || (data as any)?.mppt_count || (data && category === 'inverters' && classifyInverter(data).mppt_count !== 'Unknown' ? classifyInverter(data).mppt_count : '') || '').toString(),
-    maxPvVoltage: (specs.maxPvVoltage || specs.maxPvOpenCircuitVoltageV || (data as any)?.max_pv_open_circuit_voltage_v || (data && category === 'inverters' && classifyInverter(data).max_pv_voltage_v !== 'Unknown' ? classifyInverter(data).max_pv_voltage_v : '') || '').toString(),
+    mpptCount: stripLegacyUnitFromNumericInput(rawMpptCount),
+    maxPvVoltage: stripLegacyUnitFromNumericInput(rawMaxPvVoltage),
     dimLength,
     dimWidth,
     dimThickness,
@@ -359,14 +393,24 @@ export const ProductForm: React.FC<{
   const isAr = lang === 'ar';
   const { user } = useAuth();
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const draftProductIdRef = useRef<string>(
+    initialData?.id
+      ? String(initialData.id)
+      : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase()
+  );
   
   const [formData, setFormData] = useState(() => extractInitialFormData(initialData));
+  const [uploadedMainImageUrl, setUploadedMainImageUrl] = useState<string | null>(null);
 
   // Sync state whenever initialData changes (e.g. user selects another product or switches views)
   useEffect(() => {
     setFormData(extractInitialFormData(initialData));
     setImagePreview(initialData?.image || null);
+    setUploadedMainImageUrl(null);
     setExistingAdditionalUrls(initialData?.additionalImages || []);
+    draftProductIdRef.current = initialData?.id
+      ? String(initialData.id)
+      : `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`.toUpperCase();
   }, [initialData]);
 
   const handleHpChange = (rawHp: string) => {
@@ -375,7 +419,7 @@ export const ProductForm: React.FC<{
       const num = parseFloat(clean);
       let calcKw = prev.powerKw;
       let calcPower = prev.power;
-      if (!isNaN(num) && num > 0) {
+      if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(clean) && !isNaN(num) && num > 0) {
         calcKw = HP_TO_KW_MAP[clean] || (num * 0.7457).toFixed(1);
         calcPower = Math.round(parseFloat(calcKw) * 1000).toString();
       }
@@ -392,14 +436,14 @@ export const ProductForm: React.FC<{
 
   const handlePowerKwChange = (rawKw: string) => {
     setFormData(prev => {
-      const cleanKw = rawKw.replace(/[^0-9.]/g, '');
-      const num = parseFloat(cleanKw);
+      const trimmed = rawKw.trim();
+      const num = parseFloat(trimmed);
       let calcHp = prev.hp;
       let calcPower = prev.power;
-      if (!isNaN(num) && num > 0) {
+      if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(trimmed) && !isNaN(num) && num > 0) {
         calcPower = Math.round(num * 1000).toString();
         if (prev.category === 'pumps' || prev.type === 'Pump Inverter' || prev.hp) {
-          calcHp = KW_TO_HP_MAP[cleanKw] || (num / 0.7457).toFixed(1);
+          calcHp = KW_TO_HP_MAP[trimmed] || (num / 0.7457).toFixed(1);
         }
       }
       return {
@@ -415,7 +459,7 @@ export const ProductForm: React.FC<{
     const common = ['price', 'warranty'];
     switch (cat) {
       case 'panels':
-        return [...common, 'power', 'efficiency', 'type', 'voltage', 'current', 'weight'];
+        return [...common, 'power', 'efficiency', 'type', 'voltage', 'voc', 'current', 'isc', 'weight'];
       case 'inverters':
         return [...common, 'powerKw', 'hp', 'efficiency', 'type', 'mppt', 'maxPvVoltage', 'mpptCount', 'voltage', 'current', 'weight'];
       case 'batteries':
@@ -497,6 +541,7 @@ export const ProductForm: React.FC<{
       }
 
       setUploadError(null);
+      setUploadedMainImageUrl(null);
 
       // Requirement: Do NOT reject images larger than 5 MB.
       // If <= 5 MB: Upload normally without unnecessary compression.
@@ -632,17 +677,239 @@ export const ProductForm: React.FC<{
       return;
     }
 
-    setIsUploading(true);
     setUploadError(null);
+
+    // =========================================================================
+    // Strict Pre-Flight Numeric Validation (Names the Exact Offending Field)
+    // =========================================================================
+    const priceCheck = parseAndValidateNumericField(formData.price, 'price', {
+      required: true,
+      allowZero: true,
+      lang,
+    });
+    if (!priceCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${priceCheck.errorMessage}`);
+      return;
+    }
+
+    const powerRequired = formData.category === 'panels';
+    const powerCheck = parseAndValidateNumericField(formData.power, 'power_w', {
+      required: powerRequired,
+      allowZero: false,
+      lang,
+    });
+    if (!powerCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${powerCheck.errorMessage}`);
+      return;
+    }
+
+    const isPumpInverter = formData.category === 'inverters' && formData.type === 'Pump Inverter';
+    const powerKwRequired = formData.category === 'inverters' && !isPumpInverter;
+    const powerKwCheck = parseAndValidateNumericField(formData.powerKw, 'rated_power_kw', {
+      required: powerKwRequired,
+      allowZero: false,
+      lang,
+    });
+    if (!powerKwCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${powerKwCheck.errorMessage}`);
+      return;
+    }
+
+    const hpRequired = formData.category === 'pumps' || isPumpInverter;
+    const hpCheck = parseAndValidateNumericField(formData.hp, 'hp', {
+      required: hpRequired,
+      allowZero: false,
+      lang,
+    });
+    if (!hpCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${hpCheck.errorMessage}`);
+      return;
+    }
+
+    const efficiencyCheck = parseAndValidateNumericField(formData.efficiency, 'efficiency', {
+      required: false,
+      allowZero: false,
+      lang,
+    });
+    if (!efficiencyCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${efficiencyCheck.errorMessage}`);
+      return;
+    }
+
+    const warrantyCheck = parseAndValidateNumericField(formData.warranty, 'warranty', {
+      required: false,
+      allowZero: true,
+      lang,
+    });
+    if (!warrantyCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${warrantyCheck.errorMessage}`);
+      return;
+    }
+
+    // Validate voltage when category expects a numeric voltage (panels -> Vmp, batteries -> nominal_voltage_v)
+    let vmpNum: number | null = null;
+    let vocNum: number | null = null;
+    let impNum: number | null = null;
+    let iscNum: number | null = null;
+    let batteryVoltageNum: number | null = null;
+    let acVoltageStr: string | undefined = undefined;
+
+    if (formData.category === 'panels') {
+      const vmpCheck = parseAndValidateNumericField(formData.voltage, 'vmp_v', {
+        required: false,
+        allowZero: false,
+        lang,
+      });
+      if (!vmpCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${vmpCheck.errorMessage}`);
+        return;
+      }
+      vmpNum = vmpCheck.value;
+
+      const vocCheck = parseAndValidateNumericField(formData.voc, 'voc_v', {
+        required: false,
+        allowZero: false,
+        lang,
+      });
+      if (!vocCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${vocCheck.errorMessage}`);
+        return;
+      }
+      vocNum = vocCheck.value;
+
+      const impCheck = parseAndValidateNumericField(formData.current, 'imp_a', {
+        required: false,
+        allowZero: false,
+        lang,
+      });
+      if (!impCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${impCheck.errorMessage}`);
+        return;
+      }
+      impNum = impCheck.value;
+
+      const iscCheck = parseAndValidateNumericField(formData.isc, 'isc_a', {
+        required: false,
+        allowZero: false,
+        lang,
+      });
+      if (!iscCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${iscCheck.errorMessage}`);
+        return;
+      }
+      iscNum = iscCheck.value;
+    } else if (formData.category === 'batteries') {
+      const batVoltCheck = parseAndValidateNumericField(formData.voltage, 'nominal_voltage_v', {
+        required: false,
+        allowZero: false,
+        lang,
+      });
+      if (!batVoltCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${batVoltCheck.errorMessage}`);
+        return;
+      }
+      batteryVoltageNum = batVoltCheck.value;
+    } else if (formData.category === 'inverters') {
+      acVoltageStr = formData.voltage?.trim() || undefined;
+    }
+
+    // Inverter specific numeric fields: max_pv_open_circuit_voltage_v & number_of_mppt (mppt_count)
+    let maxPvVoltageNum: number | null = null;
+    let mpptCountNum: number | null = null;
+    if (formData.category === 'inverters') {
+      const maxPvCheck = parseAndValidateNumericField(
+        formData.maxPvVoltage,
+        'max_pv_open_circuit_voltage_v',
+        {
+          required: false,
+          allowZero: false,
+          lang,
+        }
+      );
+      if (!maxPvCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${maxPvCheck.errorMessage}`);
+        return;
+      }
+      maxPvVoltageNum = maxPvCheck.value;
+
+      const mpptCountCheck = parseAndValidateNumericField(
+        formData.mpptCount,
+        'number_of_mppt',
+        {
+          required: false,
+          integerOnly: true,
+          allowZero: false,
+          lang,
+        }
+      );
+      if (!mpptCountCheck.valid) {
+        setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${mpptCountCheck.errorMessage}`);
+        return;
+      }
+      mpptCountNum = mpptCountCheck.value;
+    }
+
+    const weightCheck = parseAndValidateNumericField(formData.weight, 'weight_kg', {
+      required: false,
+      allowZero: false,
+      lang,
+    });
+    if (!weightCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${weightCheck.errorMessage}`);
+      return;
+    }
+
+    const capacityCheck = parseAndValidateNumericField(formData.capacity, 'capacity_ah', {
+      required: formData.category === 'batteries',
+      allowZero: false,
+      lang,
+    });
+    if (!capacityCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${capacityCheck.errorMessage}`);
+      return;
+    }
+
+    const dimLengthCheck = parseAndValidateNumericField(formData.dimLength, 'length', {
+      required: false,
+      allowZero: false,
+      lang,
+    });
+    if (!dimLengthCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${dimLengthCheck.errorMessage}`);
+      return;
+    }
+
+    const dimWidthCheck = parseAndValidateNumericField(formData.dimWidth, 'width', {
+      required: false,
+      allowZero: false,
+      lang,
+    });
+    if (!dimWidthCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${dimWidthCheck.errorMessage}`);
+      return;
+    }
+
+    const dimThicknessCheck = parseAndValidateNumericField(formData.dimThickness, 'thickness', {
+      required: false,
+      allowZero: false,
+      lang,
+    });
+    if (!dimThicknessCheck.valid) {
+      setUploadError(`فشل حفظ التغيير في قاعدة البيانات: ${dimThicknessCheck.errorMessage}`);
+      return;
+    }
+
+    setIsUploading(true);
     
     try {
-      let imageUrl = initialData?.image || (initialData as any)?.image_url || '';
+      let imageUrl = uploadedMainImageUrl || initialData?.image || (initialData as any)?.image_url || '';
       // Preserve existing datasheet if product previously had one, without adding PDF upload UI
       const datasheetUrl = initialData?.datasheetUrl || '';
 
-      // Upload main product image if selected (auto-compressed if > 5MB)
-      if (imageFile) {
+      // Upload main product image if selected and not already uploaded in a previous attempt
+      if (imageFile && !uploadedMainImageUrl) {
         imageUrl = await uploadProductImage(imageFile, (status) => setCompressionStatus(status), lang);
+        setUploadedMainImageUrl(imageUrl);
       }
 
       // Upload any additional product images
@@ -654,53 +921,82 @@ export const ProductForm: React.FC<{
         }
       }
 
-      const lengthVal = formData.dimLength && !isNaN(parseFloat(formData.dimLength)) ? cleanDecimal(formData.dimLength, 4) : undefined;
-      const widthVal = formData.dimWidth && !isNaN(parseFloat(formData.dimWidth)) ? cleanDecimal(formData.dimWidth, 4) : undefined;
-      const thicknessVal = formData.dimThickness && !isNaN(parseFloat(formData.dimThickness)) ? cleanDecimal(formData.dimThickness, 4) : undefined;
+      const lengthVal = dimLengthCheck.value !== null ? cleanDecimal(dimLengthCheck.value, 4) : undefined;
+      const widthVal = dimWidthCheck.value !== null ? cleanDecimal(dimWidthCheck.value, 4) : undefined;
+      const thicknessVal = dimThicknessCheck.value !== null ? cleanDecimal(dimThicknessCheck.value, 4) : undefined;
       const dimensionUnitVal = formData.dimensionUnit;
 
-      const finalArea = calculatedAreaInM2 > 0 
-        ? calculatedAreaInM2 
-        : (formData.area ? cleanDecimal(formData.area, 4) : cleanDecimal(initialData?.area, 4));
+      const savedAreaFallback = formData.area
+        ? cleanDecimal(formData.area, 4)
+        : initialData?.area
+        ? cleanDecimal(initialData.area, 4)
+        : 0;
+      const finalArea =
+        calculatedAreaInM2 > 0
+          ? calculatedAreaInM2
+          : savedAreaFallback > 0
+          ? savedAreaFallback
+          : undefined;
 
-      let effectivePower = 0;
-      const cleanHp = formData.hp && !isNaN(parseFloat(formData.hp)) ? parseFloat(formData.hp) : (formData.hp ? formData.hp.trim() : undefined);
+      const cleanHp = hpCheck.value !== null ? hpCheck.value : undefined;
+      const cleanPowerKw = powerKwCheck.value !== null ? powerKwCheck.value : undefined;
 
+      let effectivePower: number | undefined = undefined;
       if (formData.category === 'inverters') {
-        if (formData.powerKw) {
-          effectivePower = Math.round(parseFloat(formData.powerKw) * 1000);
-        } else if (cleanHp && typeof cleanHp === 'number') {
+        if (cleanPowerKw !== undefined) {
+          effectivePower = Number((cleanPowerKw * 1000).toFixed(2));
+        } else if (cleanHp !== undefined) {
           effectivePower = Math.round(cleanHp * 746);
-        } else {
-          effectivePower = parseInt(formData.power) || initialData?.power || 0;
+        } else if (powerCheck.value !== null) {
+          effectivePower = powerCheck.value;
+        } else if (initialData?.power) {
+          effectivePower = initialData.power;
         }
       } else if (formData.category === 'pumps') {
-        if (cleanHp && typeof cleanHp === 'number') {
+        if (cleanHp !== undefined) {
           effectivePower = Math.round(cleanHp * 746);
-        } else if (formData.powerKw) {
-          effectivePower = Math.round(parseFloat(formData.powerKw) * 1000);
-        } else {
-          effectivePower = parseInt(formData.power) || initialData?.power || 0;
+        } else if (cleanPowerKw !== undefined) {
+          effectivePower = Number((cleanPowerKw * 1000).toFixed(2));
+        } else if (powerCheck.value !== null) {
+          effectivePower = powerCheck.value;
+        } else if (initialData?.power) {
+          effectivePower = initialData.power;
         }
-      } else {
-        effectivePower = parseInt(formData.power) || (formData.powerKw ? Math.round(parseFloat(formData.powerKw) * 1000) : initialData?.power || 0);
+      } else if (powerCheck.value !== null) {
+        effectivePower = powerCheck.value;
+      } else if (cleanPowerKw !== undefined) {
+        effectivePower = Number((cleanPowerKw * 1000).toFixed(2));
+      } else if (initialData?.power) {
+        effectivePower = initialData.power;
       }
 
-      const parsedPrice = parseInt(formData.price) || (initialData?.price ?? 0);
+      const parsedPrice = priceCheck.value ?? (initialData?.price ?? 0);
       const isPriceManuallySet = parsedPrice > 0 && (!initialData || parsedPrice !== initialData.price || Boolean(initialData.specs?.customPrice));
+
+      const cleanEfficiency = efficiencyCheck.value !== null ? efficiencyCheck.value : undefined;
+      const cleanWarranty = warrantyCheck.value !== null ? warrantyCheck.value : undefined;
+      const cleanWeight = weightCheck.value !== null ? weightCheck.value : undefined;
+      const cleanCapacity = capacityCheck.value !== null ? capacityCheck.value : undefined;
+      const resolvedRatedPowerKw =
+        cleanPowerKw !== undefined
+          ? cleanPowerKw
+          : effectivePower !== undefined && effectivePower > 0
+          ? Number((effectivePower / 1000).toFixed(4))
+          : undefined;
 
       const newProduct: any = {
         ...(initialData || {}),
+        id: initialData?.id || draftProductIdRef.current,
         name: formData.name,
         nameAr: formData.name,
         brand: formData.brand,
         category: formData.category as any,
         price: parsedPrice,
         customPrice: isPriceManuallySet ? parsedPrice : undefined,
-        power: effectivePower,
+        power: effectivePower ?? 0,
         hp: cleanHp,
-        efficiency: parseFloat(formData.efficiency) || (initialData?.efficiency ?? 0),
-        warranty: parseInt(formData.warranty) || (initialData?.warranty ?? 0),
+        efficiency: cleanEfficiency ?? 0,
+        warranty: cleanWarranty ?? 0,
         image: imageUrl || initialData?.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
         image_url: imageUrl || initialData?.image || 'https://images.unsplash.com/photo-1509391366360-2e959784a276?q=80&w=2944&auto=format&fit=crop',
         additionalImages: finalAdditionalUrls,
@@ -713,8 +1009,18 @@ export const ProductForm: React.FC<{
         status: formData.status as any,
         updatedAt: new Date().toISOString().split('T')[0],
         supplierId: initialData?.supplierId || user?.uid || '',
-        max_pv_open_circuit_voltage_v: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage, 10) : undefined,
-        mppt_count: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount, 10) : undefined,
+        max_pv_open_circuit_voltage_v: maxPvVoltageNum ?? undefined,
+        mppt_count: mpptCountNum ?? undefined,
+        vmp_v: vmpNum ?? undefined,
+        voc_v: vocNum ?? undefined,
+        imp_a: impNum ?? undefined,
+        isc_a: iscNum ?? undefined,
+        nominal_voltage_v: batteryVoltageNum ?? undefined,
+        battery_voltage_v: batteryVoltageNum ?? undefined,
+        ac_voltage_v: acVoltageStr,
+        weight_kg: cleanWeight,
+        capacity_ah: cleanCapacity,
+        rated_power_kw: resolvedRatedPowerKw,
         description: formData.description,
         notes: formData.description,
         specs: {
@@ -727,51 +1033,64 @@ export const ProductForm: React.FC<{
           horsepower: cleanHp,
           horsePower: cleanHp,
           pumpHorsepower: cleanHp,
-          motorPowerRange: cleanHp ? `${cleanHp} HP (${formData.powerKw || (typeof cleanHp === 'number' ? (cleanHp * 0.746).toFixed(1) : '')} kW)` : (initialData?.specs?.motorPowerRange || undefined),
-          efficiency: parseFloat(formData.efficiency) || undefined,
-          warranty: parseInt(formData.warranty) || undefined,
-          type: formData.type,
-          productType: formData.type,
-          technology: formData.type,
+          motorPowerRange: cleanHp ? `${cleanHp} HP (${resolvedRatedPowerKw || (cleanHp * 0.746).toFixed(1)} kW)` : (initialData?.specs?.motorPowerRange || undefined),
+          efficiency: cleanEfficiency,
+          warranty: cleanWarranty,
+          type: formData.type || undefined,
+          productType: formData.type || undefined,
+          technology: formData.type || undefined,
           phase: formData.category === 'inverters' ? formData.phase : undefined,
           batterySupport: formData.category === 'inverters' ? formData.batterySupport : undefined,
-          mpptCount: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount) : undefined,
-          numberOfMppt: formData.category === 'inverters' && formData.mpptCount ? parseInt(formData.mpptCount) : undefined,
-          maxPvVoltage: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage) : undefined,
-          maxPvOpenCircuitVoltageV: formData.category === 'inverters' && formData.maxPvVoltage ? parseInt(formData.maxPvVoltage) : undefined,
-          voltage: formData.voltage,
-          vmpV: formData.category === 'panels' ? formData.voltage : undefined,
-          nominalVoltage: formData.voltage,
-          acVoltageV: formData.category === 'inverters' ? formData.voltage : undefined,
-          current: formData.current,
-          impA: formData.category === 'panels' ? formData.current : undefined,
-          maxContinuousDischargeCurrentA: formData.current,
-          pvMpptVoltageRangeV: formData.mppt || undefined,
-          mppt: formData.mppt || undefined,
-          weight: formData.weight,
-          weightKg: formData.weight,
-          capacity: formData.capacity,
-          capacityAh: formData.capacity,
-          powerKw: formData.powerKw || (effectivePower ? (effectivePower / 1000).toString() : undefined),
-          ratedPowerKw: formData.powerKw ? parseFloat(formData.powerKw) : (effectivePower ? effectivePower / 1000 : undefined),
-          crossSection: formData.crossSection,
-          cableLength: formData.category === 'cables' ? formData.length : undefined,
-          length: lengthVal !== undefined ? lengthVal : (formData.category === 'cables' ? formData.length : undefined),
+          mpptCount: mpptCountNum ?? undefined,
+          numberOfMppt: mpptCountNum ?? undefined,
+          maxPvVoltage: maxPvVoltageNum ?? undefined,
+          maxPvOpenCircuitVoltageV: maxPvVoltageNum ?? undefined,
+          voltage:
+            formData.category === 'panels'
+              ? vmpNum ?? undefined
+              : formData.category === 'batteries'
+              ? batteryVoltageNum ?? undefined
+              : formData.voltage?.trim() || undefined,
+          vmpV: vmpNum ?? undefined,
+          vocV: vocNum ?? undefined,
+          nominalVoltage: batteryVoltageNum ?? undefined,
+          acVoltageV: acVoltageStr,
+          current:
+            formData.category === 'panels'
+              ? impNum ?? undefined
+              : formData.current?.trim() || undefined,
+          impA: impNum ?? undefined,
+          iscA: iscNum ?? undefined,
+          maxContinuousDischargeCurrentA:
+            formData.category === 'batteries' && formData.current
+              ? parseFloat(formData.current) || undefined
+              : undefined,
+          pvMpptVoltageRangeV: formData.mppt?.trim() || undefined,
+          mppt: formData.mppt?.trim() || undefined,
+          weight: cleanWeight,
+          weightKg: cleanWeight,
+          capacity: cleanCapacity,
+          capacityAh: cleanCapacity,
+          powerKw: resolvedRatedPowerKw,
+          ratedPowerKw: resolvedRatedPowerKw,
+          crossSection: formData.crossSection?.trim() || undefined,
+          cableLength: formData.category === 'cables' ? formData.length?.trim() || undefined : undefined,
+          length: lengthVal,
           width: widthVal,
           thickness: thicknessVal,
           dimensionUnit: dimensionUnitVal,
           area: finalArea,
-          material: formData.material,
-          maxWind: formData.maxWind,
-          ipRating: formData.ipRating,
-          poles: formData.poles,
-          quantity: formData.quantity,
-          color: formData.color,
+          material: formData.material?.trim() || undefined,
+          maxWind: formData.maxWind?.trim() || undefined,
+          ipRating: formData.ipRating?.trim() || undefined,
+          poles: formData.poles?.trim() || undefined,
+          quantity: formData.quantity?.trim() || undefined,
+          color: formData.color?.trim() || undefined,
         },
         suppliers: (initialData?.suppliers && initialData.suppliers.length > 0)
           ? initialData.suppliers.map(s => ({
               ...s,
-              price: parseInt(formData.price) || s.price || 0,
+              price: parsedPrice || s.price || 0,
               lastUpdate: new Date().toISOString().split('T')[0]
             }))
           : [
@@ -785,7 +1104,7 @@ export const ProductForm: React.FC<{
                         (!isRawUidOrId(user?.nameAr) && user?.nameAr) ||
                         (!isRawUidOrId(user?.name) && user?.name) ||
                         'مورد معتمد',
-                price: parseInt(formData.price) || 0,
+                price: parsedPrice || 0,
                 phone: SUPPLIER_CONTACT_PHONE_DISPLAY,
                 location: user?.location || 'Cairo, Egypt',
                 verified: user?.verified || false,
@@ -823,7 +1142,7 @@ export const ProductForm: React.FC<{
   };
   
   return (
-    <form className="space-y-6 text-right" onSubmit={handleSubmit}>
+    <form className="space-y-6 text-right" noValidate onSubmit={handleSubmit}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
         <div className="space-y-2 md:col-span-2 text-left">
           <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.productName}</label>
@@ -869,7 +1188,7 @@ export const ProductForm: React.FC<{
           <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.status}</label>
           <select 
             value={formData.status}
-            onChange={e => setFormData(p => ({...p, status: e.target.value}))}
+            onChange={e => setFormData(p => ({...p, status: e.target.value as 'available' | 'limited' | 'out_of_stock'}))}
             className={`w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold flex items-center gap-2 ${
               formData.status === 'available' ? 'text-solar-success' : 
               formData.status === 'limited' ? 'text-amber-500' : 'text-red-500'
@@ -892,10 +1211,11 @@ export const ProductForm: React.FC<{
               )}
             </div>
             <input 
-              type="number" 
-              inputMode="numeric"
+              type="text" 
+              inputMode="decimal"
               value={formData.price}
               onChange={e => setFormData(p => ({...p, price: e.target.value}))}
+              placeholder={isAr ? "مثال: 6500 أو 6500.5" : "e.g. 6500"}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
@@ -911,10 +1231,11 @@ export const ProductForm: React.FC<{
           <div className="space-y-1.5 text-left">
             <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.power}</label>
             <input 
-              type="number" 
-              inputMode="numeric"
+              type="text" 
+              inputMode="decimal"
               value={formData.power}
               onChange={e => setFormData(p => ({...p, power: e.target.value}))}
+              placeholder={isAr ? "مثال: 580 أو 620" : "e.g. 580"}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               required
             />
@@ -948,7 +1269,7 @@ export const ProductForm: React.FC<{
                 <div className="space-y-1.5 text-left">
                   <label className="text-[11px] font-black text-solar-text uppercase flex items-center justify-between">
                     <span>{isAr ? 'القدرة بالحصان (HP) *' : 'Horsepower (HP) *'}</span>
-                    {formData.hp && (
+                    {formData.hp && !isNaN(parseFloat(formData.hp)) && (
                       <span className="text-solar-blue font-bold text-[10px]">
                         ≈ {formData.powerKw || (parseFloat(formData.hp) * 0.746).toFixed(1)} kW
                       </span>
@@ -956,8 +1277,7 @@ export const ProductForm: React.FC<{
                   </label>
                   <div className="relative">
                     <input 
-                      type="number"
-                      step="any"
+                      type="text"
                       inputMode="decimal"
                       value={formData.hp}
                       onChange={e => handleHpChange(e.target.value)}
@@ -979,11 +1299,11 @@ export const ProductForm: React.FC<{
                   <div className="relative">
                     <input 
                       type="text" 
+                      inputMode="decimal"
                       value={formData.powerKw}
                       onChange={e => handlePowerKwChange(e.target.value)}
                       className="w-full bg-white border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base font-bold text-solar-text outline-none focus:border-solar-blue transition" 
-                      placeholder="7.5 kW"
-                      required
+                      placeholder="5.5"
                     />
                     <div className={`absolute ${isAr ? 'left-3' : 'right-3'} top-1/2 -translate-y-1/2 text-xs font-bold text-solar-muted pointer-events-none`}>
                       kW
@@ -1040,10 +1360,11 @@ export const ProductForm: React.FC<{
               </div>
               <input 
                 type="text" 
+                inputMode="decimal"
                 value={formData.powerKw}
                 onChange={e => handlePowerKwChange(e.target.value)}
                 className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-                placeholder="5kW"
+                placeholder={isAr ? "مثال: 5 أو 5.5" : "e.g. 5 or 5.5"}
                 required
               />
             </div>
@@ -1052,13 +1373,16 @@ export const ProductForm: React.FC<{
 
         {fields.includes('capacity') && (
           <div className="space-y-1.5 text-left">
-            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.capacity}</label>
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
+              {t.capacity} (Ah)
+            </label>
             <input 
               type="text" 
+              inputMode="decimal"
               value={formData.capacity}
               onChange={e => setFormData(p => ({...p, capacity: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="200Ah"
+              placeholder={isAr ? "مثال: 200 أو 100" : "e.g. 200"}
               required
             />
           </div>
@@ -1066,15 +1390,16 @@ export const ProductForm: React.FC<{
 
         {fields.includes('efficiency') && (
           <div className="space-y-1.5 text-left">
-            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.efficiency}</label>
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
+              {t.efficiency} (%)
+            </label>
             <input 
-              type="number" 
+              type="text" 
               inputMode="decimal"
-              step="0.01" 
               value={formData.efficiency}
               onChange={e => setFormData(p => ({...p, efficiency: e.target.value}))}
+              placeholder={isAr ? "مثال: 99.8 أو 22.4 (اختياري)" : "e.g. 99.8 or 22.4"}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              required
             />
           </div>
         )}
@@ -1083,12 +1408,12 @@ export const ProductForm: React.FC<{
           <div className="space-y-1.5 text-left">
             <label className="text-[11px] font-black text-solar-muted uppercase ml-1">{t.warrantyYears}</label>
             <input 
-              type="number" 
-              inputMode="numeric"
+              type="text" 
+              inputMode="decimal"
               value={formData.warranty}
               onChange={e => setFormData(p => ({...p, warranty: e.target.value}))}
+              placeholder={isAr ? "مثال: 10 أو 25 (اختياري)" : "e.g. 10 or 25"}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              required
             />
           </div>
         )}
@@ -1178,7 +1503,6 @@ export const ProductForm: React.FC<{
                 onChange={e => setFormData(p => ({...p, type: e.target.value}))}
                 className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
                 placeholder="Monocrystalline / Hybrid / Gel"
-                required
               />
             </div>
           )
@@ -1195,7 +1519,7 @@ export const ProductForm: React.FC<{
               value={formData.mppt}
               onChange={e => setFormData(p => ({...p, mppt: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder={t.mpptPlaceholder || (isAr ? "مثال: 160V - 950V أو 2 MPPT" : "e.g. 160V - 950V (2 MPPT)")}
+              placeholder={t.mpptPlaceholder || (isAr ? "مثال: 160 - 950 V" : "e.g. 160 - 950 V")}
             />
           </div>
         )}
@@ -1204,15 +1528,15 @@ export const ProductForm: React.FC<{
           <div className="space-y-1.5 text-left">
             <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center gap-1">
               <Zap size={13} className="text-solar-blue" />
-              <span>{t.maxPvVoltage || (isAr ? 'أقصى جهد دخل DC (فولت)' : 'Max PV Input Voltage (V)')}</span>
+              <span>{t.maxPvVoltage || (isAr ? 'أقصى جهد دخل DC (فولت - Voc Max)' : 'Max PV Input Voltage (V)')}</span>
             </label>
             <input 
               type="text" 
-              inputMode="numeric"
+              inputMode="decimal"
               value={formData.maxPvVoltage}
               onChange={e => setFormData(p => ({...p, maxPvVoltage: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder={t.maxPvVoltagePlaceholder || (isAr ? "مثال: 1100 أو 1000 أو 600" : "e.g. 1100, 1000, 600")}
+              placeholder={isAr ? "مثال: 1100 أو 1000 أو 600" : "e.g. 1100, 1000, 600"}
             />
           </div>
         )}
@@ -1221,7 +1545,7 @@ export const ProductForm: React.FC<{
           <div className="space-y-1.5 text-left">
             <label className="text-[11px] font-black text-solar-muted uppercase ml-1 flex items-center gap-1">
               <Zap size={13} className="text-solar-blue" />
-              <span>{t.mpptCount || (isAr ? 'عدد متتبعات MPPT' : 'Number of MPPT Trackers')}</span>
+              <span>{t.mpptCount || (isAr ? 'عدد متتبعات MPPT (number_of_mppt)' : 'Number of MPPT Trackers')}</span>
             </label>
             <input 
               type="text" 
@@ -1229,7 +1553,7 @@ export const ProductForm: React.FC<{
               value={formData.mpptCount}
               onChange={e => setFormData(p => ({...p, mpptCount: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder={t.mpptCountPlaceholder || (isAr ? "مثال: 2 أو 4 أو 6" : "e.g. 2, 4, 6")}
+              placeholder={isAr ? "مثال: 2 أو 4 أو 6" : "e.g. 2, 4, 6"}
             />
           </div>
         )}
@@ -1238,23 +1562,40 @@ export const ProductForm: React.FC<{
           <div className="space-y-1.5 text-left">
             <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
               {formData.category === 'inverters' 
-                ? (isAr ? 'جهد الخرج المتردد (AC)' : 'AC Output Voltage')
+                ? (isAr ? 'جهد الخرج المتردد (AC - V)' : 'AC Output Voltage (V)')
                 : formData.category === 'panels'
-                ? (isAr ? 'جهد التشغيل الأقصى (Vmp)' : 'Max Power Voltage (Vmp)')
-                : t.voltage}
+                ? (isAr ? 'جهد التشغيل الأقصى (Vmp - فولت)' : 'Max Power Voltage (Vmp - V)')
+                : `${t.voltage} (V)`}
             </label>
             <input 
               type="text" 
+              inputMode={formData.category === 'panels' || formData.category === 'batteries' ? 'decimal' : 'text'}
               value={formData.voltage}
               onChange={e => setFormData(p => ({...p, voltage: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder={
                 formData.category === 'inverters'
-                  ? (isAr ? "مثال: 380/400V أو 220V" : "e.g. 380/400V or 220V")
+                  ? (isAr ? "مثال: 380/400 أو 220" : "e.g. 380/400 or 220")
                   : formData.category === 'panels'
-                  ? (isAr ? "مثال: 41.5V" : "e.g. 41.5V")
-                  : (isAr ? "مثال: 48V أو 220V أو 41.5V" : "e.g. 48V / 220V / 41.5V")
+                  ? (isAr ? "مثال: 41.5 أو 42.4 (اختياري)" : "e.g. 41.5 or 42.4")
+                  : (isAr ? "مثال: 48 أو 24 أو 12" : "e.g. 48 / 24 / 12")
               }
+            />
+          </div>
+        )}
+
+        {fields.includes('voc') && (
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
+              {isAr ? 'جهد الدائرة المفتوحة (Voc - فولت)' : 'Open Circuit Voltage (Voc - V)'}
+            </label>
+            <input 
+              type="text" 
+              inputMode="decimal"
+              value={formData.voc}
+              onChange={e => setFormData(p => ({...p, voc: e.target.value}))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={isAr ? "مثال: 49.8 أو 50.2 (اختياري)" : "e.g. 49.8 or 50.2"}
             />
           </div>
         )}
@@ -1263,23 +1604,40 @@ export const ProductForm: React.FC<{
           <div className="space-y-1.5 text-left">
             <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
               {formData.category === 'inverters' 
-                ? (isAr ? 'أقصى تيار خرج (AC)' : 'Max Output Current (AC)')
+                ? (isAr ? 'أقصى تيار خرج (AC - أمبير)' : 'Max Output Current (AC - A)')
                 : formData.category === 'panels'
-                ? (isAr ? 'تيار التشغيل الأقصى (Imp)' : 'Max Power Current (Imp)')
-                : t.current}
+                ? (isAr ? 'تيار التشغيل الأقصى (Imp - أمبير)' : 'Max Power Current (Imp - A)')
+                : `${t.current} (A)`}
             </label>
             <input 
               type="text" 
+              inputMode={formData.category === 'panels' ? 'decimal' : 'text'}
               value={formData.current}
               onChange={e => setFormData(p => ({...p, current: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder={
                 formData.category === 'inverters'
-                  ? (isAr ? "مثال: 8.5A أو 16A" : "e.g. 8.5A or 16A")
+                  ? (isAr ? "مثال: 8.5 أو 16" : "e.g. 8.5 or 16")
                   : formData.category === 'panels'
-                  ? (isAr ? "مثال: 14.94A" : "e.g. 14.94A")
-                  : (isAr ? "مثال: 10.85A أو 13A أو 32A" : "e.g. 10.85A / 13A / 32A")
+                  ? (isAr ? "مثال: 14.94 (اختياري)" : "e.g. 14.94")
+                  : (isAr ? "مثال: 10.85 أو 32" : "e.g. 10.85 / 32")
               }
+            />
+          </div>
+        )}
+
+        {fields.includes('isc') && (
+          <div className="space-y-1.5 text-left">
+            <label className="text-[11px] font-black text-solar-muted uppercase ml-1">
+              {isAr ? 'تيار القصر (Isc - أمبير)' : 'Short Circuit Current (Isc - A)'}
+            </label>
+            <input 
+              type="text" 
+              inputMode="decimal"
+              value={formData.isc}
+              onChange={e => setFormData(p => ({...p, isc: e.target.value}))}
+              className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 min-h-[48px] text-base sm:text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
+              placeholder={isAr ? "مثال: 15.8 (اختياري)" : "e.g. 15.8"}
             />
           </div>
         )}
@@ -1293,7 +1651,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, crossSection: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="4mm² / 6mm²"
-              required
             />
           </div>
         )}
@@ -1307,7 +1664,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, length: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="100m"
-              required
             />
           </div>
         )}
@@ -1321,7 +1677,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, material: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="Aluminum / Copper"
-              required
             />
           </div>
         )}
@@ -1335,7 +1690,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, color: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="Black / Red"
-              required
             />
           </div>
         )}
@@ -1349,7 +1703,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, maxWind: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="120km/h"
-              required
             />
           </div>
         )}
@@ -1363,7 +1716,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, ipRating: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="IP65 / IP67"
-              required
             />
           </div>
         )}
@@ -1377,7 +1729,6 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, poles: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="2P / 4P"
-              required
             />
           </div>
         )}
@@ -1391,21 +1742,22 @@ export const ProductForm: React.FC<{
               onChange={e => setFormData(p => ({...p, quantity: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
               placeholder="100 pcs"
-              required
             />
           </div>
         )}
 
         {fields.includes('weight') && (
           <div className="space-y-2 text-left">
-            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">{t.weight}</label>
+            <label className="text-[10px] font-black text-solar-muted uppercase ml-2">
+              {t.weight} (kg)
+            </label>
             <input 
               type="text" 
+              inputMode="decimal"
               value={formData.weight}
               onChange={e => setFormData(p => ({...p, weight: e.target.value}))}
               className="w-full bg-solar-bg border border-solar-border rounded-xl px-4 py-3 text-sm outline-none focus:border-solar-blue transition font-bold text-solar-text" 
-              placeholder="23kg"
-              required
+              placeholder={isAr ? "مثال: 23 أو 28.5 (اختياري)" : "e.g. 23 or 28.5"}
             />
           </div>
         )}

@@ -25,6 +25,7 @@ import {
 } from "./src/types/inverter";
 
 import { productsData } from "./src/data/mockData";
+import { validateAndNormalizeD1ProductNumericFields } from "./src/utils/productNumericValidation";
 
 dotenv.config();
 
@@ -1097,9 +1098,16 @@ async function startServer() {
       }
     }
 
-    const ratedKw = Number(p.rated_power_kw ?? parsedSpecs.ratedPowerKw ?? 0);
-    let power = Number(p.power ?? p.power_w ?? (baseMatch ? baseMatch.power : 0));
-    if ((!power || isNaN(power)) && ratedKw > 0) {
+    const rawRatedKw = p.rated_power_kw ?? parsedSpecs.ratedPowerKw;
+    const ratedKw = rawRatedKw !== undefined && rawRatedKw !== null && rawRatedKw !== '' && Number.isFinite(Number(rawRatedKw))
+      ? Number(rawRatedKw)
+      : null;
+
+    const rawPower = p.power_w ?? p.power ?? (baseMatch ? baseMatch.power : null);
+    let power: number | null = rawPower !== undefined && rawPower !== null && rawPower !== '' && Number.isFinite(Number(rawPower))
+      ? Number(rawPower)
+      : null;
+    if ((power === null || power === 0) && ratedKw !== null && ratedKw > 0) {
       power = ratedKw <= 200 ? ratedKw * 1000 : ratedKw;
     }
 
@@ -1110,12 +1118,19 @@ async function startServer() {
       price = baseMatch?.price && baseMatch.price >= 1000 ? baseMatch.price : price * 1000;
     }
 
-    const efficiency = Number(p.efficiency ?? p.efficiency_percent ?? (baseMatch ? baseMatch.efficiency : 0));
-    const warranty = Number(p.warranty ?? p.warranty_years ?? (baseMatch ? baseMatch.warranty : 0));
+    const rawEff = p.efficiency_percent !== undefined ? p.efficiency_percent : (p.efficiency !== undefined ? p.efficiency : (baseMatch ? baseMatch.efficiency : null));
+    const efficiency: number | null = rawEff !== undefined && rawEff !== null && rawEff !== '' && Number.isFinite(Number(rawEff)) && Number(rawEff) > 0
+      ? Number(rawEff)
+      : null;
+
+    const rawWar = p.warranty_years !== undefined ? p.warranty_years : (p.warranty !== undefined ? p.warranty : (baseMatch ? baseMatch.warranty : null));
+    const warranty: number | null = rawWar !== undefined && rawWar !== null && rawWar !== '' && Number.isFinite(Number(rawWar)) && Number(rawWar) > 0
+      ? Number(rawWar)
+      : null;
 
     const brand = normalizeBrandName(p.brand || baseMatch?.brand, p.model || p.name);
     let rawModel = String(p.model || p.name || baseMatch?.name || `Product ${id}`).trim();
-    const kwDisplay = ratedKw > 0 ? ratedKw : (power >= 1000 ? power / 1000 : 0);
+    const kwDisplay = ratedKw !== null && ratedKw > 0 ? ratedKw : (power !== null && power >= 1000 ? power / 1000 : 0);
 
     // Disambiguate generic Felicity / Eastman model strings in D1 using rated power
     if (!isEdited && brand === 'Felicity' && rawModel.toLowerCase() === 'off grid inverter' && kwDisplay > 0) {
@@ -1145,11 +1160,11 @@ async function startServer() {
         nameAr = `إنفرتر فيليسيتي (فيلسيتي) أوف جريد ${kwDisplay} كيلو وات`;
       } else if (brand === 'Eastman' && kwDisplay > 0) {
         nameAr = `إنفرتر إيستمان أوف جريد ${kwDisplay} كيلو وات`;
-      } else if (brand === 'Jinko' && power > 0) {
+      } else if (brand === 'Jinko' && power !== null && power > 0) {
         nameAr = `لوح طاقة شمسية جينكو ${power} وات (${rawModel})`;
-      } else if (brand === 'LONGi Solar' && power > 0) {
+      } else if (brand === 'LONGi Solar' && power !== null && power > 0) {
         nameAr = `لوح طاقة شمسية لونجي ثنائي الوجه ${power} وات (${rawModel})`;
-      } else if (brand === 'Trina Solar' && power > 0) {
+      } else if (brand === 'Trina Solar' && power !== null && power > 0) {
         nameAr = `لوح طاقة شمسية ترينا سولار ثنائي الوجه ${power} وات (${rawModel})`;
       } else {
         nameAr = name;
@@ -1165,9 +1180,11 @@ async function startServer() {
       ...parsedSpecs,
       productType: p.product_type || parsedSpecs.productType || parsedSpecs.type || baseMatch?.specs?.productType || '',
       technology: p.technology || parsedSpecs.technology || baseMatch?.specs?.technology || '',
-      ratedPowerKw: ratedKw || (normCat === 'inverters' && power >= 1000 ? power / 1000 : power / 1000),
+      ratedPowerKw: ratedKw ?? (normCat === 'inverters' && power !== null && power >= 1000 ? power / 1000 : undefined),
       vmpV: p.vmp_v ?? parsedSpecs.vmpV ?? baseMatch?.specs?.vmpV,
+      vocV: p.voc_v ?? parsedSpecs.vocV ?? baseMatch?.specs?.vocV,
       impA: p.imp_a ?? parsedSpecs.impA ?? baseMatch?.specs?.impA,
+      iscA: p.isc_a ?? parsedSpecs.iscA ?? baseMatch?.specs?.iscA,
       acVoltageV: p.ac_voltage_v ?? parsedSpecs.acVoltageV ?? baseMatch?.specs?.acVoltageV
     };
 
@@ -1186,8 +1203,9 @@ async function startServer() {
       brand,
       category: normCat,
       product_category: titleCat,
-      power,
+      power: power ?? 0,
       power_w: power,
+      rated_power_kw: ratedKw,
       price,
       price_egp: price,
       efficiency,
@@ -2039,7 +2057,23 @@ ${urls.join("\n")}
     }
 
     try {
-      const body = sanitizeProductPayload(req.body || {});
+      const sanitizedBody = sanitizeProductPayload(req.body || {});
+      const numericValidation = validateAndNormalizeD1ProductNumericFields(sanitizedBody, { isUpdate: false });
+      if (!numericValidation.valid) {
+        return res.status(400).json({
+          ok: false,
+          success: false,
+          field: numericValidation.field,
+          error: {
+            code: "INVALID_NUMERIC_VALUE",
+            field: numericValidation.field,
+            message: numericValidation.errorMessage
+          },
+          message: numericValidation.errorMessage
+        });
+      }
+
+      const body = numericValidation.normalizedPayload;
       const rawId = body.product_id ? String(body.product_id).trim() : "";
       const newId = isValidProductId(rawId)
         ? rawId
@@ -2051,9 +2085,11 @@ ${urls.join("\n")}
           ? authCheck.uid
           : body.supplier_id || body.supplier || authCheck.uid;
 
-      const newProduct = {
+      const newProduct: Record<string, any> = {
         ...body,
         product_id: newId,
+        model: body.model || body.name || newId,
+        name: body.name || body.model || newId,
         supplier_id: authoritativeSupplierId,
         supplier: authoritativeSupplierId,
         verified: true,
@@ -2061,22 +2097,53 @@ ${urls.join("\n")}
         updated_at: new Date().toISOString()
       };
 
+      const workerPayload = {
+        ...newProduct,
+        specs: typeof newProduct.specs === "object" && newProduct.specs !== null
+          ? JSON.stringify(newProduct.specs)
+          : newProduct.specs,
+        suppliers: Array.isArray(newProduct.suppliers)
+          ? JSON.stringify(newProduct.suppliers)
+          : newProduct.suppliers
+      };
+
       // Forward to Cloudflare Worker with Authorization Bearer header
       try {
-        const cfRes = await fetch(`${CF_WORKER_API}/products`, {
+        let cfRes = await fetch(`${CF_WORKER_API}/products`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": authHeader!,
             "Origin": "https://enerjoo.com"
           },
-          body: JSON.stringify(newProduct),
+          body: JSON.stringify(workerPayload),
           signal: AbortSignal.timeout(10000)
         });
+
+        // If retrying a save with the same product_id that already exists in D1 (409 Conflict),
+        // update it via PUT so retries never create duplicates or fail.
+        if (cfRes.status === 409) {
+          cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(newId)}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": authHeader!,
+              "Origin": "https://enerjoo.com"
+            },
+            body: JSON.stringify(workerPayload),
+            signal: AbortSignal.timeout(10000)
+          });
+        }
+
         if (cfRes.status === 401 || cfRes.status === 403) {
           const errJson: any = await cfRes.json().catch(() => null);
           if (errJson?.error?.code === "SUPPLIER_NOT_VERIFIED" || errJson?.error?.code === "SUPPLIER_REJECTED") {
             return res.status(403).json(errJson);
+          }
+        } else if (cfRes.status === 400) {
+          const errJson: any = await cfRes.json().catch(() => null);
+          if (errJson) {
+            return res.status(400).json(errJson);
           }
         }
       } catch (cfErr) {
@@ -2089,15 +2156,24 @@ ${urls.join("\n")}
         await saveDeletedProducts();
       }
 
-      // Add to local catalog
-      const existingIdx = activeCatalogProducts.findIndex(p => p.product_id === newId);
+      const normalizedProduct = normalizeProductRecord({ ...newProduct, _isEdited: true, _fromD1: true });
+
+      // Add/update in local catalog without duplicating
+      const existingIdx = activeCatalogProducts.findIndex(
+        p => String(p.product_id) === newId || String(p.id) === newId
+      );
       if (existingIdx >= 0) {
-        activeCatalogProducts[existingIdx] = newProduct;
+        activeCatalogProducts[existingIdx] = normalizedProduct;
       } else {
-        activeCatalogProducts.unshift(newProduct);
+        activeCatalogProducts.unshift(normalizedProduct);
       }
 
-      res.status(201).json({ success: true, ok: true, product_id: newId, product: newProduct });
+      // Also persist in editedProductsMap & liveD1ProductsCache so GET /api/products immediately reflects it
+      editedProductsMap.set(newId, normalizedProduct);
+      await saveEditedProducts();
+      liveD1ProductsCache.set(newId, { ...normalizedProduct, _fromD1: true });
+
+      res.status(201).json({ success: true, ok: true, product_id: newId, product: normalizedProduct });
     } catch (err: any) {
       console.error("Error in POST /api/products:", err);
       res.status(500).json({ success: false, error: "Failed to create product" });
@@ -2125,20 +2201,51 @@ ${urls.join("\n")}
     }
 
     try {
-      const safeBody = sanitizeProductPayload(req.body || {});
+      const sanitizedBody = sanitizeProductPayload(req.body || {});
+      const numericValidation = validateAndNormalizeD1ProductNumericFields(sanitizedBody, { isUpdate: true });
+      if (!numericValidation.valid) {
+        return res.status(400).json({
+          ok: false,
+          success: false,
+          field: numericValidation.field,
+          error: {
+            code: "INVALID_NUMERIC_VALUE",
+            field: numericValidation.field,
+            message: numericValidation.errorMessage
+          },
+          message: numericValidation.errorMessage
+        });
+      }
+
+      const safeBody = numericValidation.normalizedPayload;
+      const workerUpdatePayload = {
+        ...safeBody,
+        specs: typeof safeBody.specs === "object" && safeBody.specs !== null
+          ? JSON.stringify(safeBody.specs)
+          : safeBody.specs,
+        suppliers: Array.isArray(safeBody.suppliers)
+          ? JSON.stringify(safeBody.suppliers)
+          : safeBody.suppliers
+      };
 
       // Forward to Cloudflare Worker with Authorization Bearer header
       try {
-        await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
+        const cfRes = await fetch(`${CF_WORKER_API}/products/${encodeURIComponent(productId)}`, {
           method: req.method === "PATCH" ? "PATCH" : "PUT",
           headers: {
             "Content-Type": "application/json",
             "Authorization": authHeader!,
             "Origin": "https://enerjoo.com"
           },
-          body: JSON.stringify(safeBody),
+          body: JSON.stringify(workerUpdatePayload),
           signal: AbortSignal.timeout(10000)
         });
+        if (cfRes.status === 400) {
+          const errJson: any = await cfRes.json().catch(() => null);
+          if (errJson) {
+            return res.status(400).json(errJson);
+          }
+        }
       } catch {
         // Continue with local update
       }

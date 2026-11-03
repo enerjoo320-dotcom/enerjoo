@@ -7,6 +7,7 @@
  */
 
 import { runEnerjooSolarConsultant, RawCatalogProduct } from '../src/utils/enerjooSolarConsultant';
+import { validateAndNormalizeD1ProductNumericFields } from '../src/utils/productNumericValidation';
 
 export interface D1PreparedStatement {
   bind(...values: any[]): D1PreparedStatement;
@@ -601,12 +602,34 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
       );
     }
 
-    let body: any;
+    let rawBody: any;
     try {
-      body = await request.json();
+      rawBody = await request.json();
     } catch {
       return errorJson('Invalid JSON payload in request body', 400, request);
     }
+
+    const numericValidation = validateAndNormalizeD1ProductNumericFields(rawBody || {}, { isUpdate: false });
+    if (!numericValidation.valid) {
+      return json(
+        {
+          ok: false,
+          success: false,
+          field: numericValidation.field,
+          error: {
+            code: 'INVALID_NUMERIC_VALUE',
+            field: numericValidation.field,
+            message: numericValidation.errorMessage,
+          },
+          message: numericValidation.errorMessage,
+        },
+        400,
+        request
+      );
+    }
+
+    const body = numericValidation.normalizedPayload;
+    body.model = body.model || body.name;
 
     if (!body.product_id || !body.brand || !body.model) {
       return errorJson('Missing required fields: product_id, brand, model', 400, request);
@@ -614,14 +637,6 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     if (authCheck.role === 'supplier' && authCheck.uid) {
       body.supplier = authCheck.uid;
       body.supplier_id = authCheck.uid;
-    }
-
-    // Check conflict
-    const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ?')
-      .bind(body.product_id)
-      .first();
-    if (existing) {
-      return errorJson(`Product with ID '${body.product_id}' already exists`, 409, request);
     }
 
     const query = `
@@ -646,6 +661,36 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, datetime('now'), datetime('now')
       )
+      ON CONFLICT(product_id) DO UPDATE SET
+        product_category = excluded.product_category,
+        brand = excluded.brand,
+        model = excluded.model,
+        product_type = excluded.product_type,
+        technology = excluded.technology,
+        cell_type = excluded.cell_type,
+        number_of_cells = excluded.number_of_cells,
+        power_w = excluded.power_w,
+        rated_power_kw = excluded.rated_power_kw,
+        ac_voltage_v = excluded.ac_voltage_v,
+        battery_voltage_v = excluded.battery_voltage_v,
+        nominal_voltage_v = excluded.nominal_voltage_v,
+        capacity_ah = excluded.capacity_ah,
+        max_pv_open_circuit_voltage_v = excluded.max_pv_open_circuit_voltage_v,
+        pv_mppt_voltage_range_v = excluded.pv_mppt_voltage_range_v,
+        vmp_v = excluded.vmp_v,
+        voc_v = excluded.voc_v,
+        imp_a = excluded.imp_a,
+        isc_a = excluded.isc_a,
+        efficiency_percent = excluded.efficiency_percent,
+        dimensions_mm = excluded.dimensions_mm,
+        weight_kg = excluded.weight_kg,
+        warranty_years = excluded.warranty_years,
+        price_egp = excluded.price_egp,
+        supplier = COALESCE(excluded.supplier, products.supplier),
+        availability = excluded.availability,
+        image_url = COALESCE(excluded.image_url, products.image_url),
+        notes = excluded.notes,
+        updated_at = datetime('now')
     `;
 
     await env.DB.prepare(query)
@@ -657,50 +702,50 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         body.product_type || null,
         body.technology || null,
         body.cell_type || null,
-        body.number_of_cells || null,
-        body.power_w || null,
-        body.rated_power_kw || null,
-        body.surge_power_w || null,
+        body.number_of_cells ?? null,
+        body.power_w ?? null,
+        body.rated_power_kw ?? null,
+        body.surge_power_w ?? null,
         body.waveform || null,
         body.ac_voltage_v || null,
         body.ac_voltage_regulation || null,
-        body.frequency_hz || null,
-        body.peak_efficiency_percent || null,
-        body.transfer_time_ms || null,
-        body.battery_voltage_v || null,
-        body.nominal_voltage_v || null,
-        body.capacity_ah || null,
-        body.nominal_energy_wh || null,
-        body.max_output_power_kw || null,
-        body.recommended_charge_voltage_v || null,
-        body.recommended_charge_current_a || null,
-        body.end_of_discharge_voltage_v || null,
-        body.max_continuous_charge_current_a || null,
-        body.max_continuous_discharge_current_a || null,
-        body.cycle_life || null,
+        body.frequency_hz ?? null,
+        body.peak_efficiency_percent ?? null,
+        body.transfer_time_ms ?? null,
+        body.battery_voltage_v ?? null,
+        body.nominal_voltage_v ?? null,
+        body.capacity_ah ?? null,
+        body.nominal_energy_wh ?? null,
+        body.max_output_power_kw ?? null,
+        body.recommended_charge_voltage_v ?? null,
+        body.recommended_charge_current_a ?? null,
+        body.end_of_discharge_voltage_v ?? null,
+        body.max_continuous_charge_current_a ?? null,
+        body.max_continuous_discharge_current_a ?? null,
+        body.cycle_life ?? null,
         body.communication || null,
-        body.max_pv_open_circuit_voltage_v || null,
-        body.max_pv_array_power_w || null,
-        body.max_pv_input_current_a || null,
+        body.max_pv_open_circuit_voltage_v ?? null,
+        body.max_pv_array_power_w ?? null,
+        body.max_pv_input_current_a ?? null,
         body.pv_mppt_voltage_range_v || null,
-        body.max_solar_charger_current_a || null,
-        body.max_ac_charger_current_a || null,
-        body.max_charge_current_a || null,
-        body.vmp_v || null,
-        body.voc_v || null,
-        body.imp_a || null,
-        body.isc_a || null,
-        body.efficiency_percent || null,
+        body.max_solar_charger_current_a ?? null,
+        body.max_ac_charger_current_a ?? null,
+        body.max_charge_current_a ?? null,
+        body.vmp_v ?? null,
+        body.voc_v ?? null,
+        body.imp_a ?? null,
+        body.isc_a ?? null,
+        body.efficiency_percent ?? null,
         body.temperature_coefficient_pmax || null,
         body.temperature_coefficient_voc || null,
         body.temperature_coefficient_isc || null,
-        body.max_system_voltage_v || null,
-        body.maximum_series_fuse_a || null,
+        body.max_system_voltage_v ?? null,
+        body.maximum_series_fuse_a ?? null,
         body.dimensions_mm || null,
         body.machine_dimensions_w_h_d_mm || null,
-        body.weight_kg || null,
-        body.nw_kg || null,
-        body.gw_kg || null,
+        body.weight_kg ?? null,
+        body.nw_kg ?? null,
+        body.gw_kg ?? null,
         body.front_glass || null,
         body.back_glass || null,
         body.frame || null,
@@ -708,8 +753,8 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         body.junction_box || null,
         body.operating_temperature || null,
         body.storage_temperature || null,
-        body.warranty_years || null,
-        body.price_egp || 0,
+        body.warranty_years ?? null,
+        body.price_egp ?? body.price ?? 0,
         body.supplier || null,
         body.availability || 'Available',
         body.image_url || null,
@@ -739,12 +784,33 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
 
     if (!productId) return errorJson('Product ID required in path', 400, request);
 
-    let body: any;
+    let rawBody: any;
     try {
-      body = await request.json();
+      rawBody = await request.json();
     } catch {
       return errorJson('Invalid JSON payload in request body', 400, request);
     }
+
+    const numericValidation = validateAndNormalizeD1ProductNumericFields(rawBody || {}, { isUpdate: true });
+    if (!numericValidation.valid) {
+      return json(
+        {
+          ok: false,
+          success: false,
+          field: numericValidation.field,
+          error: {
+            code: 'INVALID_NUMERIC_VALUE',
+            field: numericValidation.field,
+            message: numericValidation.errorMessage,
+          },
+          message: numericValidation.errorMessage,
+        },
+        400,
+        request
+      );
+    }
+
+    const body = numericValidation.normalizedPayload;
 
     const existing = await env.DB.prepare('SELECT product_id FROM products WHERE product_id = ? OR id = ?')
       .bind(productId, productId)
@@ -766,11 +832,15 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
     const notes = body.notes || body.description || null;
     const imageUrl = body.image_url || body.image || null;
     const availability = body.availability || (body.status === 'out_of_stock' ? 'Out of Stock' : body.status === 'limited' ? 'Limited' : 'Available');
-    const vmpV = body.vmp_v || null;
-    const impA = body.imp_a || null;
-    const vocV = body.voc_v || null;
-    const iscA = body.isc_a || null;
+    const vmpV = body.vmp_v !== undefined ? body.vmp_v : null;
+    const impA = body.imp_a !== undefined ? body.imp_a : null;
+    const vocV = body.voc_v !== undefined ? body.voc_v : null;
+    const iscA = body.isc_a !== undefined ? body.isc_a : null;
     const acVoltageV = body.ac_voltage_v || null;
+    const nominalVoltageV = body.nominal_voltage_v !== undefined ? body.nominal_voltage_v : null;
+    const batteryVoltageV = body.battery_voltage_v !== undefined ? body.battery_voltage_v : null;
+    const capacityAh = body.capacity_ah !== undefined ? body.capacity_ah : null;
+    const maxPvVoc = body.max_pv_open_circuit_voltage_v !== undefined ? body.max_pv_open_circuit_voltage_v : null;
     const supplier = body.supplier || body.supplier_id || null;
 
     await env.DB.prepare(
@@ -795,6 +865,10 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         voc_v = COALESCE(?, voc_v),
         isc_a = COALESCE(?, isc_a),
         ac_voltage_v = COALESCE(?, ac_voltage_v),
+        nominal_voltage_v = COALESCE(?, nominal_voltage_v),
+        battery_voltage_v = COALESCE(?, battery_voltage_v),
+        capacity_ah = COALESCE(?, capacity_ah),
+        max_pv_open_circuit_voltage_v = COALESCE(?, max_pv_open_circuit_voltage_v),
         supplier = COALESCE(?, supplier),
         updated_at = datetime('now')
       WHERE product_id = ? OR id = ?`
@@ -820,6 +894,10 @@ async function handleProducts(request: Request, env: Env, path: string, method: 
         vocV,
         iscA,
         acVoltageV,
+        nominalVoltageV,
+        batteryVoltageV,
+        capacityAh,
+        maxPvVoc,
         supplier,
         productId,
         productId

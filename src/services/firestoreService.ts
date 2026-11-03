@@ -24,6 +24,10 @@ import { isRawUidOrId } from '../utils/supplierUtils';
 import { productsData } from '../data/mockData';
 import { safeLocalStorage } from '../utils/safeStorage';
 import { SUPPLIER_CONTACT_PHONE_DISPLAY } from '../constants/contact';
+import {
+  parseAndValidateNumericField,
+  validateAndNormalizeD1ProductNumericFields,
+} from '../utils/productNumericValidation';
 
 const DELETED_PRODUCTS_STORAGE_KEY = 'enerjoo_deleted_product_ids_v2';
 
@@ -768,12 +772,14 @@ function mapD1ProductToProduct(d1Item: any): Product {
     maxPvArrayPowerW: d1Item.max_pv_array_power_w ?? parsedSpecs.maxPvArrayPowerW,
     pvMpptVoltageRangeV: d1Item.pv_mppt_voltage_range_v || parsedSpecs.pvMpptVoltageRangeV || parsedSpecs.mppt || '',
     mppt: d1Item.pv_mppt_voltage_range_v || parsedSpecs.mppt || parsedSpecs.pvMpptVoltageRangeV || '',
-    vmpV: d1Item.vmp_v || parsedSpecs.vmpV || parsedSpecs.voltage || '',
-    voltage: d1Item.vmp_v || parsedSpecs.voltage || parsedSpecs.vmpV || d1Item.nominal_voltage_v || d1Item.ac_voltage_v || '',
-    vocV: d1Item.voc_v || parsedSpecs.vocV || '',
-    impA: d1Item.imp_a || parsedSpecs.impA || parsedSpecs.current || '',
-    current: d1Item.imp_a || parsedSpecs.current || parsedSpecs.impA || '',
-    iscA: d1Item.isc_a || parsedSpecs.iscA || '',
+    vmpV: d1Item.vmp_v ?? parsedSpecs.vmpV ?? (category === 'panels' ? parsedSpecs.voltage : '') ?? '',
+    voltage: d1Item.vmp_v ?? parsedSpecs.voltage ?? parsedSpecs.vmpV ?? d1Item.nominal_voltage_v ?? d1Item.ac_voltage_v ?? '',
+    vocV: d1Item.voc_v ?? parsedSpecs.vocV ?? parsedSpecs.voc ?? '',
+    voc: d1Item.voc_v ?? parsedSpecs.voc ?? parsedSpecs.vocV ?? '',
+    impA: d1Item.imp_a ?? parsedSpecs.impA ?? parsedSpecs.current ?? '',
+    current: d1Item.imp_a ?? parsedSpecs.current ?? parsedSpecs.impA ?? '',
+    iscA: d1Item.isc_a ?? parsedSpecs.iscA ?? parsedSpecs.isc ?? '',
+    isc: d1Item.isc_a ?? parsedSpecs.isc ?? parsedSpecs.iscA ?? '',
     dimensionsMm: d1Item.dimensions_mm || parsedSpecs.dimensionsMm || parsedSpecs.dimensions || '',
     weightKg: d1Item.weight_kg || parsedSpecs.weightKg || parsedSpecs.weight || '',
     weight: d1Item.weight_kg || parsedSpecs.weight || parsedSpecs.weightKg || '',
@@ -951,10 +957,27 @@ function mapD1ProductToProduct(d1Item: any): Product {
   };
 }
 
+function resolveStrictNumeric(
+  rawVal: unknown,
+  fieldKey: string,
+  required = false
+): number | null {
+  const res = parseAndValidateNumericField(rawVal, fieldKey, { required });
+  if (!res.valid) {
+    const err: any = new Error(res.errorMessage || 'إحدى قيم المنتج الرقمية غير صالحة.');
+    err.status = 400;
+    err.code = 'INVALID_NUMERIC_VALUE';
+    err.field = res.field;
+    throw err;
+  }
+  return res.value;
+}
+
 /**
  * Maps frontend Product data to Cloudflare D1 Product payload.
+ * Guarantees all numeric columns are finite numbers or null (never strings, NaN, Infinity, or unit-suffixed text).
  */
-function mapProductToD1Payload(product: Partial<Product> & { product_id?: string }): Record<string, any> {
+export function mapProductToD1Payload(product: Partial<Product> & { product_id?: string }): Record<string, any> {
   const payload: Record<string, any> = {
     _isEdited: true
   };
@@ -973,44 +996,74 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
     payload.product_category = mapCategoryToD1Category(product.category);
     payload.category = product.category;
   }
-  if (product.power !== undefined) {
-    payload.power_w = Number(product.power);
-    payload.power = Number(product.power);
+
+  // Price (required on new product, optional on partial update)
+  if (product.price !== undefined || (product as any).price_egp !== undefined) {
+    const priceVal = resolveStrictNumeric(product.price ?? (product as any).price_egp, 'price', false);
+    payload.price_egp = priceVal;
+    if (priceVal !== null) {
+      payload.price = priceVal;
+    }
   }
-  if (product.hp !== undefined) {
-    payload.hp = product.hp;
+
+  // Power (W)
+  if (product.power !== undefined || (product as any).power_w !== undefined) {
+    const powerVal = resolveStrictNumeric(product.power ?? (product as any).power_w, 'power_w', false);
+    payload.power_w = powerVal !== null && powerVal > 0 ? powerVal : null;
+    if (powerVal !== null && powerVal > 0) {
+      payload.power = powerVal;
+    }
   }
-  if (product.price !== undefined) {
-    payload.price_egp = Number(product.price);
-    payload.price = Number(product.price);
+
+  // Horsepower (HP)
+  if (product.hp !== undefined || product.specs?.hp !== undefined) {
+    const hpVal = resolveStrictNumeric(product.hp ?? product.specs?.hp, 'hp', false);
+    payload.hp = hpVal;
   }
-  if (product.efficiency !== undefined) {
-    payload.efficiency_percent = Number(product.efficiency);
-    payload.efficiency = Number(product.efficiency);
+
+  // Efficiency (%)
+  if (product.efficiency !== undefined || (product as any).efficiency_percent !== undefined) {
+    const effVal = resolveStrictNumeric(product.efficiency ?? (product as any).efficiency_percent, 'efficiency_percent', false);
+    payload.efficiency_percent = effVal !== null && effVal > 0 ? effVal : null;
+    if (effVal !== null && effVal > 0) {
+      payload.efficiency = effVal;
+    }
   }
-  if (product.warranty !== undefined) {
-    payload.warranty_years = Number(product.warranty);
-    payload.warranty = Number(product.warranty);
+
+  // Warranty (Years)
+  if (product.warranty !== undefined || (product as any).warranty_years !== undefined) {
+    const warVal = resolveStrictNumeric(product.warranty ?? (product as any).warranty_years, 'warranty_years', false);
+    payload.warranty_years = warVal !== null && warVal > 0 ? warVal : null;
+    if (warVal !== null && warVal > 0) {
+      payload.warranty = warVal;
+    }
   }
-  if (product.area !== undefined) payload.area = Number(product.area);
-  if (product.length !== undefined) payload.length = Number(product.length);
-  if (product.width !== undefined) payload.width = Number(product.width);
-  if (product.thickness !== undefined) payload.thickness = Number(product.thickness);
+
+  // Dimensions & Area
+  const lengthVal = resolveStrictNumeric(product.length ?? product.specs?.length, 'length', false);
+  const widthVal = resolveStrictNumeric(product.width ?? product.specs?.width, 'width', false);
+  const thicknessVal = resolveStrictNumeric(product.thickness ?? product.specs?.thickness, 'thickness', false);
+  const areaVal = resolveStrictNumeric(product.area ?? product.specs?.area, 'area', false);
+
+  if (product.length !== undefined || product.specs?.length !== undefined) payload.length = lengthVal;
+  if (product.width !== undefined || product.specs?.width !== undefined) payload.width = widthVal;
+  if (product.thickness !== undefined || product.specs?.thickness !== undefined) payload.thickness = thicknessVal;
+  if (product.area !== undefined || product.specs?.area !== undefined) {
+    payload.area = areaVal !== null && areaVal > 0 ? areaVal : null;
+  }
+
   if (product.dimensionUnit !== undefined) payload.dimensionUnit = product.dimensionUnit;
   if (product.additionalImages !== undefined) payload.additionalImages = product.additionalImages;
 
   // Format dimensions_mm for D1 database column
-  const lengthVal = product.length ?? product.specs?.length;
-  const widthVal = product.width ?? product.specs?.width;
-  const thicknessVal = product.thickness ?? product.specs?.thickness;
   const unit = product.dimensionUnit || product.specs?.dimensionUnit || 'mm';
-  if (lengthVal && widthVal) {
-    payload.dimensions_mm = `${lengthVal} x ${widthVal}${thicknessVal ? ` x ${thicknessVal}` : ''} ${unit}`;
+  if (lengthVal !== null && widthVal !== null) {
+    payload.dimensions_mm = `${lengthVal} x ${widthVal}${thicknessVal !== null ? ` x ${thicknessVal}` : ''} ${unit}`;
   } else if (product.specs?.dimensionsMm) {
-    payload.dimensions_mm = product.specs.dimensionsMm;
+    payload.dimensions_mm = String(product.specs.dimensionsMm).trim();
   }
 
-  // Top-level fallbacks for specs
+  // Textual notes & product_type
   const descNotes = product.specs?.description || product.specs?.notes || product.description || product.notes || (product as any).notes;
   if (descNotes) {
     payload.notes = descNotes;
@@ -1019,17 +1072,100 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
   if (prodType) {
     payload.product_type = prodType;
   }
-  const volt = product.specs?.voltage || product.specs?.vmpV || product.specs?.nominalVoltage || (product as any).voltage || (product as any).vmp_v;
-  if (volt) {
-    payload.vmp_v = volt;
+  if (product.specs?.technology) {
+    payload.technology = product.specs.technology;
   }
-  const curr = product.specs?.current || product.specs?.impA || (product as any).current || (product as any).imp_a;
-  if (curr) {
-    payload.imp_a = curr;
+
+  // Weight (kg) - strictly numeric or null
+  const rawWeight = product.specs?.weightKg ?? product.specs?.weight ?? (product as any).weight_kg ?? (product as any).weight;
+  if (rawWeight !== undefined) {
+    payload.weight_kg = resolveStrictNumeric(rawWeight, 'weight_kg', false);
   }
-  const wt = product.specs?.weight || product.specs?.weightKg || (product as any).weight || (product as any).weight_kg;
-  if (wt) {
-    payload.weight_kg = wt;
+
+  // Category-aware electrical and battery parameters
+  const effectiveCategory = product.category || mapD1CategoryToCategory((product as any).product_category);
+
+  if (effectiveCategory === 'inverters') {
+    // Inverter AC voltage is a text descriptor (e.g. "220/230" or "380/400")
+    const rawAcVolt = product.specs?.acVoltageV ?? product.specs?.voltage ?? (product as any).ac_voltage_v;
+    if (rawAcVolt !== undefined && rawAcVolt !== null && String(rawAcVolt).trim() !== '') {
+      payload.ac_voltage_v = String(rawAcVolt).trim();
+    }
+    payload.vmp_v = null;
+    payload.nominal_voltage_v = null;
+    payload.imp_a = null;
+
+    const rawKw = product.specs?.ratedPowerKw ?? product.specs?.powerKw ?? (product as any).rated_power_kw;
+    if (rawKw !== undefined) {
+      const kwVal = resolveStrictNumeric(rawKw, 'rated_power_kw', false);
+      payload.rated_power_kw = kwVal !== null && kwVal > 0 ? kwVal : null;
+      if (payload.rated_power_kw !== null && !payload.power_w) {
+        payload.power_w = Math.round(payload.rated_power_kw * 1000);
+        payload.power = payload.power_w;
+      }
+    }
+
+    const rawMaxPv = product.specs?.maxPvVoltage ?? product.specs?.maxPvOpenCircuitVoltageV ?? (product as any).max_pv_open_circuit_voltage_v;
+    if (rawMaxPv !== undefined) {
+      payload.max_pv_open_circuit_voltage_v = resolveStrictNumeric(rawMaxPv, 'max_pv_open_circuit_voltage_v', false);
+    }
+
+    const rawMpptCount = product.specs?.mpptCount ?? product.specs?.numberOfMppt ?? (product as any).mppt_count ?? (product as any).number_of_mppt;
+    if (rawMpptCount !== undefined) {
+      const mpptCountVal = resolveStrictNumeric(rawMpptCount, 'number_of_mppt', false);
+      payload.mppt_count = mpptCountVal;
+      payload.number_of_mppt = mpptCountVal;
+    }
+
+    const rawMpptRange = product.specs?.pvMpptVoltageRangeV ?? product.specs?.mppt ?? (product as any).pv_mppt_voltage_range_v;
+    if (rawMpptRange !== undefined && rawMpptRange !== null && String(rawMpptRange).trim() !== '') {
+      payload.pv_mppt_voltage_range_v = String(rawMpptRange).trim();
+    }
+  } else if (effectiveCategory === 'batteries') {
+    const rawNomVolt =
+      product.specs?.nominalVoltage ??
+      product.specs?.batteryVoltageV ??
+      product.specs?.voltage ??
+      (product as any).nominal_voltage_v ??
+      (product as any).battery_voltage_v;
+    if (rawNomVolt !== undefined) {
+      const nomVoltVal = resolveStrictNumeric(rawNomVolt, 'nominal_voltage_v', false);
+      payload.nominal_voltage_v = nomVoltVal;
+      payload.battery_voltage_v = nomVoltVal;
+    }
+    payload.vmp_v = null;
+
+    const rawCap = product.specs?.capacityAh ?? product.specs?.capacity ?? (product as any).capacity_ah ?? (product as any).capacity;
+    if (rawCap !== undefined) {
+      payload.capacity_ah = resolveStrictNumeric(rawCap, 'capacity_ah', false);
+    }
+  } else {
+    // Solar panels & other categories
+    const rawVmp = product.specs?.vmpV ?? product.specs?.voltage ?? (product as any).vmp_v ?? (product as any).Vmp ?? (product as any).voltage;
+    if (rawVmp !== undefined) {
+      payload.vmp_v = resolveStrictNumeric(rawVmp, 'vmp_v', false);
+    }
+
+    const rawVoc = product.specs?.vocV ?? product.specs?.voc ?? (product as any).voc_v ?? (product as any).Voc;
+    if (rawVoc !== undefined) {
+      payload.voc_v = resolveStrictNumeric(rawVoc, 'voc_v', false);
+    }
+
+    const rawImp = product.specs?.impA ?? product.specs?.current ?? (product as any).imp_a ?? (product as any).Imp ?? (product as any).current;
+    if (rawImp !== undefined) {
+      payload.imp_a = resolveStrictNumeric(rawImp, 'imp_a', false);
+    }
+
+    const rawIsc = product.specs?.iscA ?? product.specs?.isc ?? (product as any).isc_a ?? (product as any).Isc;
+    if (rawIsc !== undefined) {
+      payload.isc_a = resolveStrictNumeric(rawIsc, 'isc_a', false);
+    }
+
+    if (effectiveCategory !== 'panels' && product.specs?.nominalVoltage !== undefined) {
+      payload.nominal_voltage_v = resolveStrictNumeric(product.specs.nominalVoltage, 'nominal_voltage_v', false);
+    } else {
+      payload.nominal_voltage_v = null;
+    }
   }
 
   if (product.image) payload.image_url = product.image;
@@ -1058,63 +1194,73 @@ function mapProductToD1Payload(product: Partial<Product> & { product_id?: string
     payload.availability = product.status === 'available' ? 'Available' :
                            product.status === 'limited' ? 'Limited' : 'Out of Stock';
   }
-  if (product.specs) {
-    payload.specs = JSON.stringify(product.specs);
 
-    // Map technical specifications to specific Cloudflare D1 columns
-    if (product.specs.powerKw || product.specs.ratedPowerKw) {
-      payload.rated_power_kw = Number(product.specs.powerKw || product.specs.ratedPowerKw);
+  if (product.specs) {
+    const cleanSpecs: Record<string, any> = { ...product.specs };
+    // Ensure numeric specs inside JSON are clean numbers or omitted if null/empty
+    if (payload.rated_power_kw !== undefined) {
+      cleanSpecs.ratedPowerKw = payload.rated_power_kw ?? undefined;
+      cleanSpecs.powerKw = payload.rated_power_kw ?? undefined;
     }
-    if (product.specs.pvMpptVoltageRangeV || product.specs.mppt || (product as any).pv_mppt_voltage_range_v) {
-      payload.pv_mppt_voltage_range_v = product.specs.pvMpptVoltageRangeV || product.specs.mppt || (product as any).pv_mppt_voltage_range_v;
-    }
-    if (product.specs.voltage || product.specs.vmpV || product.specs.acVoltageV) {
-      if (product.category === 'inverters') {
-        payload.ac_voltage_v = product.specs.acVoltageV || product.specs.voltage;
-      } else {
-        payload.vmp_v = product.specs.vmpV || product.specs.voltage;
+    if (payload.vmp_v !== undefined) {
+      cleanSpecs.vmpV = payload.vmp_v ?? undefined;
+      if (effectiveCategory === 'panels') {
+        cleanSpecs.voltage = payload.vmp_v ?? undefined;
+        delete cleanSpecs.nominalVoltage;
       }
     }
-    if (product.specs.acVoltageV) {
-      payload.ac_voltage_v = product.specs.acVoltageV;
+    if (payload.voc_v !== undefined) {
+      cleanSpecs.vocV = payload.voc_v ?? undefined;
+      cleanSpecs.voc = payload.voc_v ?? undefined;
     }
-    if (product.specs.nominalVoltage) {
-      payload.nominal_voltage_v = product.specs.nominalVoltage;
-    }
-    if (product.specs.current || product.specs.impA) {
-      if (product.category === 'inverters') {
-        // Inverter output current
-      } else {
-        payload.imp_a = product.specs.impA || product.specs.current;
+    if (payload.imp_a !== undefined) {
+      cleanSpecs.impA = payload.imp_a ?? undefined;
+      if (effectiveCategory === 'panels') {
+        cleanSpecs.current = payload.imp_a ?? undefined;
       }
     }
-    if (product.specs.weight || product.specs.weightKg) {
-      payload.weight_kg = product.specs.weight || product.specs.weightKg;
+    if (payload.isc_a !== undefined) {
+      cleanSpecs.iscA = payload.isc_a ?? undefined;
+      cleanSpecs.isc = payload.isc_a ?? undefined;
     }
-    if (product.specs.capacity || product.specs.capacityAh) {
-      payload.capacity_ah = product.specs.capacity || product.specs.capacityAh;
+    if (payload.weight_kg !== undefined) {
+      cleanSpecs.weightKg = payload.weight_kg ?? undefined;
+      cleanSpecs.weight = payload.weight_kg ?? undefined;
     }
-    if (product.specs.type || product.specs.productType) {
-      payload.product_type = product.specs.type || product.specs.productType;
+    if (payload.capacity_ah !== undefined) {
+      cleanSpecs.capacityAh = payload.capacity_ah ?? undefined;
+      cleanSpecs.capacity = payload.capacity_ah ?? undefined;
     }
-    if (product.specs.technology) {
-      payload.technology = product.specs.technology;
+    if (payload.nominal_voltage_v !== undefined && effectiveCategory === 'batteries') {
+      cleanSpecs.nominalVoltage = payload.nominal_voltage_v ?? undefined;
+      cleanSpecs.batteryVoltageV = payload.nominal_voltage_v ?? undefined;
     }
-    if (product.specs.maxPvVoltage || product.specs.maxPvOpenCircuitVoltageV || (product as any).max_pv_open_circuit_voltage_v) {
-      payload.max_pv_open_circuit_voltage_v = Number(product.specs.maxPvVoltage || product.specs.maxPvOpenCircuitVoltageV || (product as any).max_pv_open_circuit_voltage_v);
+    if (payload.max_pv_open_circuit_voltage_v !== undefined) {
+      cleanSpecs.maxPvVoltage = payload.max_pv_open_circuit_voltage_v ?? undefined;
+      cleanSpecs.maxPvOpenCircuitVoltageV = payload.max_pv_open_circuit_voltage_v ?? undefined;
     }
-    if (product.specs.mpptCount || product.specs.numberOfMppt || (product as any).mppt_count) {
-      payload.mppt_count = Number(product.specs.mpptCount || product.specs.numberOfMppt || (product as any).mppt_count);
+    if (payload.mppt_count !== undefined) {
+      cleanSpecs.mpptCount = payload.mppt_count ?? undefined;
+      cleanSpecs.numberOfMppt = payload.mppt_count ?? undefined;
     }
-    if (product.specs.description || product.specs.notes) {
-      payload.notes = product.specs.description || product.specs.notes;
-    }
+    payload.specs = JSON.stringify(cleanSpecs);
   }
+
   if (product.suppliers) {
     payload.suppliers = JSON.stringify(product.suppliers);
   }
 
-  return payload;
+  // Final pass to guarantee all D1 numeric columns are strictly finite number | null
+  const finalCheck = validateAndNormalizeD1ProductNumericFields(payload, { isUpdate: true });
+  if (!finalCheck.valid) {
+    const err: any = new Error(finalCheck.errorMessage || 'إحدى قيم المنتج الرقمية غير صالحة.');
+    err.status = 400;
+    err.code = 'INVALID_NUMERIC_VALUE';
+    err.field = finalCheck.field;
+    throw err;
+  }
+
+  return finalCheck.normalizedPayload;
 }
 
 /**
@@ -1430,12 +1576,35 @@ export const addProduct = async (product: Omit<Product, 'id'> & { id?: string | 
     product_id: newProductId
   };
 
-  const res = await requestProductsApi<{ success?: boolean; ok?: boolean; message?: string; product_id?: string }>('/products', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
+  let createdId = newProductId;
+  try {
+    const res = await requestProductsApi<{ success?: boolean; ok?: boolean; message?: string; product_id?: string }>('/products', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    createdId = res.product_id || newProductId;
+  } catch (postErr: any) {
+    // If retrying a previous attempt with the same product_id that already reached D1 (409 Conflict),
+    // update the existing record in place instead of failing or creating a duplicate.
+    const isConflict =
+      postErr?.status === 409 ||
+      postErr?.code === 'CONFLICT' ||
+      String(postErr?.message || '').includes('already exists') ||
+      String(postErr?.detail || '').includes('already exists');
+    if (isConflict) {
+      await requestProductsApi<{ success?: boolean; ok?: boolean }>(
+        `/products/${encodeURIComponent(newProductId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ ...payload, updated_at: new Date().toISOString() })
+        }
+      );
+      createdId = newProductId;
+    } else {
+      throw postErr;
+    }
+  }
 
-  const createdId = res.product_id || newProductId;
   unmarkProductAsDeleted(createdId);
   saveEditedProduct(createdId, { ...productWithSupplier, id: createdId });
   await notifyProductListeners();
